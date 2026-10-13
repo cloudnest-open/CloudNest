@@ -473,3 +473,114 @@ test('dashboard and file summaries expose only safe, real fields', () => {
     close();
   }
 });
+
+// ---- M9.d: resume verification, cleanup retries, honest failure states ----
+
+test('a reselected source that does not match is rejected as source_changed', async () => {
+  const { db, close, service } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 16 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    const original = Buffer.alloc(8 * MIB, 7);
+    const digest = crypto.createHash('sha256').update(original).digest('hex');
+    const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.commitChunk({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a0.objectKey,
+      remoteObjectId: 'r0', sha256: digest, sizeBytes: 8 * MIB,
+    });
+    // the owner reselects a DIFFERENT file of the same size
+    const wrongSource = Buffer.alloc(8 * MIB, 9);
+    await assert.rejects(
+      service.verifyReselectedSource(plan.jobId, 8 * MIB, async () => wrongSource),
+      (err: unknown) => err instanceof UploadError && err.safeCode === 'source_changed',
+    );
+    // a chunk-size mismatch is also refused before any hashing work
+    await assert.rejects(
+      service.verifyReselectedSource(plan.jobId, 16 * MIB, async () => original),
+      (err: unknown) => err instanceof UploadError && err.safeCode === 'source_changed',
+    );
+  } finally {
+    close();
+  }
+});
+
+test('a matching reselected source resumes only the missing chunks', async () => {
+  const { db, close, service } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 24 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    const chunk0 = Buffer.alloc(8 * MIB, 1);
+    const digest0 = crypto.createHash('sha256').update(chunk0).digest('hex');
+    const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.commitChunk({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a0.objectKey,
+      remoteObjectId: 'r0', sha256: digest0, sizeBytes: 8 * MIB,
+    });
+    const result = await service.verifyReselectedSource(plan.jobId, 8 * MIB, async (offset) => {
+      assert.equal(offset, 0, 'only completed slices are re-read');
+      return chunk0;
+    });
+    assert.equal(result.verifiedChunks, 1);
+    assert.deepEqual(result.missingChunks, [1, 2]);
+  } finally {
+    close();
+  }
+});
+
+test('cleanup retries only close obligations whose remote object is known', async () => {
+  const { db, close, service, q } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 16 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    await service.cancel(plan.jobId);
+    const pending = service.pendingCleanups();
+    // the remote id was never confirmed, so the obligation must NOT be dropped
+    assert.ok(pending.length >= 1, 'the obligation stays recorded');
+    const retry = await service.retryPendingCleanups();
+    assert.equal(retry.retried, pending.length);
+    assert.equal(retry.cleaned, 0, 'an unknown remote object is never assumed deleted');
+    assert.ok(retry.stillPending >= 1, 'it remains pending rather than silently lost');
+    void a0;
+  } finally {
+    close();
+  }
+});
+
+test('a cancelled job is not resumable and a completed job stays complete', () => {
+  const { db, close, service, q } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 8 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.commitChunk({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a0.objectKey,
+      remoteObjectId: 'r0', sha256: 'e'.repeat(64), sizeBytes: 8 * MIB,
+    });
+    assert.throws(
+      () => service.markRunning(plan.jobId),
+      (err: unknown) => err instanceof UploadError && err.safeCode === 'job_not_resumable',
+    );
+    const job = q.getJob.get(plan.jobId) as { state: string };
+    assert.equal(job.state, 'completed', 'a completed job is never reopened');
+  } finally {
+    close();
+  }
+});
+
+test('reservation cache is corrected from durable rows, never trusted blindly', () => {
+  const { db, close, service } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 16 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    // corrupt the cache deliberately
+    db.prepare('UPDATE provider_accounts SET reserved_inflight_bytes = 999999 WHERE id = ?').run('acc-a');
+    service.recomputeAllReservations();
+    const account = db.prepare('SELECT reserved_inflight_bytes FROM provider_accounts WHERE id = ?')
+      .get('acc-a') as { reserved_inflight_bytes: number };
+    assert.equal(account.reserved_inflight_bytes, 16 * MIB, 'the cache is rebuilt from allocations');
+    void plan;
+  } finally {
+    close();
+  }
+});

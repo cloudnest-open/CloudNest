@@ -600,6 +600,72 @@ export class UploadService {
     return { recovered: running.length, reservationsRecomputed: accounts.length };
   }
 
+  /**
+   * Retry every durable cleanup obligation. Objects whose id is still unknown
+   * stay pending: the connector must never guess that a remote object is gone.
+   */
+  async retryPendingCleanups(): Promise<{ retried: number; cleaned: number; stillPending: number }> {
+    const pending = this.pendingCleanups();
+    let cleaned = 0;
+    let stillPending = 0;
+    const now = new Date().toISOString();
+    for (const attempt of pending) {
+      const row = this.db.prepare('SELECT provider_account_id FROM upload_attempts WHERE id = ?')
+        .get(attempt.id) as { provider_account_id: string } | undefined;
+      if (!row) { stillPending++; continue; }
+      if (!attempt.remote_object_id) {
+        // the remote id was never confirmed, so the obligation cannot be closed
+        stillPending++;
+        continue;
+      }
+      try {
+        await this.deleteRemoteObject(row.provider_account_id, attempt.remote_object_id);
+        this.q.markAttemptCleaned.run(now, attempt.id);
+        cleaned++;
+      } catch {
+        stillPending++;
+      }
+    }
+    return { retried: pending.length, cleaned, stillPending };
+  }
+
+  /**
+   * Verify a reselected source before skipping already-completed chunks.
+   * Returns the chunks that still need uploading, and refuses (source_changed)
+   * when a previously completed slice no longer hashes to its saved digest.
+   */
+  async verifyReselectedSource(
+    jobId: string,
+    chunkSizeBytes: number,
+    readSlice: (offsetBytes: number, sizeBytes: number) => Promise<Buffer>,
+  ): Promise<{ missingChunks: number[]; verifiedChunks: number }> {
+    const job = this.q.getJob.get(jobId) as JobRow | undefined;
+    if (!job?.file_id) throw new UploadError('job_not_found', 404);
+    const file = this.q.getFile.get(job.file_id) as FileRow | undefined;
+    if (!file) throw new UploadError('job_not_found', 404);
+    if (file.chunk_size_bytes !== chunkSizeBytes) {
+      throw new UploadError('source_changed', 409);
+    }
+    const done = new Map(
+      (this.q.listChunks.all(file.id) as Array<{ chunk_index: number; offset_bytes: number; size_bytes: number; sha256: string }>)
+        .map((c) => [c.chunk_index, c]),
+    );
+    const missing: number[] = [];
+    let verified = 0;
+    for (let i = 0; i < job.chunks_total; i++) {
+      const saved = done.get(i);
+      if (!saved) { missing.push(i); continue; }
+      const slice = await readSlice(saved.offset_bytes, saved.size_bytes);
+      const digest = crypto.createHash('sha256').update(slice).digest('hex');
+      if (digest !== saved.sha256) {
+        // do not overwrite: the source is not the file this job was planned for
+        throw new UploadError('source_changed', 409);
+      }
+      verified++;
+    }
+    return { missingChunks: missing, verifiedChunks: verified };
+  }
+
   /** Durable cleanup obligations that must be retried later. */
   pendingCleanups(): Array<{ id: string; object_key: string; remote_object_id: string | null }> {
     return this.q.cleanupPendingAttempts.all() as Array<{ id: string; object_key: string; remote_object_id: string | null }>;
