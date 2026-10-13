@@ -1,4 +1,12 @@
 import { Storage } from 'megajs';
+import {
+  ensureAppRootImpl,
+  uploadObjectStreamImpl,
+  findAppObjectByKeyImpl,
+  listAppObjectsImpl,
+  deleteAppObjectImpl,
+  downloadObjectStreamImpl,
+} from './mega-files.js';
 
 /** Minimal structural view of the megajs Storage we actually use. */
 interface MegaStorageLike {
@@ -116,5 +124,28 @@ export const megaAdapter: ProviderAdapter = {
   async ensureValidCredentials(bundle) {
     if (!isMegaBundle(bundle)) throw new ProviderError('invalid_credentials', 401);
     return bundle;
+  },
+
+  // ---- file-object primitives (Step 4 / M8, experimental) ----
+  // These are implemented against the pinned unofficial library, but the
+  // capability gate below keeps MEGA out of upload routing until a live smoke
+  // test proves streaming, download, delete and recovery behaviour.
+  async ensureAppRoot(bundle) {
+    return ensureAppRootImpl(bundle);
+  },
+  async uploadObjectStream(bundle, params) {
+    return uploadObjectStreamImpl(bundle, params);
+  },
+  async findAppObjectByKey(bundle, rootId, objectKey) {
+    return findAppObjectByKeyImpl(bundle, rootId, objectKey);
+  },
+  async listAppObjects(bundle, rootId) {
+    return listAppObjectsImpl(bundle, rootId);
+  },
+  async deleteAppObject(bundle, rootId, remoteObjectId) {
+    return deleteAppObjectImpl(bundle, rootId, remoteObjectId);
+  },
+  async downloadObjectStream(bundle, remoteObjectId) {
+    return downloadObjectStreamImpl(bundle, remoteObjectId);
   },
 };
