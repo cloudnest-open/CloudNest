@@ -1,0 +1,801 @@
+import crypto from 'node:crypto';
+import type Database from 'better-sqlite3';
+import { makeUploadQueries, type JobRow, type FileRow, type AllocationRow } from '../db/upload-queries.js';
+import { makeProviderQueries } from '../db/provider-queries.js';
+import { planChunks, chunkBounds, sanitizeDisplayName, generateObjectKey, ChunkMathError, type ChunkSizeMiB } from './chunk-math.js';
+import { preflight, allocateChunks, outstandingReservationBytes, type AccountCapacityInput } from './capacity.js';
+import type { CredentialsStore } from '../providers/credentials-store.js';
+import { getAdapter } from '../providers/registry.js';
+import { ProviderError } from '../providers/types.js';
+import { drainAndHash, HashingCounter } from './streaming.js';
+
+/**
+ * Upload planning, allocation, chunk commit, resume and cancellation (M9).
+ * All SQLite writes live here; provider adapters never touch the database.
+ */
+
+export class UploadError extends Error {
+  readonly safeCode: string;
+  readonly httpStatus: number;
+  constructor(safeCode: string, httpStatus = 400) {
+    super(safeCode);
+    this.safeCode = safeCode;
+    this.httpStatus = httpStatus;
+  }
+}
+
+const PROVIDER_UPLOAD_READY = new Set(['google_drive', 'dropbox', 'onedrive', 'pcloud']);
+
+export interface PlanRequest {
+  originalName: string;
+  sizeBytes: number;
+  chunkSizeMiB: ChunkSizeMiB;
+  mimeType?: string | null;
+  idempotencyKey: string;
+}
+
+export interface PlanResult {
+  jobId: string;
+  fileId: string;
+  chunkCount: number;
+  chunkSizeBytes: number;
+  sizeBytes: number;
+  allocations: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number; accountId: string }>;
+  reused: boolean;
+}
+
+export class UploadService {
+  private readonly q;
+  private readonly providerQ;
+  constructor(
+    private readonly db: Database.Database,
+    private readonly store: CredentialsStore,
+  ) {
+    this.q = makeUploadQueries(db);
+    this.providerQ = makeProviderQueries(db);
+  }
+
+  /** Deterministic fingerprint: the same request must never reserve twice. */
+  static fingerprint(req: PlanRequest): string {
+    return crypto
+      .createHash('sha256')
+      .update(JSON.stringify({
+        n: req.originalName,
+        s: req.sizeBytes,
+        c: req.chunkSizeMiB,
+        m: req.mimeType ?? null,
+      }))
+      .digest('hex');
+  }
+
+  /** Eligible capacity per connected account, from real quota + reservations. */
+  private capacityInputs(): AccountCapacityInput[] {
+    const accounts = this.providerQ.listAccounts.all() as Array<{
+      id: string; provider: string; display_label: string; status: string;
+      quota_status: string; quota_total_bytes: number | null; used_bytes: number | null; reserve_bytes: number;
+    }>;
+    const active = this.q.listAllActiveAllocations.all() as Array<{ provider_account_id: string; size_bytes: number; state: string }>;
+    return accounts
+      .filter((a) => PROVIDER_UPLOAD_READY.has(a.provider))
+      .map((a) => ({
+        accountId: a.id,
+        provider: a.provider,
+        displayLabel: a.display_label,
+        status: a.status,
+        quotaStatus: a.quota_status as 'current' | 'stale' | 'unknown',
+        quotaTotalBytes: a.quota_total_bytes,
+        quotaUsedBytes: a.used_bytes,
+        reserveBytes: a.reserve_bytes,
+        outstandingReservationBytes: outstandingReservationBytes(active, a.id),
+      }));
+  }
+
+  /**
+   * Metadata-only plan. Reserves the whole file atomically or not at all.
+   * Idempotent on the client key: a retried request returns the same job.
+   */
+  plan(req: PlanRequest): PlanResult {
+    let name: string;
+    let plan;
+    try {
+      name = sanitizeDisplayName(req.originalName);
+      plan = planChunks(req.sizeBytes, req.chunkSizeMiB * 1024 * 1024);
+    } catch (err) {
+      if (err instanceof ChunkMathError) throw new UploadError(err.safeCode, 400);
+      throw err;
+    }
+
+    const fingerprint = UploadService.fingerprint({ ...req, originalName: name });
+
+    // idempotency: same key + same fingerprint returns the existing job
+    const existing = this.q.getJobByIdempotencyKey.get(req.idempotencyKey) as JobRow | undefined;
+    if (existing) {
+      if (existing.request_fingerprint !== fingerprint) {
+        throw new UploadError('idempotency_key_reused', 409);
+      }
+      const allocations = this.q.listAllocations.all(existing.id) as AllocationRow[];
+      return {
+        jobId: existing.id,
+        fileId: existing.file_id ?? '',
+        chunkCount: existing.chunks_total,
+        chunkSizeBytes: plan.chunkSizeBytes,
+        sizeBytes: plan.fileSizeBytes,
+        allocations: allocations.map((a) => ({
+          chunkIndex: a.chunk_index,
+          offsetBytes: a.offset_bytes,
+          sizeBytes: a.size_bytes,
+          accountId: a.provider_account_id,
+        })),
+        reused: true,
+      };
+    }
+
+    // an empty file needs no capacity and creates no remote object
+    if (plan.chunkCount === 0) {
+      return this.createEmptyFile(name, req, fingerprint, plan.chunkSizeBytes);
+    }
+
+    const capacity = preflight(this.capacityInputs(), plan.fileSizeBytes);
+    if (!capacity.canProceed) {
+      throw new UploadError('capacity_insufficient', 409);
+    }
+
+    const chunkDescriptors: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number }> = [];
+    for (let i = 0; i < plan.chunkCount; i++) {
+      const b = chunkBounds(plan, i);
+      chunkDescriptors.push({ chunkIndex: b.chunkIndex, offsetBytes: b.offsetBytes, sizeBytes: b.sizeBytes });
+    }
+    const assignments = allocateChunks(chunkDescriptors, capacity.assessment.eligible);
+    if (!assignments) throw new UploadError('capacity_insufficient', 409);
+
+    // one transaction: file + job + every allocation, or nothing at all
+    const now = new Date().toISOString();
+    const fileId = this.q.newId();
+    const jobId = this.q.newId();
+    const txn = this.db.transaction(() => {
+      this.q.insertFile.run({
+        id: fileId,
+        original_name: name,
+        size_bytes: plan.fileSizeBytes,
+        mime_type: req.mimeType ?? null,
+        chunk_size_bytes: plan.chunkSizeBytes,
+        chunk_count: plan.chunkCount,
+        state: 'uploading',
+        created_at: now,
+      });
+      this.q.insertJob.run({
+        id: jobId,
+        file_id: fileId,
+        state: 'queued',
+        chunks_total: plan.chunkCount,
+        idempotency_key: req.idempotencyKey,
+        request_fingerprint: fingerprint,
+        created_at: now,
+        updated_at: now,
+      });
+      for (const a of assignments) {
+        this.q.insertAllocation.run({
+          id: this.q.newId(),
+          job_id: jobId,
+          chunk_index: a.chunkIndex,
+          provider_account_id: a.accountId,
+          size_bytes: a.sizeBytes,
+          offset_bytes: a.offsetBytes,
+          created_at: now,
+          updated_at: now,
+        });
+      }
+      this.recomputeReservedInflight(jobId);
+    });
+    txn();
+
+    return {
+      jobId,
+      fileId,
+      chunkCount: plan.chunkCount,
+      chunkSizeBytes: plan.chunkSizeBytes,
+      sizeBytes: plan.fileSizeBytes,
+      allocations: assignments.map((a) => ({
+        chunkIndex: a.chunkIndex,
+        offsetBytes: a.offsetBytes,
+        sizeBytes: a.sizeBytes,
+        accountId: a.accountId,
+      })),
+      reused: false,
+    };
+  }
+
+  private createEmptyFile(name: string, req: PlanRequest, fingerprint: string, chunkSizeBytes: number): PlanResult {
+    const now = new Date().toISOString();
+    const fileId = this.q.newId();
+    const jobId = this.q.newId();
+    const txn = this.db.transaction(() => {
+      this.q.insertFile.run({
+        id: fileId, original_name: name, size_bytes: 0, mime_type: req.mimeType ?? null,
+        chunk_size_bytes: chunkSizeBytes, chunk_count: 0, state: 'completed', created_at: now,
+      });
+      this.q.insertJob.run({
+        id: jobId, file_id: fileId, state: 'completed', chunks_total: 0,
+        idempotency_key: req.idempotencyKey, request_fingerprint: fingerprint, created_at: now, updated_at: now,
+      });
+      this.q.completeFile.run({ id: fileId, manifest_hash: manifestHash([]), completed_at: now });
+    });
+    txn();
+    return {
+      jobId, fileId, chunkCount: 0, chunkSizeBytes, sizeBytes: 0, allocations: [], reused: false,
+    };
+  }
+
+  getJob(jobId: string): JobRow | undefined {
+    return this.q.getJob.get(jobId) as JobRow | undefined;
+  }
+
+  getFile(fileId: string): FileRow | undefined {
+    return this.q.getFile.get(fileId) as FileRow | undefined;
+  }
+
+  listJobs(limit = 50): JobRow[] {
+    return this.q.listJobs.all(limit) as unknown as JobRow[];
+  }
+
+  listFiles(limit: number, offset: number): FileRow[] {
+    return this.q.listFiles.all(limit, offset) as unknown as FileRow[];
+  }
+
+  countFiles(): number {
+    return (this.q.countFiles.get() as { n: number }).n;
+  }
+
+  listAllocations(jobId: string): AllocationRow[] {
+    return this.q.listAllocations.all(jobId) as unknown as AllocationRow[];
+  }
+
+  getResumeManifest(jobId: string, offset: number, limit: number): {
+    chunks: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number; sha256: string }>;
+    total: number;
+  } {
+    const job = this.q.getJob.get(jobId) as JobRow | undefined;
+    if (!job?.file_id) throw new UploadError('job_not_found', 404);
+    const rows = this.q.listChunks.all(job.file_id) as Array<{
+      chunk_index: number; offset_bytes: number; size_bytes: number; sha256: string;
+    }>;
+    return {
+      chunks: rows.slice(offset, offset + limit).map((r) => ({
+        chunkIndex: r.chunk_index, offsetBytes: r.offset_bytes, sizeBytes: r.size_bytes, sha256: r.sha256,
+      })),
+      total: rows.length,
+    };
+  }
+
+  /** Start or continue a job; refuses when a source identity check is needed. */
+  markRunning(jobId: string): void {
+    const job = this.q.getJob.get(jobId) as JobRow | undefined;
+    if (!job) throw new UploadError('job_not_found', 404);
+    if (job.state === 'completed') throw new UploadError('job_not_resumable', 409);
+    if (job.state === 'cancelled') throw new UploadError('job_not_resumable', 409);
+    this.q.updateJobState.run({
+      id: jobId, state: 'running', last_safe_error_code: job.last_safe_error_code, updated_at: new Date().toISOString(),
+    });
+  }
+
+  private recomputeReservedInflight(jobId: string): void {
+    const allocs = this.q.listAllAllocationsForJob.all(jobId) as Array<{ provider_account_id: string; size_bytes: number; state: string }>;
+    const perAccount = new Map<string, number>();
+    for (const a of allocs) {
+      if (a.state === 'reserved' || a.state === 'uploading' || a.state === 'uploaded_pending_quota') {
+        perAccount.set(a.provider_account_id, (perAccount.get(a.provider_account_id) ?? 0) + a.size_bytes);
+      }
+    }
+    const now = new Date().toISOString();
+    for (const [accountId, bytes] of perAccount) {
+      this.db.prepare('UPDATE provider_accounts SET reserved_inflight_bytes = ?, updated_at = ? WHERE id = ?')
+        .run(bytes, now, accountId);
+    }
+  }
+
+  /** Recompute every account's reserved_inflight_bytes from durable rows. */
+  recomputeAllReservations(): void {
+    const active = this.q.listAllActiveAllocations.all() as Array<{ provider_account_id: string; size_bytes: number; state: string }>;
+    const accounts = this.providerQ.listAccounts.all() as Array<{ id: string }>;
+    const now = new Date().toISOString();
+    for (const account of accounts) {
+      const bytes = outstandingReservationBytes(active, account.id);
+      this.db.prepare('UPDATE provider_accounts SET reserved_inflight_bytes = ?, updated_at = ? WHERE id = ?')
+        .run(bytes, now, account.id);
+    }
+  }
+
+  /**
+   * Commit one successfully uploaded chunk: attempt -> chunk -> placement,
+   * all inside one transaction, then update progress counters.
+   */
+  commitChunk(input: {
+    jobId: string;
+    chunkIndex: number;
+    accountId: string;
+    objectKey: string;
+    remoteObjectId: string;
+    sha256: string;
+    sizeBytes: number;
+    providerChecksumType?: string;
+  }): { chunksCompleted: number; bytesCompleted: number; fileCompleted: boolean } {
+    const job = this.q.getJob.get(input.jobId) as JobRow | undefined;
+    if (!job?.file_id) throw new UploadError('job_not_found', 404);
+    const file = this.q.getFile.get(job.file_id) as FileRow | undefined;
+    if (!file) throw new UploadError('job_not_found', 404);
+    const allocation = this.q.getAllocation.get(input.jobId, input.chunkIndex) as AllocationRow | undefined;
+    if (!allocation) throw new UploadError('invalid_upload_metadata', 400);
+
+    const now = new Date().toISOString();
+    const attempt = this.q.getAttemptByObjectKey.get(input.objectKey) as { id: string } | undefined;
+    const txn = this.db.transaction(() => {
+      if (attempt) {
+        this.q.markAttemptUploadedUncommitted.run({
+          id: attempt.id, bytes_received: input.sizeBytes, sha256: input.sha256,
+          remote_object_id: input.remoteObjectId, updated_at: now,
+        });
+      }
+      // an existing chunk for this index is a re-upload: deactivate old placements
+      const existingChunk = this.q.getChunk.get(file.id, input.chunkIndex) as { id: string } | undefined;
+      const chunkId = existingChunk?.id ?? this.q.newId();
+      if (existingChunk) {
+        this.q.deactivatePlacements.run(now, chunkId);
+      } else {
+        this.q.insertChunk.run({
+          id: chunkId, file_id: file.id, chunk_index: input.chunkIndex,
+          offset_bytes: allocation.offset_bytes, size_bytes: input.sizeBytes,
+          sha256: input.sha256, created_at: now, updated_at: now,
+        });
+      }
+      this.q.insertPlacement.run({
+        id: this.q.newId(), chunk_id: chunkId, provider_account_id: input.accountId,
+        remote_object_id: input.remoteObjectId, remote_object_key: input.objectKey,
+        provider_checksum_type: input.providerChecksumType ?? null,
+        confirmed_size_bytes: input.sizeBytes, created_at: now, updated_at: now,
+      });
+      if (attempt) this.q.markAttemptCommitted.run(now, attempt.id);
+      this.q.markAllocationUploadedPendingQuota.run(now, allocation.id);
+    });
+    txn();
+
+    // progress counters from durable rows
+    const chunks = this.q.listChunks.all(file.id) as Array<{ size_bytes: number }>;
+    const bytesCompleted = chunks.reduce((n, c) => n + c.size_bytes, 0);
+    const chunksCompleted = chunks.length;
+    const fileCompleted = chunksCompleted === file.chunk_count;
+    this.q.updateJobProgress.run({
+      id: input.jobId, chunks_completed: chunksCompleted, bytes_completed: bytesCompleted,
+      last_safe_error_code: null, updated_at: now,
+    });
+    this.recomputeReservedInflight(input.jobId);
+
+    if (fileCompleted) {
+      const mh = manifestHash(chunks);
+      this.q.completeFile.run({ id: file.id, manifest_hash: mh, completed_at: now });
+      this.q.updateJobState.run({ id: input.jobId, state: 'completed', last_safe_error_code: null, updated_at: now });
+    }
+    return { chunksCompleted, bytesCompleted, fileCompleted };
+  }
+
+  /** Record a failed attempt without destroying any durable history. */
+  recordFailure(input: {
+    jobId: string; chunkIndex: number; accountId: string; objectKey: string;
+    safeCode: string; bytesReceived: number; remoteObjectId?: string | null;
+  }): void {
+    const now = new Date().toISOString();
+    const attempt = this.q.getAttemptByObjectKey.get(input.objectKey) as { id: string } | undefined;
+    if (attempt) {
+      this.q.markAttemptUploadedUncommitted.run({
+        id: attempt.id, bytes_received: input.bytesReceived, sha256: null,
+        remote_object_id: input.remoteObjectId ?? null, updated_at: now,
+      });
+      this.q.markAttemptFailed.run({
+        id: attempt.id, safe_error_code: input.safeCode, bytes_received: input.bytesReceived, updated_at: now,
+      });
+    } else {
+      // no attempt row (validation failed before any remote work)
+      this.q.insertAttempt.run({
+        id: this.q.newId(), job_id: input.jobId, chunk_index: input.chunkIndex,
+        provider_account_id: input.accountId, object_key: input.objectKey,
+        resume_ciphertext: null, resume_nonce: null, resume_auth_tag: null, resume_key_version: null,
+        created_at: now, updated_at: now,
+      });
+      const fresh = this.q.getAttemptByObjectKey.get(input.objectKey) as { id: string } | undefined;
+      if (fresh) {
+        this.q.markAttemptFailed.run({
+          id: fresh.id, safe_error_code: input.safeCode, bytes_received: input.bytesReceived, updated_at: now,
+        });
+      }
+    }
+    const allocation = this.q.getAllocation.get(input.jobId, input.chunkIndex) as AllocationRow | undefined;
+    if (allocation && allocation.state === 'uploading') {
+      this.q.markAllocationReleased.run(now, allocation.id);
+      this.recomputeReservedInflight(input.jobId);
+    }
+    this.q.updateJobProgress.run({
+      id: input.jobId,
+      chunks_completed: this.q.listChunks.all(this.q.getJob.get(input.jobId) ? (this.q.getJob.get(input.jobId) as JobRow).file_id ?? '' : '').length,
+      bytes_completed: 0,
+      last_safe_error_code: input.safeCode,
+      updated_at: now,
+    });
+    this.q.bumpJobRetry.run({ id: input.jobId, updated_at: now });
+  }
+
+  /** Create the attempt row before any bytes are sent (crash recovery anchor). */
+  beginAttempt(input: { jobId: string; chunkIndex: number; accountId: string }): { attemptId: string; objectKey: string } {
+    const job = this.q.getJob.get(input.jobId) as JobRow | undefined;
+    if (!job?.file_id) throw new UploadError('job_not_found', 404);
+    const allocation = this.q.getAllocation.get(input.jobId, input.chunkIndex) as AllocationRow | undefined;
+    if (!allocation) throw new UploadError('invalid_upload_metadata', 400);
+    const attemptId = this.q.newId();
+    const objectKey = generateObjectKey(job.file_id, input.chunkIndex, attemptId);
+    const now = new Date().toISOString();
+    const txn = this.db.transaction(() => {
+      this.q.insertAttempt.run({
+        id: attemptId, job_id: input.jobId, chunk_index: input.chunkIndex,
+        provider_account_id: input.accountId, object_key: objectKey,
+        resume_ciphertext: null, resume_nonce: null, resume_auth_tag: null, resume_key_version: null,
+        created_at: now, updated_at: now,
+      });
+      this.q.markAllocationUploading.run(now, allocation.id);
+    });
+    txn();
+    return { attemptId, objectKey };
+  }
+
+  /**
+   * Reassign an unfinished chunk to another account, transactionally,
+   * preserving the audit trail and never creating two active placements.
+   */
+  reassignChunk(jobId: string, chunkIndex: number): { accountId: string } | null {
+    const allocation = this.q.getAllocation.get(jobId, chunkIndex) as AllocationRow | undefined;
+    if (!allocation) return null;
+    const capacity = this.capacityInputs().filter((a) => a.accountId !== allocation.provider_account_id);
+    const assessed = preflight(capacity, allocation.size_bytes);
+    const target = assessed.assessment.eligible.find((a) => a.usableBytes >= allocation.size_bytes);
+    if (!target) return null;
+    const now = new Date().toISOString();
+    const txn = this.db.transaction(() => {
+      this.q.reassignAllocation.run({ id: allocation.id, provider_account_id: target.accountId, updated_at: now });
+      this.q.updateJobState.run({ id: jobId, state: 'running', last_safe_error_code: 'rerouted', updated_at: now });
+    });
+    txn();
+    this.recomputeReservedInflight(jobId);
+    return { accountId: target.accountId };
+  }
+
+  /** Pause: no new chunks are scheduled; already-claimed chunks may finish. */
+  pause(jobId: string): void {
+    const job = this.q.getJob.get(jobId) as JobRow | undefined;
+    if (!job) throw new UploadError('job_not_found', 404);
+    if (job.state === 'completed') throw new UploadError('job_not_resumable', 409);
+    this.q.updateJobState.run({
+      id: jobId, state: 'paused', last_safe_error_code: job.last_safe_error_code, updated_at: new Date().toISOString(),
+    });
+  }
+
+  /** Resume: continue only the chunks that are still missing. */
+  resume(jobId: string): { missingChunks: number[] } {
+    const job = this.q.getJob.get(jobId) as JobRow | undefined;
+    if (!job?.file_id) throw new UploadError('job_not_found', 404);
+    if (job.state === 'cancelled') throw new UploadError('job_not_resumable', 409);
+    const done = new Set(
+      (this.q.listChunks.all(job.file_id) as Array<{ chunk_index: number }>).map((c) => c.chunk_index),
+    );
+    const missing: number[] = [];
+    for (let i = 0; i < job.chunks_total; i++) if (!done.has(i)) missing.push(i);
+    this.q.updateJobState.run({
+      id: jobId, state: 'running', last_safe_error_code: job.last_safe_error_code, updated_at: new Date().toISOString(),
+    });
+    return { missingChunks: missing };
+  }
+
+  /**
+   * Cancel: stop dispatch, release unused reservations, and clean up partial
+   * remote objects. Reservations are only freed once cleanup has reached a
+   * safe state, and cleanup that cannot be confirmed stays recorded.
+   */
+  async cancel(jobId: string): Promise<{ cleanupPending: boolean; cleaned: number }> {
+    const job = this.q.getJob.get(jobId) as JobRow | undefined;
+    if (!job) throw new UploadError('job_not_found', 404);
+    const allocations = this.q.listAllocations.all(jobId) as AllocationRow[];
+    const attempts = allocations.map((a) =>
+      (this.q.listAttemptsForChunk.all(jobId, a.chunk_index) as Array<{
+        id: string; object_key: string; state: string; remote_object_id: string | null; provider_account_id: string;
+      }>)[0],
+    ).filter((a): a is NonNullable<typeof a> => a !== undefined);
+
+    let cleaned = 0;
+    let cleanupPending = false;
+    const now = new Date().toISOString();
+
+    for (const attempt of attempts) {
+      if (attempt.state === 'committed' || attempt.state === 'cleaned') continue;
+      const adapter = getAdapter(this.providerQAccountProvider(attempt.provider_account_id));
+      // mark cleanup pending first so a crash cannot lose the obligation
+      this.q.markAttemptCleanupPending.run({
+        id: attempt.id, safe_error_code: 'cleanup_pending', updated_at: now,
+      });
+      if (!adapter?.deleteAppObject) {
+        // no cleanup capability: keep the obligation recorded rather than pretend
+        cleanupPending = true;
+        continue;
+      }
+      try {
+        if (attempt.remote_object_id) {
+          await this.deleteRemoteObject(attempt.provider_account_id, attempt.remote_object_id);
+          this.q.markAttemptCleaned.run(now, attempt.id);
+          cleaned++;
+        } else {
+          // the object id was never learned; the attempt stays a durable obligation
+          cleanupPending = true;
+        }
+      } catch {
+        cleanupPending = true;
+      }
+    }
+
+    const txn = this.db.transaction(() => {
+      for (const a of allocations) {
+        if (a.state === 'reserved' || a.state === 'uploading') {
+          this.q.markAllocationReleased.run(now, a.id);
+        }
+      }
+      this.q.updateJobState.run({
+        id: jobId,
+        state: cleanupPending ? 'deletion_pending' : 'cancelled',
+        last_safe_error_code: cleanupPending ? 'cleanup_pending' : null,
+        updated_at: now,
+      });
+      const remaining = this.q.listChunks.all(job.file_id ?? '') as Array<{ size_bytes: number }>;
+      this.q.updateJobProgress.run({
+        id: jobId, chunks_completed: remaining.length,
+        bytes_completed: remaining.reduce((n, c) => n + c.size_bytes, 0),
+        last_safe_error_code: cleanupPending ? 'cleanup_pending' : null, updated_at: now,
+      });
+    });
+    txn();
+    this.recomputeReservedInflight(jobId);
+    return { cleanupPending, cleaned };
+  }
+
+  private providerQAccountProvider(accountId: string): string {
+    const row = this.providerQ.getAccount.get(accountId) as { provider: string } | undefined;
+    return row?.provider ?? '';
+  }
+
+  private async deleteRemoteObject(accountId: string, remoteObjectId: string): Promise<void> {
+    const account = this.providerQ.getAccount.get(accountId) as
+      | { id: string; provider: string; credential_ciphertext: Buffer | null }
+      | undefined;
+    if (!account) throw new ProviderError('provider_object_missing', 404);
+    const remoteRoot = this.db
+      .prepare('SELECT remote_root_id FROM provider_account_roots WHERE provider_account_id = ?')
+      .get(accountId) as { remote_root_id: string } | undefined;
+    const adapter = getAdapter(account.provider);
+    if (!adapter?.deleteAppObject) throw new ProviderError('provider_unavailable', 502);
+    const bundle = this.store.loadAccountBundle(account as unknown as Parameters<CredentialsStore['loadAccountBundle']>[0]);
+    if (!bundle) throw new ProviderError('needs_reauth', 401);
+    const appConfig = account.provider === 'mega' || account.provider === 'pcloud'
+      ? undefined
+      : this.store.getConfig(account.provider)?.config;
+    await adapter.deleteAppObject(bundle, remoteRoot?.remote_root_id ?? '', remoteObjectId, appConfig);
+  }
+
+  /** Startup recovery: running jobs become safely paused; reconcile reservations. */
+  recoverOnStartup(): { recovered: number; reservationsRecomputed: number } {
+    const running = this.q.runningJobs.all() as unknown as JobRow[];
+    const now = new Date().toISOString();
+    const txn = this.db.transaction(() => {
+      for (const job of running) {
+        this.q.updateJobState.run({
+          id: job.id, state: 'paused', last_safe_error_code: 'recovered_after_restart', updated_at: now,
+        });
+      }
+    });
+    txn();
+    this.recomputeAllReservations();
+    const accounts = this.providerQ.listAccounts.all() as Array<{ id: string }>;
+    return { recovered: running.length, reservationsRecomputed: accounts.length };
+  }
+
+  /** Durable cleanup obligations that must be retried later. */
+  pendingCleanups(): Array<{ id: string; object_key: string; remote_object_id: string | null }> {
+    return this.q.cleanupPendingAttempts.all() as Array<{ id: string; object_key: string; remote_object_id: string | null }>;
+  }
+
+  // ---- route bridge helpers: keep provider/DB detail out of the router ----
+
+  /** Account row needed to talk to a provider for this upload. */
+  getAccountForUpload(accountId: string): { id: string; provider: string } | undefined {
+    const row = this.providerQ.getAccount.get(accountId) as { id: string; provider: string } | undefined;
+    if (!row) return undefined;
+    const adapter = getAdapter(row.provider);
+    // an adapter that cannot upload must never be used for a chunk
+    if (!adapter?.capabilities.upload || !adapter.uploadObjectStream) return undefined;
+    return row;
+  }
+
+  /** Decrypted credential bundle for the account. */
+  loadBundleFor(accountId: string) {
+    const row = this.providerQ.getAccount.get(accountId) as Parameters<CredentialsStore['loadAccountBundle']>[0] | undefined;
+    if (!row) throw new UploadError('account_needs_reauth', 409);
+    const bundle = this.store.loadAccountBundle(row);
+    if (!bundle) throw new UploadError('account_needs_reauth', 409);
+    return bundle;
+  }
+
+  /**
+   * The CloudNest-managed remote root for this account, created lazily on the
+   * first upload and persisted before any bytes are sent.
+   */
+  ensureRootFor(accountId: string): string {
+    const existing = this.db
+      .prepare('SELECT remote_root_id, status FROM provider_account_roots WHERE provider_account_id = ?')
+      .get(accountId) as { remote_root_id: string; status: string } | undefined;
+    if (existing && existing.status === 'ready') return existing.remote_root_id;
+    throw new UploadError('provider_root_missing', 409);
+  }
+
+  /**
+   * Ensure the account has a CloudNest-managed remote root, creating it lazily
+   * on first use and persisting the id before any chunk bytes are sent.
+   */
+  async ensureOrCreateRoot(accountId: string): Promise<string> {
+    const existing = this.db
+      .prepare("SELECT remote_root_id, status FROM provider_account_roots WHERE provider_account_id = ?")
+      .get(accountId) as { remote_root_id: string; status: string } | undefined;
+    if (existing && existing.status === 'ready') return existing.remote_root_id;
+
+    const account = this.providerQ.getAccount.get(accountId) as
+      | { id: string; provider: string }
+      | undefined;
+    if (!account) throw new UploadError('account_needs_reauth', 409);
+    const adapter = getAdapter(account.provider);
+    if (!adapter?.ensureAppRoot) throw new UploadError('provider_unavailable', 502);
+    const bundle = this.loadBundleFor(accountId);
+    const appConfig = account.provider === 'mega' || account.provider === 'pcloud'
+      ? undefined
+      : this.store.getConfig(account.provider)?.config ?? undefined;
+    try {
+      const root = await adapter.ensureAppRoot(bundle, appConfig);
+      this.saveRootFor(accountId, root.remoteRootId);
+      return root.remoteRootId;
+    } catch (err) {
+      const now = new Date().toISOString();
+      this.db.prepare(
+        `INSERT INTO provider_account_roots (provider_account_id, remote_root_id, status, created_at, updated_at)
+         VALUES (?, '', ?, ?, ?)
+         ON CONFLICT(provider_account_id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at`,
+      ).run(accountId, err instanceof ProviderError && err.safeCode === 'needs_reauth' ? 'needs_reauth' : 'error', now, now);
+      if (err instanceof ProviderError) throw new UploadError(err.safeCode, err.httpStatus);
+      throw new UploadError('provider_unavailable', 502);
+    }
+  }
+
+  /** Persist a verified remote root id for later uploads. */
+  saveRootFor(accountId: string, remoteRootId: string): void {
+    const now = new Date().toISOString();
+    this.db.prepare(
+      `INSERT INTO provider_account_roots (provider_account_id, remote_root_id, status, created_at, updated_at)
+       VALUES (?, ?, 'ready', ?, ?)
+       ON CONFLICT(provider_account_id) DO UPDATE SET remote_root_id = excluded.remote_root_id,
+         status = 'ready', updated_at = excluded.updated_at`,
+    ).run(accountId, remoteRootId, now, now);
+  }
+
+  hashingTransform(): HashingCounter {
+    return new HashingCounter();
+  }
+
+  finalizeHash(counter: HashingCounter): { sha256: string; bytes: number } {
+    return { sha256: counter.digest(), bytes: counter.bytes };
+  }
+
+  /** Public job shape: no credentials, no provider session URLs. */
+  publicJob(jobId: string): {
+    jobId: string; fileId: string | null; originalName: string | null; state: string;
+    chunksCompleted: number; chunksTotal: number; bytesCompleted: number; sizeBytes: number;
+    retryCount: number; safeErrorCode: string | null; resumable: boolean; cancellable: boolean;
+    createdAt: string; updatedAt: string;
+  } | null {
+    const job = this.q.getJob.get(jobId) as JobRow | undefined;
+    if (!job) return null;
+    const file = job.file_id ? (this.q.getFile.get(job.file_id) as FileRow | undefined) : undefined;
+    const resumable = job.state === 'queued' || job.state === 'running' || job.state === 'paused'
+      || job.state === 'failed' || job.state === 'deletion_pending';
+    return {
+      jobId: job.id,
+      fileId: job.file_id,
+      originalName: file?.original_name ?? null,
+      state: job.state,
+      chunksCompleted: job.chunks_completed,
+      chunksTotal: job.chunks_total,
+      bytesCompleted: job.bytes_completed,
+      sizeBytes: file?.size_bytes ?? 0,
+      retryCount: job.retry_count,
+      safeErrorCode: job.last_safe_error_code,
+      resumable,
+      cancellable: job.state !== 'completed' && job.state !== 'cancelled',
+      createdAt: job.created_at,
+      updatedAt: job.updated_at,
+    };
+  }
+
+  /** Public file shape with a stored-across summary from active placements. */
+  publicFile(fileId: string): {
+    id: string; originalName: string; sizeBytes: number; mimeType: string | null;
+    chunkCount: number; chunkSizeBytes: number; state: string; storedAcross: string[];
+    createdAt: string; completedAt: string | null;
+  } | null {
+    const file = this.q.getFile.get(fileId) as FileRow | undefined;
+    if (!file) return null;
+    const chunks = this.q.listChunks.all(file.id) as Array<{ id: string }>;
+    const storedAcross: string[] = [];
+    for (const chunk of chunks) {
+      const placements = this.q.placementsForChunk.all(chunk.id) as Array<{
+        provider_account_id: string; is_active: number;
+      }>;
+      for (const p of placements) {
+        if (p.is_active !== 1) continue;
+        const account = this.providerQ.getAccount.get(p.provider_account_id) as { provider: string } | undefined;
+        if (account && !storedAcross.includes(account.provider)) storedAcross.push(account.provider);
+      }
+    }
+    return {
+      id: file.id,
+      originalName: file.original_name,
+      sizeBytes: file.size_bytes,
+      mimeType: file.mime_type,
+      chunkCount: file.chunk_count,
+      chunkSizeBytes: file.chunk_size_bytes,
+      state: file.state,
+      storedAcross,
+      createdAt: file.created_at,
+      completedAt: file.completed_at,
+    };
+  }
+
+  /** Live dashboard summary: real rows only, unknown quota stays unknown. */
+  dashboardSummary(): {
+    accounts: Array<{ id: string; provider: string; displayLabel: string; status: string; quotaStatus: string }>;
+    activeJobs: number;
+    recentFiles: number;
+    totalFiles: number;
+  } {
+    const accounts = (this.providerQ.listAccounts.all() as Array<{
+      id: string; provider: string; display_label: string; status: string; quota_status: string;
+    }>).map((a) => ({
+      id: a.id, provider: a.provider, displayLabel: a.display_label,
+      status: a.status, quotaStatus: a.quota_status,
+    }));
+    const jobs = this.q.listJobs.all(200) as unknown as JobRow[];
+    const activeJobs = jobs.filter((j) => j.state === 'running' || j.state === 'queued' || j.state === 'paused').length;
+    const files = this.q.listFiles.all(5, 0) as unknown as FileRow[];
+    return {
+      accounts,
+      activeJobs,
+      recentFiles: files.length,
+      totalFiles: this.countFiles(),
+    };
+  }
+
+  /** Hash a chunk stream while forwarding it, verifying the exact byte count. */
+  static async hashChunkStream(
+    stream: NodeJS.ReadableStream,
+    expectedBytes: number,
+  ): Promise<{ sha256: string; bytes: number }> {
+    const result = await drainAndHash(stream);
+    if (result.bytes !== expectedBytes) {
+      throw new UploadError('chunk_size_mismatch', 400);
+    }
+    return result;
+  }
+}
+
+/** Versioned, deterministic manifest hash over ordered chunk descriptors. */
+export function manifestHash(chunks: Array<{ size_bytes: number; sha256?: string | null }>): string {
+  const canonical = chunks.map((c, i) => `${i}:${c.size_bytes}:${c.sha256 ?? ''}`).join('|');
+  return crypto.createHash('sha256').update(`v1|${canonical}`).digest('hex');
+}

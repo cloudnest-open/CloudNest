@@ -369,6 +369,51 @@ const M0006_UPLOAD_ENGINE: Migration = {
   },
 };
 
+const M0007_PLACEMENT_STATES: Migration = {
+  version: 7,
+  name: '0007-placement-upload-states',
+  up: (db) => {
+    // Migration 5 constrained placement states to the Step-2 placeholder list.
+    // The upload engine needs the canonical set from the Step 4 plan, including
+    // 'verified' (a trusted provider checksum or read-back confirmed the bytes).
+    // Rebuild the table to widen the CHECK while preserving every row, index and
+    // child reference; never edit an applied migration.
+    db.exec(`
+      CREATE TABLE chunk_placements_new (
+        id TEXT PRIMARY KEY,
+        chunk_id TEXT NOT NULL REFERENCES file_chunks(id) ON DELETE RESTRICT,
+        provider_account_id TEXT NOT NULL REFERENCES provider_accounts(id) ON DELETE RESTRICT,
+        remote_object_id TEXT,
+        remote_object_key TEXT,
+        state TEXT NOT NULL CHECK(state IN ('pending','uploading','uploaded','verified','failed','missing','deletion_pending','unavailable','deleting','deleted')),
+        is_active INTEGER NOT NULL CHECK(is_active IN (0,1)),
+        provider_checksum_type TEXT,
+        confirmed_size_bytes INTEGER CHECK(confirmed_size_bytes IS NULL OR confirmed_size_bytes >= 0),
+        last_safe_error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    db.exec(`
+      INSERT INTO chunk_placements_new
+        (id, chunk_id, provider_account_id, remote_object_id, remote_object_key, state, is_active,
+         provider_checksum_type, confirmed_size_bytes, last_safe_error_code, created_at, updated_at)
+      SELECT id, chunk_id, provider_account_id, remote_object_id, remote_object_key, state, is_active,
+         provider_checksum_type, confirmed_size_bytes, last_safe_error_code, created_at, updated_at
+      FROM chunk_placements;
+    `);
+    db.exec('DROP TABLE chunk_placements;');
+    db.exec('ALTER TABLE chunk_placements_new RENAME TO chunk_placements;');
+    db.exec('CREATE INDEX idx_chunk_placements_chunk_state ON chunk_placements(chunk_id, state);');
+    db.exec('CREATE UNIQUE INDEX idx_chunk_placements_active ON chunk_placements(chunk_id) WHERE is_active = 1;');
+    db.exec('CREATE INDEX idx_chunk_placements_object_key ON chunk_placements(remote_object_key);');
+    const violations = db.pragma('foreign_key_check');
+    if (Array.isArray(violations) ? violations.length > 0 : Boolean(violations)) {
+      throw new Error('foreign_key_check failed after chunk_placements rebuild');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -376,4 +421,5 @@ export const allMigrations: readonly Migration[] = [
   M0004_PROVIDER_ACCOUNT_ROOTS,
   M0005_CHUNK_PLACEMENT_OBJECT_KEY,
   M0006_UPLOAD_ENGINE,
+  M0007_PLACEMENT_STATES,
 ];

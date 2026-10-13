@@ -99,13 +99,19 @@ test('enumerated values are constrained in SQLite', () => {
     const accountId = (
       db.prepare('SELECT id FROM provider_accounts LIMIT 1').get() as { id: string }
     ).id;
+    // canonical placement state (migration v7 widened these to the Step-4 set)
     const place = db.prepare(`INSERT INTO chunk_placements (id, chunk_id, provider_account_id, remote_object_id, state, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'active', 1, ?, ?)`);
+      VALUES (?, ?, ?, ?, 'verified', 1, ?, ?)`);
     place.run(uuid(), chunkId, accountId, 'obj-1', now, now);
     assert.throws(() => place.run(uuid(), chunkId, accountId, 'obj-2', now, now));
     // inactive duplicates allowed
+    // an inactive duplicate is allowed (cleanup history is preserved)
     db.prepare(`INSERT INTO chunk_placements (id, chunk_id, provider_account_id, remote_object_id, state, is_active, created_at, updated_at)
-      VALUES (?, ?, ?, 'obj-2', 'inactive'CHECKREMOVED, 0, ?, ?)`.replace("'inactive'CHECKREMOVED", "'deleted'")).run(uuid(), chunkId, accountId, now, now);
+      VALUES (?, ?, ?, 'obj-2', 'deleted', 0, ?, ?)`).run(uuid(), chunkId, accountId, now, now);
+    // a non-canonical state is still rejected by the CHECK constraint
+    assert.throws(() =>
+      db.prepare(`INSERT INTO chunk_placements (id, chunk_id, provider_account_id, remote_object_id, state, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, 'obj-3', 'inactive', 0, ?, ?)`).run(uuid(), chunkId, accountId, now, now));
 
     // FK enforcement: deleting a referenced file/account/chunk is blocked
     assert.throws(() => db.prepare('DELETE FROM files WHERE id = ?').run(fileId));

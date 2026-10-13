@@ -17,6 +17,8 @@ import { providerAccountsRouter } from './routes/provider-accounts.js';
 import { CredentialsStore } from './providers/credentials-store.js';
 import { ProviderAccountService } from './services/provider-account-service.js';
 import { makeProviderQueries } from './db/provider-queries.js';
+import { rawChunkRouter, uploadsRouter } from './routes/uploads.js';
+import { UploadService } from './uploads/upload-service.js';
 
 /**
  * Express app factory (Step 2).
@@ -53,13 +55,9 @@ export function createApp(options: {
     }),
   );
 
-  // 2. bounded JSON parser (8 KiB cap on auth/setup bodies; 400 on malformed)
-  app.use(
-    express.json({
-      limit: '8kb',
-      type: 'application/json',
-    }),
-  );
+
+  const credentialsStore = new CredentialsStore(options.db, options.dataDir);
+  const accountService = new ProviderAccountService(options.db, makeProviderQueries(options.db), credentialsStore);
 
   // 3. server-side sessions in the shared SQLite connection
   const sessionStore = new SqliteSessionStore(options.db);
@@ -88,14 +86,29 @@ export function createApp(options: {
   app.set('csrf', csrf);
   app.set('sessionStore', sessionStore);
 
+
+  // 3b. RAW CHUNK UPLOAD — mounted here (after sessions/CSRF, before any body
+  //     parser) so nothing buffers a chunk body. The plan forbids express.raw
+  //     and multer memory storage for this route.
+  const uploads = new UploadService(options.db, credentialsStore);
+  app.use(rawChunkRouter({ queries, csrf, uploads, store: credentialsStore }));
+  app.use(uploadsRouter({ queries, csrf, uploads }));
+  app.set('uploads', uploads);
+
+  // 2. bounded JSON parser (8 KiB cap on auth/setup bodies; 400 on malformed)
+  app.use(
+    express.json({
+      limit: '8kb',
+      type: 'application/json',
+    }),
+  );
+
   // 4. public setup/auth routes (unsafe methods are CSRF-protected inside)
   app.use(setupRouter(queries, csrf, () => options.db));
   app.use(authRouter(queries, csrf));
 
   // 4b. provider + account management (admin session + CSRF; OAuth callback
   //     is GET and is protected by one-time session-bound state instead)
-  const credentialsStore = new CredentialsStore(options.db, options.dataDir);
-  const accountService = new ProviderAccountService(options.db, makeProviderQueries(options.db), credentialsStore);
   app.use(providersRouter({ db: options.db, queries, csrf, store: credentialsStore, accounts: accountService, appBaseUrl: options.appBaseUrl }));
   app.use(providerAccountsRouter({ queries, csrf, store: credentialsStore, accounts: accountService, appBaseUrl: options.appBaseUrl }));
   app.set('providerAccounts', accountService);
