@@ -2,12 +2,12 @@
 
 let csrfToken = '';
 
-async function request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: unknown }> {
+async function request(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<{ status: number; data: unknown }> {
   const res = await fetch(path, {
     method,
     headers: {
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(method === 'POST' ? { 'x-csrf-token': csrfToken } : {}),
+      ...(method !== 'GET' ? { 'x-csrf-token': csrfToken } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
@@ -27,6 +27,43 @@ export async function refreshCsrfToken(): Promise<void> {
   csrfToken = (data as { csrfToken?: string })?.csrfToken ?? '';
 }
 
+export interface ProviderInfo {
+  id: string;
+  displayName: string;
+  experimental: boolean;
+  requiresAppConfig: boolean;
+  callbackUri: string | null;
+  verificationStatus: string;
+  lastVerifiedAt: string | null;
+  lastSafeErrorCode: string | null;
+}
+
+export interface AccountInfo {
+  id: string;
+  provider: string;
+  displayName: string;
+  experimental: boolean;
+  displayLabel: string;
+  accountIdentifier: string | null;
+  status: 'connected' | 'needs_reauth' | 'disconnected' | 'error';
+  quota: {
+    totalBytes: number | null;
+    usedBytes: number | null;
+    availableBytes: number | null;
+    status: 'current' | 'stale' | 'unknown';
+    lastCheckedAt: string | null;
+    lastErrorCode: string | null;
+    lastErrorAt: string | null;
+  };
+  reserveBytes: number;
+  reservedInflightBytes: number;
+  lastErrorCode: string | null;
+  lastErrorAt: string | null;
+  hasCredentials: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const api = {
   setupStatus: () => request('GET', '/api/setup/status'),
   me: () => request('GET', '/api/auth/me'),
@@ -35,4 +72,19 @@ export const api = {
   logout: () => request('POST', '/api/auth/logout'),
   changePassword: (currentPassword: string, newPassword: string) =>
     request('POST', '/api/auth/change-password', { currentPassword, newPassword, confirmNew: newPassword }),
+
+  // providers + accounts (Step 3)
+  providers: () => request('GET', '/api/providers'),
+  saveProviderConfig: (provider: string, body: { clientId: string; clientSecret: string; authority?: string }) =>
+    request('PUT', `/api/providers/${provider}/config`, body),
+  oauthStart: (provider: string) => request('POST', `/api/providers/${provider}/oauth/start`),
+  megaConnect: (email: string, password: string) =>
+    request('POST', '/api/providers/mega/credentials', { email, password }),
+  accounts: () => request('GET', '/api/provider-accounts'),
+  refreshQuota: (id: string) => request('POST', `/api/provider-accounts/${id}/refresh-quota`),
+  refreshAllQuotas: () => request('POST', '/api/provider-accounts/refresh-quotas'),
+  updateAccount: (id: string, body: { displayLabel?: string; reserveBytes?: number }) =>
+    request('PATCH', `/api/provider-accounts/${id}`, body),
+  reconnect: (id: string) => request('POST', `/api/provider-accounts/${id}/reconnect`),
+  disconnect: (id: string) => request('POST', `/api/provider-accounts/${id}/disconnect`),
 };

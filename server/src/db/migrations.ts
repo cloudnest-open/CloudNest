@@ -187,7 +187,88 @@ const M0002_CORE_METADATA_SCHEMA: Migration = {
   },
 };
 
+const M0003_PROVIDER_CONNECTIONS: Migration = {
+  version: 3,
+  name: '0003-provider-connections',
+  up: (db) => {
+    // One-time provider app credentials (encrypted). MEGA has no OAuth app config.
+    db.exec(`
+      CREATE TABLE provider_app_configs (
+        provider TEXT PRIMARY KEY CHECK(provider IN ('google_drive','dropbox','pcloud','onedrive')),
+        config_ciphertext BLOB NOT NULL,
+        config_nonce BLOB NOT NULL,
+        config_auth_tag BLOB NOT NULL,
+        config_key_version INTEGER NOT NULL CHECK(config_key_version > 0),
+        verification_status TEXT NOT NULL CHECK(verification_status IN ('saved','verified','needs_correction')) DEFAULT 'saved',
+        last_verified_at TEXT,
+        last_safe_error_code TEXT,
+        last_error_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+
+    // Step 2 kept status CHECK at ('connected','disconnected','error','reauth_required');
+    // the canonical account states are connected/needs_reauth/disconnected/error.
+    // Rebuild provider_accounts with the canonical CHECK + new quota/error columns.
+    db.exec(`
+      CREATE TABLE provider_accounts_new (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL CHECK(provider IN ('google_drive','dropbox','pcloud','mega','onedrive')),
+        display_label TEXT NOT NULL,
+        account_identifier TEXT,
+        status TEXT NOT NULL CHECK(status IN ('connected','needs_reauth','disconnected','error')),
+        quota_total_bytes INTEGER CHECK(quota_total_bytes IS NULL OR quota_total_bytes >= 0),
+        used_bytes INTEGER CHECK(used_bytes IS NULL OR used_bytes >= 0),
+        quota_status TEXT NOT NULL DEFAULT 'unknown' CHECK(quota_status IN ('current','stale','unknown')),
+        reserve_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserve_bytes >= 0),
+        reserved_inflight_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserved_inflight_bytes >= 0),
+        last_quota_check_at TEXT,
+        last_quota_error_code TEXT,
+        last_quota_error_at TEXT,
+        last_error_code TEXT,
+        last_error_at TEXT,
+        credential_ciphertext BLOB,
+        credential_nonce BLOB,
+        credential_auth_tag BLOB,
+        credential_key_version INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    // map old status values; preserve all rows and columns
+    db.exec(`
+      INSERT INTO provider_accounts_new
+        (id, provider, display_label, account_identifier, status, quota_total_bytes, used_bytes,
+         reserve_bytes, reserved_inflight_bytes, last_quota_check_at,
+         credential_ciphertext, credential_nonce, credential_auth_tag, credential_key_version,
+         created_at, updated_at)
+      SELECT id, provider, display_label, account_identifier,
+        CASE status
+          WHEN 'connected' THEN 'connected'
+          WHEN 'reauth_required' THEN 'needs_reauth'
+          WHEN 'disconnected' THEN 'disconnected'
+          WHEN 'error' THEN 'error'
+        END,
+        quota_total_bytes, used_bytes, reserve_bytes, reserved_inflight_bytes, last_quota_check_at,
+        credential_ciphertext, credential_nonce, credential_auth_tag, credential_key_version,
+        created_at, updated_at
+      FROM provider_accounts;
+    `);
+    db.exec('DROP TABLE provider_accounts;');
+    db.exec('ALTER TABLE provider_accounts_new RENAME TO provider_accounts;');
+    db.exec('CREATE INDEX idx_provider_accounts_provider_status ON provider_accounts(provider, status);');
+    db.exec('CREATE UNIQUE INDEX idx_provider_accounts_identity ON provider_accounts(provider, account_identifier) WHERE account_identifier IS NOT NULL;');
+    // verify referential integrity after the rebuild
+    const violations = db.pragma('foreign_key_check', { simple: true });
+    if (violations) {
+      throw new Error('foreign_key_check failed after provider_accounts rebuild');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
+  M0003_PROVIDER_CONNECTIONS,
 ];

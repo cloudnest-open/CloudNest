@@ -264,3 +264,58 @@ body {
 .btn-logout:hover { background: var(--cn-surface-muted); color: var(--cn-text); }
 .notice-card { border-color: var(--cn-success-text); }
 .notice-card p { color: var(--cn-success-text); margin: 0; }
+
+/* Step 3: Cloud Accounts + Provider Setup */
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.btn-inline { margin-top: 0; }
+.btn-secondary {
+  padding: 7px 12px; font-size: 13px; border: 1px solid var(--cn-border);
+  background: var(--cn-surface); color: var(--cn-text); border-radius: 8px; cursor: pointer;
+}
+.btn-secondary:hover { background: var(--cn-surface-muted); }
+.btn-secondary:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-danger {
+  padding: 7px 12px; font-size: 13px; border: 1px solid #F04438; background: var(--cn-surface);
+  color: #B42318; border-radius: 8px; cursor: pointer;
+}
+.btn-danger:hover { background: #FEF3F2; }
+.btn-danger:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--cn-border); }
+.tab { padding: 8px 14px; border: none; background: transparent; font-size: 14px; color: var(--cn-text-muted); cursor: pointer; border-bottom: 2px solid transparent; }
+.tab.active { color: var(--cn-primary); border-bottom-color: var(--cn-primary); font-weight: 600; }
+
+.provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.provider-card { border: 1px solid var(--cn-border); border-radius: 10px; padding: 14px; }
+.provider-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.setup-state { font-size: 13px; margin: 0 0 10px; }
+.setup-ok { color: var(--cn-success-text); }
+.setup-warn { color: #B54708; }
+.setup-bad { color: var(--cn-danger-text); }
+.setup-muted { color: var(--cn-text-muted); }
+
+.tag { font-size: 11px; padding: 2px 7px; border-radius: 999px; margin-left: 6px; }
+.tag-warn { background: #FFFAEB; color: #B54708; border: 1px solid #FEDF89; }
+
+.accounts-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.accounts-table th, .accounts-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--cn-border); vertical-align: top; }
+.accounts-table th { color: var(--cn-text-muted); font-weight: 600; font-size: 12px; }
+.accounts-table .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ellipsis { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.state { font-size: 12px; padding: 2px 8px; border-radius: 999px; }
+.state-ok { background: #ECFDF3; color: var(--cn-success-text); }
+.state-warn { background: #FFFAEB; color: #B54708; }
+.state-bad { background: #FEF3F2; color: var(--cn-danger-text); }
+.state-muted { background: var(--cn-surface-muted); color: var(--cn-text-muted); }
+
+.muted.small, .small { font-size: 12px; }
+.setup-list { display: flex; flex-direction: column; gap: 14px; }
+.setup-row { border: 1px solid var(--cn-border); border-radius: 10px; padding: 14px; }
+.setup-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.copy-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.callback-uri { background: var(--cn-surface-muted); padding: 6px 8px; border-radius: 6px; font-size: 12px; overflow-x: auto; }
+.form-ok { color: var(--cn-success-text); font-size: 13px; }
+@media (max-width: 767px) {
+  .accounts-table { display: block; overflow-x: auto; }
+}

@@ -19,7 +19,7 @@ for (const migration of applied) {
   console.log(`[cloudnest] migration applied: ${migration.version} ${migration.name}`);
 }
 
-const app = createApp({ appVersion: config.appVersion, db: opened.db, sessionSecret });
+const app = createApp({ appVersion: config.appVersion, db: opened.db, sessionSecret, dataDir: config.dataDir, appBaseUrl: config.appBaseUrl });
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`[cloudnest] listening on http://127.0.0.1:${config.port}`);
   console.log(`[cloudnest] data directory: ${config.dataDir}`);

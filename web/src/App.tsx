@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, refreshCsrfToken } from './api.js';
 import { FirstRunPage, LoginPage, ChangePasswordPanel } from './pages/AuthPages.js';
+import { CloudAccountsPage } from './pages/CloudAccountsPage.js';
+import { ProviderSetupCard } from './components/ProviderSetupCard.js';
 
 const NAV_ITEMS = [
   'Dashboard',
@@ -26,6 +28,7 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [settingsSection, setSettingsSection] = useState<'security' | 'providers'>('security');
 
   useEffect(() => {
     (async () => {
@@ -46,6 +49,28 @@ export default function App() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (authState !== 'ready') return;
+    const params = new URLSearchParams(window.location.search);
+    const connectResult = params.get('connect');
+    if (connectResult) {
+      const messages: Record<string, string> = {
+        connected: 'Account connected successfully.',
+        refresh_token_missing: 'Connected, but the provider did not return a durable refresh token. Reconnect and grant offline access to keep this account usable unattended.',
+        oauth_state_invalid: 'The authorization request could not be validated. Start the connection again.',
+        oauth_denied: 'Authorization was declined at the provider. No account was created.',
+        token_exchange_failed: 'The provider rejected the authorization code. Start the connection again.',
+        provider_not_configured: 'Provider setup is missing. Configure it in Settings → Provider Setup.',
+        provider_unavailable: 'The provider is temporarily unavailable. Try again later.',
+        provider_rate_limited: 'The provider rate-limited the request. Try again shortly.',
+        needs_reauth: 'The provider requires you to sign in again.',
+      };
+      setNotice(messages[connectResult] ?? 'The connection could not be completed.');
+      setActive('Cloud Accounts');
+      window.history.replaceState({}, '', '/');
+    }
+  }, [authState]);
 
   useEffect(() => {
     if (authState !== 'ready') return;
@@ -135,12 +160,26 @@ export default function App() {
           {active === 'Settings' ? (
             <>
               <h1 className="page-title">Settings</h1>
-              <ChangePasswordPanel onDone={(message) => setNotice(message)} />
+              <div className="tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={settingsSection === 'security'} className={`tab${settingsSection === 'security' ? ' active' : ''}`} onClick={() => setSettingsSection('security')}>
+                  Security
+                </button>
+                <button type="button" role="tab" aria-selected={settingsSection === 'providers'} className={`tab${settingsSection === 'providers' ? ' active' : ''}`} onClick={() => setSettingsSection('providers')}>
+                  Provider Setup
+                </button>
+              </div>
+              {settingsSection === 'security' ? (
+                <ChangePasswordPanel onDone={(message) => setNotice(message)} />
+              ) : (
+                <ProviderSetupCard onChanged={() => undefined} />
+              )}
               <section className="card">
                 <h2>Other settings</h2>
                 <p className="muted">Not implemented yet. These controls will arrive in a later step.</p>
               </section>
             </>
+          ) : active === 'Cloud Accounts' ? (
+            <CloudAccountsPage onGoToSettings={() => { setActive('Settings'); setSettingsSection('providers'); }} />
           ) : active !== 'Dashboard' ? (
             <section className="card placeholder-card">
               <h1>{active}</h1>

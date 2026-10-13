@@ -17,6 +17,28 @@ export interface AppConfig {
   dataDir: string;
   dbPath: string;
   appVersion: string;
+  /** Canonical origin for OAuth callbacks. Never derived from a Host header. */
+  appBaseUrl: string;
+}
+
+function parseAppBaseUrl(raw: string | undefined): string {
+  const value = (raw === undefined || raw.trim() === '') ? 'http://127.0.0.1:8787' : raw.trim();
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`Invalid APP_BASE_URL: ${JSON.stringify(raw)}. Use an origin like http://127.0.0.1:8787.`);
+  }
+  if (url.username || url.password || url.search || url.hash || (url.pathname !== '/' && url.pathname !== '')) {
+    throw new Error('APP_BASE_URL must be an origin only (scheme + host + optional port; no path, query, credentials or fragment).');
+  }
+  const isLoopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]';
+  if (url.protocol === 'http:') {
+    if (!isLoopback) throw new Error('APP_BASE_URL: plain HTTP is only allowed for loopback origins; use HTTPS otherwise.');
+  } else if (url.protocol !== 'https:') {
+    throw new Error('APP_BASE_URL: scheme must be http (loopback) or https.');
+  }
+  return url.origin;
 }
 
 function parsePort(raw: string | undefined): number {
@@ -57,12 +79,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const nodeEnv = parseNodeEnv(env.NODE_ENV);
   const dataDir = resolveDataDir(env.DATA_DIR);
   const dbPath = path.join(dataDir, 'cloudnest.db');
+  const appBaseUrl = parseAppBaseUrl(env.APP_BASE_URL);
   return {
     port,
     nodeEnv,
     dataDir,
     dbPath,
     appVersion: '0.1.0',
+    appBaseUrl,
   };
 }
 

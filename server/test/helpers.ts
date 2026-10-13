@@ -20,7 +20,7 @@ export async function startTestApp(): Promise<TestApp> {
   const { db, close } = openDatabase(dbPath);
   runMigrations(db, allMigrations);
   const secret = crypto.randomBytes(32).toString('base64url');
-  const app: express.Express = createApp({ appVersion: 'test', db, sessionSecret: secret, webDistDir: dataDir });
+  const app: express.Express = createApp({ appVersion: 'test', db, sessionSecret: secret, dataDir, appBaseUrl: 'http://127.0.0.1:8787', webDistDir: dataDir });
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const port = (server.address() as { port: number }).port;
@@ -102,9 +102,22 @@ export class Client {
 
   /** Unsafe request with a fresh CSRF token fetched first. */
   async post(path: string, body?: unknown): Promise<ApiResponse> {
+    return this.send('POST', path, body);
+  }
+
+  /** Any unsafe verb with a fresh CSRF token fetched first. */
+  async send(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<ApiResponse> {
     const tokenRes = await this.raw('GET', '/api/auth/csrf-token');
     const token = (tokenRes.body as { csrfToken?: string })?.csrfToken ?? '';
-    return this.raw('POST', path, body, token);
+    return this.raw(method, path, body, token);
+  }
+
+  async put(path: string, body?: unknown): Promise<ApiResponse> {
+    return this.send('PUT', path, body);
+  }
+
+  async patch(path: string, body?: unknown): Promise<ApiResponse> {
+    return this.send('PATCH', path, body);
   }
 
   /** Unsafe request with an explicit (possibly wrong) token. */

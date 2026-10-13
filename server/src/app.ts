@@ -12,6 +12,11 @@ import { requireAdmin } from './middleware/require-admin.js';
 import { SqliteSessionStore } from './db/session-store.js';
 import { makeCsrf } from './auth/csrf.js';
 import { makeQueries } from './db/queries.js';
+import { providersRouter } from './routes/providers.js';
+import { providerAccountsRouter } from './routes/provider-accounts.js';
+import { CredentialsStore } from './providers/credentials-store.js';
+import { ProviderAccountService } from './services/provider-account-service.js';
+import { makeProviderQueries } from './db/provider-queries.js';
 
 /**
  * Express app factory (Step 2).
@@ -23,6 +28,8 @@ export function createApp(options: {
   appVersion: string;
   db: Database.Database;
   sessionSecret: string;
+  dataDir: string;
+  appBaseUrl: string;
   webDistDir?: string;
 }): Express {
   const app = express();
@@ -55,12 +62,12 @@ export function createApp(options: {
   );
 
   // 3. server-side sessions in the shared SQLite connection
-  const store = new SqliteSessionStore(options.db);
+  const sessionStore = new SqliteSessionStore(options.db);
   app.use(
     session({
       name: 'cloudnest.sid',
       secret: options.sessionSecret,
-      store,
+      store: sessionStore,
       resave: false,
       saveUninitialized: false,
       rolling: true,
@@ -79,11 +86,20 @@ export function createApp(options: {
   app.set('db', options.db);
   app.set('queries', queries);
   app.set('csrf', csrf);
-  app.set('sessionStore', store);
+  app.set('sessionStore', sessionStore);
 
   // 4. public setup/auth routes (unsafe methods are CSRF-protected inside)
   app.use(setupRouter(queries, csrf, () => options.db));
   app.use(authRouter(queries, csrf));
+
+  // 4b. provider + account management (admin session + CSRF; OAuth callback
+  //     is GET and is protected by one-time session-bound state instead)
+  const credentialsStore = new CredentialsStore(options.db, options.dataDir);
+  const accountService = new ProviderAccountService(options.db, makeProviderQueries(options.db), credentialsStore);
+  app.use(providersRouter({ db: options.db, queries, csrf, store: credentialsStore, accounts: accountService, appBaseUrl: options.appBaseUrl }));
+  app.use(providerAccountsRouter({ queries, csrf, store: credentialsStore, accounts: accountService, appBaseUrl: options.appBaseUrl }));
+  app.set('providerAccounts', accountService);
+  app.set('credentialsStore', credentialsStore);
 
   // 5. authenticated admin API (allow-list pattern: everything under /api/admin/*)
   const admin = express.Router();
