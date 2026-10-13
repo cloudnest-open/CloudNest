@@ -267,8 +267,55 @@ const M0003_PROVIDER_CONNECTIONS: Migration = {
   },
 };
 
+const M0004_PROVIDER_ACCOUNT_ROOTS: Migration = {
+  version: 4,
+  name: '0004-provider-account-roots',
+  up: (db) => {
+    // One dedicated CloudNest-managed root per provider account (created lazily
+    // on first upload by an idempotent ensure/find flow).
+    db.exec(`
+      CREATE TABLE provider_account_roots (
+        provider_account_id TEXT PRIMARY KEY REFERENCES provider_accounts(id) ON DELETE RESTRICT,
+        remote_root_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('ready','missing','needs_reauth','error')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+
+    // Upload-capability tracking so a connector that cannot stream safely is
+    // visibly unsupported instead of silently using a different path.
+    db.exec(`
+      CREATE TABLE provider_capabilities (
+        provider_account_id TEXT PRIMARY KEY REFERENCES provider_accounts(id) ON DELETE RESTRICT,
+        upload_supported INTEGER NOT NULL CHECK(upload_supported IN (0,1)),
+        download_supported INTEGER NOT NULL CHECK(download_supported IN (0,1)),
+        list_supported INTEGER NOT NULL CHECK(list_supported IN (0,1)),
+        reason_code TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  },
+};
+
+const M0005_CHUNK_PLACEMENT_OBJECT_KEY: Migration = {
+  version: 5,
+  name: '0005-chunk-placement-object-key',
+  up: (db) => {
+    // Recover a provider object by its known app-generated key after a crash
+    // before its remote object ID was committed.
+    db.exec('ALTER TABLE chunk_placements ADD COLUMN remote_object_key TEXT;');
+    db.exec('CREATE INDEX idx_chunk_placements_object_key ON chunk_placements(remote_object_key);');
+    // Integrity/verification state for a committed placement.
+    db.exec("ALTER TABLE chunk_placements ADD COLUMN provider_checksum_type TEXT;");
+    db.exec('ALTER TABLE chunk_placements ADD COLUMN confirmed_size_bytes INTEGER;');
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
   M0003_PROVIDER_CONNECTIONS,
+  M0004_PROVIDER_ACCOUNT_ROOTS,
+  M0005_CHUNK_PLACEMENT_OBJECT_KEY,
 ];

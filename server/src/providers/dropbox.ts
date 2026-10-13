@@ -32,6 +32,7 @@ export const dropboxAdapter: ProviderAdapter = {
   experimental: false,
   displayName: 'Dropbox',
   requiresAppConfig: true,
+  capabilities: { upload: true, download: true, list: true },
 
   async connectAndReadAccount(bundle, appConfig): Promise<NormalizedAccount> {
     const fresh = await ensureFresh(bundle, appConfig);

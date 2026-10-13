@@ -46,6 +46,7 @@ export const onedriveAdapter: ProviderAdapter = {
   experimental: false,
   displayName: 'OneDrive',
   requiresAppConfig: true,
+  capabilities: { upload: true, download: true, list: true },
 
   async connectAndReadAccount(bundle, appConfig): Promise<NormalizedAccount> {
     const fresh = await ensureFresh(bundle, appConfig);

@@ -36,6 +36,11 @@ export interface DecryptedProviderAppConfig {
 
 export type ProviderSafeErrorCode =
   | 'provider_not_configured'
+  | 'provider_no_space'
+  | 'provider_object_missing'
+  | 'provider_checksum_mismatch'
+  | 'upload_aborted'
+  | 'quota_unknown'
   | 'oauth_state_invalid'
   | 'oauth_denied'
   | 'token_exchange_failed'
@@ -59,17 +64,66 @@ export class ProviderError extends Error {
   }
 }
 
+export interface ProviderCapabilities {
+  upload: boolean;
+  download: boolean;
+  list: boolean;
+  /** Reason upload is unsupported, e.g. 'streaming_unsupported'. */
+  reasonCode?: string;
+}
+
+export interface RemoteObjectRef {
+  remoteObjectId: string;
+  objectKey: string;
+  sizeBytes: number;
+  providerChecksum?: { type: string; value: string };
+}
+
+export interface EnsureAppRootResult {
+  remoteRootId: string;
+  created: boolean;
+}
+
+export interface UploadObjectStreamParams {
+  rootId: string;
+  objectKey: string;
+  name: string;
+  readable: NodeJS.ReadableStream;
+  sizeBytes: number;
+  signal?: AbortSignal;
+  /** Absolute byte offset the provider has already acknowledged (resume). */
+  acknowledgedBytes?: number;
+}
+
 export interface ProviderAdapter {
   readonly id: ProviderId;
   readonly experimental: boolean;
   readonly displayName: string;
   readonly requiresAppConfig: boolean;
+  /** Advertised capability gate; upload capability must be truthful. */
+  readonly capabilities: ProviderCapabilities;
   /** Connect validates identity; returns quota in the same call when the provider exposes it. */
   connectAndReadAccount(credentialBundle: ProviderCredentialBundle, appConfig?: DecryptedProviderAppConfig): Promise<NormalizedAccount>;
   getQuota(credentialBundle: ProviderCredentialBundle, appConfig?: DecryptedProviderAppConfig): Promise<NormalizedQuota>;
   /** Refresh expiring OAuth tokens, validate non-expiring tokens, or report reauth needed. */
   ensureValidCredentials(credentialBundle: ProviderCredentialBundle, appConfig?: DecryptedProviderAppConfig): Promise<ProviderCredentialBundle>;
   revokeOrClose?(credentialBundle: ProviderCredentialBundle): Promise<{ revoked: boolean; safeErrorCode?: ProviderSafeErrorCode }>;
+
+  // ---- file-object primitives (M4+); optional so a connector can honestly
+  //      declare that a capability is unavailable instead of faking it. ----
+
+  /** Find or create the dedicated CloudNest-managed root (idempotent). */
+  ensureAppRoot?(credentialBundle: ProviderCredentialBundle, appConfig?: DecryptedProviderAppConfig): Promise<EnsureAppRootResult>;
+  /** Stream one logical chunk object to the provider. No full-buffer collection. */
+  uploadObjectStream?(credentialBundle: ProviderCredentialBundle, params: UploadObjectStreamParams, appConfig?: DecryptedProviderAppConfig): Promise<RemoteObjectRef>;
+  /** Recover an object by its known app-generated key after an ambiguous response. */
+  findAppObjectByKey?(credentialBundle: ProviderCredentialBundle, rootId: string, objectKey: string, appConfig?: DecryptedProviderAppConfig): Promise<RemoteObjectRef | null>;
+  /** List only objects CloudNest manages (never unrelated user files). */
+  listAppObjects?(credentialBundle: ProviderCredentialBundle, rootId: string, appConfig?: DecryptedProviderAppConfig): Promise<RemoteObjectRef[]>;
+  /** Temporary-attempt cleanup only; logical-file deletion is a later step. */
+  deleteAppObject?(credentialBundle: ProviderCredentialBundle, rootId: string, remoteObjectId: string, appConfig?: DecryptedProviderAppConfig): Promise<{ deleted: boolean; safeErrorCode?: ProviderSafeErrorCode }>;
+  /** Stream a remote object's bytes for later download/reassembly steps. */
+  downloadObjectStream?(credentialBundle: ProviderCredentialBundle, remoteObjectId: string, appConfig?: DecryptedProviderAppConfig, range?: { start: number; end: number }): Promise<{ stream: NodeJS.ReadableStream; sizeBytes: number | null; contentType: string | null }>;
 }
 
 /** Minimal fetch helper: timeouts, size limits, no logging of bodies. */

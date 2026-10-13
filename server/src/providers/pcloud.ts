@@ -17,6 +17,7 @@ export const pcloudAdapter: ProviderAdapter = {
   experimental: false,
   displayName: 'pCloud',
   requiresAppConfig: true,
+  capabilities: { upload: true, download: true, list: true },
 
   async connectAndReadAccount(bundle): Promise<NormalizedAccount> {
     if (!isPcloudBundle(bundle)) throw new ProviderError('identity_validation_failed', 400);

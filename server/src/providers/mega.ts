@@ -74,6 +74,7 @@ export const megaAdapter: ProviderAdapter = {
   experimental: true,
   displayName: 'MEGA',
   requiresAppConfig: false,
+  capabilities: { upload: false, download: false, list: false, reasonCode: 'streaming_unsupported_unverified' },
 
   async connectAndReadAccount(bundle): Promise<NormalizedAccount> {
     if (!isMegaBundle(bundle)) throw new ProviderError('identity_validation_failed', 400);
