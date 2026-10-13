@@ -312,10 +312,68 @@ const M0005_CHUNK_PLACEMENT_OBJECT_KEY: Migration = {
   },
 };
 
+const M0006_UPLOAD_ENGINE: Migration = {
+  version: 6,
+  name: '0006-upload-engine',
+  up: (db) => {
+    // Persisted plan idempotency: a lost HTTP response must not create a
+    // second file/job or reserve capacity twice.
+    db.exec('ALTER TABLE transfer_jobs ADD COLUMN idempotency_key TEXT;');
+    db.exec('ALTER TABLE transfer_jobs ADD COLUMN request_fingerprint TEXT;');
+    db.exec('CREATE UNIQUE INDEX idx_transfer_jobs_idempotency ON transfer_jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;');
+
+    // One reservation row per (job, chunk) — durable BEFORE any bytes are sent.
+    db.exec(`
+      CREATE TABLE upload_chunk_allocations (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES transfer_jobs(id) ON DELETE RESTRICT,
+        chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
+        provider_account_id TEXT NOT NULL REFERENCES provider_accounts(id) ON DELETE RESTRICT,
+        size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+        offset_bytes INTEGER NOT NULL CHECK(offset_bytes >= 0),
+        state TEXT NOT NULL CHECK(state IN ('reserved','uploading','uploaded_pending_quota','released','needs_replan')),
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(job_id, chunk_index)
+      );
+      CREATE INDEX idx_allocations_job_state ON upload_chunk_allocations(job_id, state);
+      CREATE INDEX idx_allocations_account_state ON upload_chunk_allocations(provider_account_id, state);
+    `);
+
+    // One durable row per upload attempt, recorded even before file_chunks can
+    // be safely committed. Holds opaque provider resume state (write-only).
+    db.exec(`
+      CREATE TABLE upload_attempts (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES transfer_jobs(id) ON DELETE RESTRICT,
+        chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
+        provider_account_id TEXT NOT NULL REFERENCES provider_accounts(id) ON DELETE RESTRICT,
+        object_key TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('uploading','uploaded_uncommitted','committed','cleanup_pending','cleaned','failed')),
+        bytes_received INTEGER NOT NULL DEFAULT 0 CHECK(bytes_received >= 0),
+        sha256 TEXT,
+        remote_object_id TEXT,
+        safe_error_code TEXT,
+        provider_resume_state_ciphertext BLOB,
+        provider_resume_state_nonce BLOB,
+        provider_resume_state_auth_tag BLOB,
+        provider_resume_state_key_version INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(object_key)
+      );
+      CREATE INDEX idx_attempts_job_state ON upload_attempts(job_id, state);
+      CREATE INDEX idx_attempts_object_key ON upload_attempts(object_key);
+    `);
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
   M0003_PROVIDER_CONNECTIONS,
   M0004_PROVIDER_ACCOUNT_ROOTS,
   M0005_CHUNK_PLACEMENT_OBJECT_KEY,
+  M0006_UPLOAD_ENGINE,
 ];
