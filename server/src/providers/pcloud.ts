@@ -1,4 +1,12 @@
 import { providerFetch, ProviderError, type ProviderAdapter, type ProviderCredentialBundle, type NormalizedAccount, type NormalizedQuota } from './types.js';
+import {
+  ensureAppRootImpl,
+  uploadObjectStreamImpl,
+  findAppObjectByKeyImpl,
+  listAppObjectsImpl,
+  deleteAppObjectImpl,
+  downloadObjectStreamImpl,
+} from './pcloud-files.js';
 
 const ALLOWED_HOSTS = new Set(['api.pcloud.com', 'eapi.pcloud.com']);
 
@@ -61,6 +69,26 @@ export const pcloudAdapter: ProviderAdapter = {
     if (!isPcloudBundle(bundle)) throw new ProviderError('needs_reauth', 401);
     // pCloud tokens are non-expiring; validate by a cheap userinfo call in getQuota paths.
     return bundle;
+  },
+
+  // ---- file-object primitives (Step 4 / M7) ----
+  async ensureAppRoot(bundle, appConfig) {
+    return ensureAppRootImpl(bundle, appConfig);
+  },
+  async uploadObjectStream(bundle, params, appConfig) {
+    return uploadObjectStreamImpl(bundle, params, appConfig);
+  },
+  async findAppObjectByKey(bundle, rootId, objectKey, appConfig) {
+    return findAppObjectByKeyImpl(bundle, rootId, objectKey, appConfig);
+  },
+  async listAppObjects(bundle, rootId, appConfig) {
+    return listAppObjectsImpl(bundle, rootId, appConfig);
+  },
+  async deleteAppObject(bundle, rootId, remoteObjectId, appConfig) {
+    return deleteAppObjectImpl(bundle, rootId, remoteObjectId, appConfig);
+  },
+  async downloadObjectStream(bundle, remoteObjectId, appConfig, range) {
+    return downloadObjectStreamImpl(bundle, remoteObjectId, appConfig, range);
   },
 
   async revokeOrClose(bundle) {
