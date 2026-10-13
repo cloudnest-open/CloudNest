@@ -2,14 +2,23 @@
 
 let csrfToken = '';
 
-async function request(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<{ status: number; data: unknown }> {
+async function request(
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+  path: string,
+  body?: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<{ status: number; data: unknown }> {
+  // A Blob body is sent raw (chunk upload); anything else is JSON.
+  const isBlob = body instanceof Blob;
   const res = await fetch(path, {
     method,
     headers: {
-      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+      ...(body !== undefined && !isBlob ? { 'content-type': 'application/json' } : {}),
+      ...(isBlob ? { 'content-type': 'application/octet-stream' } : {}),
       ...(method !== 'GET' ? { 'x-csrf-token': csrfToken } : {}),
+      ...(extraHeaders ?? {}),
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : isBlob ? body : JSON.stringify(body),
     credentials: 'same-origin',
   });
   let data: unknown = null;
@@ -87,4 +96,28 @@ export const api = {
     request('PATCH', `/api/provider-accounts/${id}`, body),
   reconnect: (id: string) => request('POST', `/api/provider-accounts/${id}/reconnect`),
   disconnect: (id: string) => request('POST', `/api/provider-accounts/${id}/disconnect`),
+
+  // ---- uploads (Step 4 / M9) ----
+  dashboardSummary: () => request('GET', '/api/dashboard/summary'),
+  listFiles: (limit = 50, offset = 0) => request('GET', `/api/files?limit=${limit}&offset=${offset}`),
+  planUpload: (body: { originalName: string; sizeBytes: number; chunkSizeMiB: number; mimeType: string | null }, idempotencyKey: string) =>
+    request('POST', '/api/uploads/plan', body, { 'idempotency-key': idempotencyKey }),
+  listUploads: () => request('GET', '/api/uploads'),
+  getUploadJob: (jobId: string) => request('GET', `/api/uploads/${jobId}`),
+  resumeManifest: (jobId: string, limit = 200) =>
+    request('GET', `/api/uploads/${jobId}/resume-manifest?limit=${limit}`),
+  pauseUpload: (jobId: string) => request('POST', `/api/uploads/${jobId}/pause`),
+  resumeUpload: (jobId: string) => request('POST', `/api/uploads/${jobId}/resume`),
+  cancelUpload: (jobId: string) => request('POST', `/api/uploads/${jobId}/cancel`),
+  retryUpload: (jobId: string) => request('POST', `/api/uploads/${jobId}/retry`),
+
+  /**
+   * One raw logical chunk as the request body — never multipart, never JSON.
+   * The server streams and hashes these exact bytes.
+   */
+  uploadChunkRaw: (jobId: string, chunkIndex: number, body: Blob): Promise<{ status: number; data: unknown }> =>
+    request('PUT', `/api/uploads/${jobId}/chunks/${chunkIndex}`, body),
+
+  /** Internal: expose the CSRF token flow for raw-body uploads. */
+  refreshCsrf: refreshCsrfToken,
 };
