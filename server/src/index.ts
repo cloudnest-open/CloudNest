@@ -1,22 +1,25 @@
 import 'dotenv/config';
 import { createApp } from './app.js';
 import { loadConfig } from './config/env.js';
-import { openDatabase, runMigrations, step1Migrations } from './db/index.js';
+import { openDatabase, runMigrations } from './db/index.js';
+import { allMigrations } from './db/migrations.js';
+import { loadOrCreateSessionSecret } from './config/secret.js';
 
 /**
  * CloudNest server entry point (Step 1).
  * The only file that binds a port. Binds to loopback only.
  */
 const config = loadConfig();
+const sessionSecret = loadOrCreateSessionSecret(config.dataDir);
 
 // Open the database and run transactional migrations BEFORE accepting traffic.
 const opened = openDatabase(config.dbPath);
-const applied = runMigrations(opened.db, step1Migrations);
+const applied = runMigrations(opened.db, allMigrations);
 for (const migration of applied) {
   console.log(`[cloudnest] migration applied: ${migration.version} ${migration.name}`);
 }
 
-const app = createApp({ appVersion: config.appVersion });
+const app = createApp({ appVersion: config.appVersion, db: opened.db, sessionSecret });
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`[cloudnest] listening on http://127.0.0.1:${config.port}`);
   console.log(`[cloudnest] data directory: ${config.dataDir}`);

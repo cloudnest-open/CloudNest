@@ -190,3 +190,77 @@ body {
   .sidebar-footer { border-top: none; }
   .content { padding: 16px; }
 }
+
+/* Auth screens (Step 2) */
+.auth-card {
+  max-width: 380px;
+  margin: 8vh auto;
+  background: var(--cn-surface);
+  border: 1px solid var(--cn-border);
+  border-radius: 12px;
+  padding: 28px;
+}
+
+.auth-card h1 { font-size: 20px; margin: 4px 0 12px; }
+.brand-word { color: var(--cn-primary); font-weight: 700; letter-spacing: 2px; font-size: 13px; margin: 0; }
+
+.auth-card form { display: flex; flex-direction: column; gap: 6px; }
+.auth-card label { font-size: 13px; color: var(--cn-text-muted); margin-top: 8px; }
+.auth-card input {
+  padding: 9px 12px;
+  border: 1px solid var(--cn-border);
+  border-radius: 8px;
+  font-size: 14px;
+  background: var(--cn-surface);
+  color: var(--cn-text);
+}
+.auth-card input:focus-visible { outline: 2px solid var(--cn-focus); outline-offset: 1px; }
+.auth-card input[readonly] { background: var(--cn-surface-muted); }
+
+.btn-primary {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: var(--cn-primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-primary:hover { background: var(--cn-primary-hover); }
+.btn-primary:disabled { opacity: 0.6; cursor: wait; }
+
+.form-error { color: var(--cn-danger-text); font-size: 13px; margin: 8px 0 0; }
+.auth-server-error {
+  max-width: 380px;
+  margin: 12px auto 0;
+  padding: 10px 14px;
+  border: 1px solid var(--cn-danger-text);
+  border-radius: 8px;
+  color: var(--cn-danger-text);
+  background: var(--cn-surface);
+  font-size: 13px;
+}
+
+.password-form { display: flex; flex-direction: column; gap: 6px; max-width: 360px; }
+.password-form label { font-size: 13px; color: var(--cn-text-muted); margin-top: 8px; }
+.password-form input {
+  padding: 9px 12px;
+  border: 1px solid var(--cn-border);
+  border-radius: 8px;
+  font-size: 14px;
+}
+.btn-logout {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-size: 11px;
+  border: 1px solid var(--cn-border);
+  background: var(--cn-surface);
+  color: var(--cn-text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-logout:hover { background: var(--cn-surface-muted); color: var(--cn-text); }
+.notice-card { border-color: var(--cn-success-text); }
+.notice-card p { color: var(--cn-success-text); margin: 0; }

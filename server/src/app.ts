@@ -1,57 +1,134 @@
 import express from 'express';
-import type { Express } from 'express';
+import type { Express, RequestHandler } from 'express';
+import session from 'express-session';
+import helmet from 'helmet';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import type Database from 'better-sqlite3';
 import { healthRouter } from './routes/health.js';
+import { setupRouter } from './routes/setup.js';
+import { authRouter } from './routes/auth.js';
+import { requireAdmin } from './middleware/require-admin.js';
+import { SqliteSessionStore } from './db/session-store.js';
+import { makeCsrf } from './auth/csrf.js';
+import { makeQueries } from './db/queries.js';
 
 /**
- * Express app factory (Step 1).
- * - API routes and the JSON API 404 handler run BEFORE the frontend fallback.
- * - The frontend fallback only answers eligible browser GET requests and only
- *   when a production build exists (web/dist).
- * - The central error handler never exposes stack traces, paths or env values.
+ * Express app factory (Step 2).
+ * Route order: security headers -> bounded JSON parser -> session middleware
+ * -> CSRF middleware -> public setup/auth routes -> authenticated admin API
+ * -> JSON /api/* 404 -> static UI fallback -> central error handler.
  */
 export function createApp(options: {
   appVersion: string;
+  db: Database.Database;
+  sessionSecret: string;
   webDistDir?: string;
 }): Express {
   const app = express();
   app.disable('x-powered-by');
 
-  // 1. API routes
-  app.use(healthRouter(options.appVersion));
+  // 1. security headers (same-origin app; CSP compatible with bundled React)
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:'],
+          connectSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          frameAncestors: ["'self'"],
+        },
+      },
+    }),
+  );
 
-  // 2. JSON 404 for unknown /api/* paths (must not return UI HTML)
+  // 2. bounded JSON parser (8 KiB cap on auth/setup bodies; 400 on malformed)
+  app.use(
+    express.json({
+      limit: '8kb',
+      type: 'application/json',
+    }),
+  );
+
+  // 3. server-side sessions in the shared SQLite connection
+  const store = new SqliteSessionStore(options.db);
+  app.use(
+    session({
+      name: 'cloudnest.sid',
+      secret: options.sessionSecret,
+      store,
+      resave: false,
+      saveUninitialized: false,
+      rolling: true,
+      cookie: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: false, // loopback-only local mode in Step 2; HTTPS/tunnel must enable Secure
+        maxAge: 12 * 60 * 60 * 1000, // 12-hour idle timeout, rolling
+      },
+    }),
+  );
+
+  const csrf = makeCsrf();
+  const queries = makeQueries(options.db);
+  app.set('db', options.db);
+  app.set('queries', queries);
+  app.set('csrf', csrf);
+  app.set('sessionStore', store);
+
+  // 4. public setup/auth routes (unsafe methods are CSRF-protected inside)
+  app.use(setupRouter(queries, csrf, () => options.db));
+  app.use(authRouter(queries, csrf));
+
+  // 5. authenticated admin API (allow-list pattern: everything under /api/admin/*)
+  const admin = express.Router();
+  admin.use(requireAdmin(queries));
+  admin.get('/api/admin/ping', (_req, res) => {
+    res.json({ ok: true });
+  });
+  app.use(admin);
+
+  // 6. JSON 404 for unknown /api/* paths (never the UI HTML)
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Not found' });
   });
 
-  // 3. Production static UI + eligible frontend fallback
+  // 7. production static UI + eligible frontend fallback
   const webDistDir = options.webDistDir ?? path.resolve('web/dist');
   const hasBuild = existsSync(path.join(webDistDir, 'index.html'));
   if (hasBuild) {
     app.use(express.static(webDistDir, { index: false }));
     app.use((req, res, next) => {
-      // Only browser navigation requests get the SPA fallback.
       if (req.method !== 'GET' || !req.accepts('html')) return next();
       res.sendFile(path.join(webDistDir, 'index.html'));
     });
   }
 
-  // 4. Central error handler — never leak internals.
-  app.use(
-    (
-      err: unknown,
-      _req: express.Request,
-      res: express.Response,
-      _next: express.NextFunction,
-    ) => {
-      // Log a concise message server-side; details stay in the server log only.
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      console.error(`[cloudnest] request error: ${message}`);
-      res.status(500).json({ error: 'Internal server error' });
-    },
-  );
+  // 8. central error handler — CSRF failures return 403, malformed JSON 400;
+  //    never leak stack traces, paths or env values.
+  const errorHandler: express.ErrorRequestHandler = (err, _req, res, _next) => {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    if (message === 'invalid csrf token' || message.includes('csrf')) {
+      res.status(403).json({ error: 'Invalid or missing CSRF token.' });
+      return;
+    }
+    if (err instanceof SyntaxError && 'body' in (err as object)) {
+      res.status(400).json({ error: 'Malformed JSON body.' });
+      return;
+    }
+    if ((err as { type?: string })?.type === 'entity.too.large') {
+      res.status(413).json({ error: 'Request body too large.' });
+      return;
+    }
+    console.error(`[cloudnest] request error: ${message}`);
+    res.status(500).json({ error: 'Internal server error' });
+  };
+  app.use(errorHandler);
 
   return app;
 }

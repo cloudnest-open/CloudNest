@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { api, refreshCsrfToken } from './api.js';
+import { FirstRunPage, LoginPage, ChangePasswordPanel } from './pages/AuthPages.js';
 
 const NAV_ITEMS = [
   'Dashboard',
@@ -11,6 +13,7 @@ const NAV_ITEMS = [
 ] as const;
 
 type NavItem = (typeof NAV_ITEMS)[number];
+type AuthState = 'loading' | 'setup' | 'login' | 'ready';
 
 interface Health {
   status: string;
@@ -18,33 +21,69 @@ interface Health {
 }
 
 export default function App() {
+  const [authState, setAuthState] = useState<AuthState>('loading');
   const [active, setActive] = useState<NavItem>('Dashboard');
   const [health, setHealth] = useState<Health | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
+    (async () => {
+      try {
+        await refreshCsrfToken();
+        const setup = await api.setupStatus();
+        const setupRequired = (setup.data as { setupRequired?: boolean })?.setupRequired === true;
+        if (setupRequired) {
+          setAuthState('setup');
+          return;
+        }
+        const me = await api.me();
+        const authenticated = (me.data as { authenticated?: boolean })?.authenticated === true;
+        setAuthState(authenticated ? 'ready' : 'login');
+      } catch {
+        setServerError('Cannot reach the local server. Is CloudNest running?');
+        setAuthState('login');
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (authState !== 'ready') return;
     let cancelled = false;
     fetch('/api/health')
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<Health>;
-      })
-      .then((data) => {
-        if (!cancelled) {
-          setHealth(data);
-          setServerError(null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setHealth(null);
-          setServerError('Cannot reach the local server. Is CloudNest running?');
-        }
-      });
+      .then((res) => res.json() as Promise<Health>)
+      .then((data) => !cancelled && setHealth(data))
+      .catch(() => !cancelled && setHealth(null));
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authState]);
+
+  async function logout() {
+    await api.logout();
+    await refreshCsrfToken();
+    setNotice(null);
+    setAuthState('login');
+  }
+
+  if (authState === 'setup') {
+    return <FirstRunPage onDone={() => setAuthState('ready')} />;
+  }
+  if (authState === 'login') {
+    return (
+      <>
+        {serverError && (
+          <div className="auth-server-error" role="alert">
+            {serverError}
+          </div>
+        )}
+        <LoginPage onDone={() => setAuthState('ready')} />
+      </>
+    );
+  }
+  if (authState === 'loading') {
+    return <div className="auth-card">Loading…</div>;
+  }
 
   return (
     <div className="shell">
@@ -67,17 +106,13 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <span
-            className={
-              health ? 'status-dot status-ok' : 'status-dot status-down'
-            }
-            aria-hidden="true"
-          />
+          <span className={health ? 'status-dot status-ok' : 'status-dot status-down'} aria-hidden="true" />
           <span className="status-text">
-            {health
-              ? `Local server: connected (v${health.version})`
-              : 'Local server: not connected'}
+            {health ? `Local server: connected (v${health.version})` : 'Local server: not connected'}
           </span>
+          <button type="button" className="btn-logout" onClick={logout}>
+            Sign out
+          </button>
         </div>
       </aside>
 
@@ -92,7 +127,21 @@ export default function App() {
           />
         </header>
         <main className="content">
-          {active !== 'Dashboard' ? (
+          {notice && (
+            <div className="card notice-card" role="status">
+              <p>{notice}</p>
+            </div>
+          )}
+          {active === 'Settings' ? (
+            <>
+              <h1 className="page-title">Settings</h1>
+              <ChangePasswordPanel onDone={(message) => setNotice(message)} />
+              <section className="card">
+                <h2>Other settings</h2>
+                <p className="muted">Not implemented yet. These controls will arrive in a later step.</p>
+              </section>
+            </>
+          ) : active !== 'Dashboard' ? (
             <section className="card placeholder-card">
               <h1>{active}</h1>
               <p>Not implemented yet. This section will arrive in a later step.</p>
@@ -113,11 +162,6 @@ export default function App() {
                 <h2>Recent files</h2>
                 <p className="muted">No files yet. Files you upload in a later step will appear here.</p>
               </section>
-              {serverError && (
-                <section className="card error-card" role="alert">
-                  <p>{serverError}</p>
-                </section>
-              )}
             </>
           )}
         </main>
