@@ -1,4 +1,12 @@
 import { providerFetch, ProviderError, type ProviderAdapter, type ProviderCredentialBundle, type NormalizedAccount, type NormalizedQuota, type DecryptedProviderAppConfig } from './types.js';
+import {
+  ensureAppRootImpl,
+  uploadObjectStreamImpl,
+  findAppObjectByKeyImpl,
+  listAppObjectsImpl,
+  deleteAppObjectImpl,
+  downloadObjectStreamImpl,
+} from './onedrive-files.js';
 
 export const VALID_AUTHORITIES = new Set(['common', 'consumers', 'organizations']);
 const REQUIRED_SCOPES = ['offline_access', 'Files.ReadWrite'];
@@ -100,6 +108,26 @@ export const onedriveAdapter: ProviderAdapter = {
 
   async ensureValidCredentials(bundle, appConfig) {
     return ensureFresh(bundle, appConfig);
+  },
+
+  // ---- file-object primitives (Step 4 / M6) ----
+  async ensureAppRoot(bundle, appConfig) {
+    return ensureAppRootImpl(bundle, appConfig);
+  },
+  async uploadObjectStream(bundle, params, appConfig) {
+    return uploadObjectStreamImpl(bundle, params, appConfig);
+  },
+  async findAppObjectByKey(bundle, rootId, objectKey, appConfig) {
+    return findAppObjectByKeyImpl(bundle, rootId, objectKey, appConfig);
+  },
+  async listAppObjects(bundle, rootId, appConfig) {
+    return listAppObjectsImpl(bundle, rootId, appConfig);
+  },
+  async deleteAppObject(bundle, rootId, remoteObjectId, appConfig) {
+    return deleteAppObjectImpl(bundle, rootId, remoteObjectId, appConfig);
+  },
+  async downloadObjectStream(bundle, remoteObjectId, appConfig, range) {
+    return downloadObjectStreamImpl(bundle, remoteObjectId, appConfig, range);
   },
 };
 
