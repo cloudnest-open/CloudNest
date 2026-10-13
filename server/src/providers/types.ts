@@ -38,6 +38,7 @@ export type ProviderSafeErrorCode =
   | 'provider_not_configured'
   | 'provider_no_space'
   | 'provider_object_missing'
+  | 'provider_object_conflict'
   | 'provider_checksum_mismatch'
   | 'upload_aborted'
   | 'quota_unknown'

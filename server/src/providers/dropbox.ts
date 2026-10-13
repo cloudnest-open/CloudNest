@@ -1,4 +1,12 @@
 import { providerFetch, ProviderError, type ProviderAdapter, type ProviderCredentialBundle, type NormalizedAccount, type NormalizedQuota, type DecryptedProviderAppConfig } from './types.js';
+import {
+  ensureAppRootImpl,
+  uploadObjectStreamImpl,
+  findAppObjectByKeyImpl,
+  listAppObjectsImpl,
+  deleteAppObjectImpl,
+  downloadObjectStreamImpl,
+} from './dropbox-files.js';
 
 const REQUIRED_SCOPES = ['files.metadata.read', 'files.metadata.write', 'files.content.write', 'files.content.read'];
 
@@ -103,6 +111,26 @@ export const dropboxAdapter: ProviderAdapter = {
 
   async ensureValidCredentials(bundle, appConfig) {
     return ensureFresh(bundle, appConfig);
+  },
+
+  // ---- file-object primitives (Step 4 / M5) ----
+  async ensureAppRoot(bundle, appConfig) {
+    return ensureAppRootImpl(bundle, appConfig);
+  },
+  async uploadObjectStream(bundle, params, appConfig) {
+    return uploadObjectStreamImpl(bundle, params, appConfig);
+  },
+  async findAppObjectByKey(bundle, rootId, objectKey, appConfig) {
+    return findAppObjectByKeyImpl(bundle, rootId, objectKey, appConfig);
+  },
+  async listAppObjects(bundle, rootId, appConfig) {
+    return listAppObjectsImpl(bundle, rootId, appConfig);
+  },
+  async deleteAppObject(bundle, rootId, remoteObjectId, appConfig) {
+    return deleteAppObjectImpl(bundle, rootId, remoteObjectId, appConfig);
+  },
+  async downloadObjectStream(bundle, remoteObjectId, appConfig, range) {
+    return downloadObjectStreamImpl(bundle, remoteObjectId, appConfig, range);
   },
 };
 
