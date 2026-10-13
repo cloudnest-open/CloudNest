@@ -1,16 +1,33 @@
-# Private planning / handoff documents — never publish (per AGENTS.md & MILESTONES.md handling rules)
-AGENTS.md
-MILESTONES.md
-cloudnest-blueprint-final-v1.1.md
-cloudnest-step-1-plan-final-v1.1.md
-cloudnest-step-2-plan-final-v1.1.md
-cloudnest-step-3-plan-final-v1.3.md
-cloudnest-step-4-plan-final-v1.3.md
-cloudnest-step-5-plan-final-v1.1.md
-cloudnest-step-6-plan-final-v1.1.md
-cloudnest-frontend-design-pack/
+# Dependencies
+node_modules/
+
+# Build outputs
+web/dist/
+dist/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# SQLite databases and sidecars (never in the repository)
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+
+# Logs
+*.log
+logs/
+
+# Runtime data directories
+data/
+*.data/
 
 # OS artifacts
-.directory
 .DS_Store
 Thumbs.db
+.directory

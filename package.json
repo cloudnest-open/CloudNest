@@ -1,0 +1,37 @@
+{
+  "name": "cloudnest",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CloudNest - a self-hosted personal cloud-storage aggregator (working name, subject to owner approval).",
+  "type": "module",
+  "engines": { "node": "24.x" },
+  "scripts": {
+    "dev": "concurrently -k -n API,WEB \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "tsx watch server/src/index.ts",
+    "dev:web": "vite --config web/vite.config.ts",
+    "typecheck": "tsc --noEmit -p server/tsconfig.json && tsc --noEmit -p web/tsconfig.json",
+    "test": "tsx --test server/test/health.test.ts server/test/config.test.ts server/test/database.test.ts",
+    "build": "npm run typecheck && vite build --config web/vite.config.ts && tsc -p server/tsconfig.json",
+    "start": "node dist/server/src/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "dotenv": "^17.2.3",
+    "env-paths": "^3.0.0",
+    "express": "^5.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.4",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7"
+  }
+}
