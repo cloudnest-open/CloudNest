@@ -4,6 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CloudNest</title>
+    <script>
+      // FE-10: resolve the persisted theme BEFORE the stylesheet applies, so a
+      // dark-mode owner never sees a light flash on reload. Kept deliberately
+      // dependency-free and inline (deferred modules always paint late).
+      (function () {
+        try {
+          var stored = localStorage.getItem('cloudnest.theme');
+          var theme = stored === 'dark' || stored === 'light' ? stored : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.style.colorScheme = theme;
+        } catch (e) {
+          // storage unavailable: the default light theme applies
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

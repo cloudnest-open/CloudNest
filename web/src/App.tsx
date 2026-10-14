@@ -71,6 +71,8 @@ export default function App() {
   // Global search over CloudNest-managed files (real data; never a fake index).
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
+  // FE-12: keyboard-highlighted result index for the combobox
+  const [hitIndex, setHitIndex] = useState(-1);
   const [searchOpen, setSearchOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [fileSearch, setFileSearch] = useState<{ text: string; seq: number }>({ text: '', seq: 0 });
@@ -164,6 +166,7 @@ export default function App() {
         .then((res) => {
           if (cancelled || res.status !== 200) return;
           setHits((res.data as { files?: SearchHit[] }).files ?? []);
+          setHitIndex(-1);
           setSearchOpen(true);
         })
         .catch(() => undefined);
@@ -261,25 +264,52 @@ export default function App() {
               type="search"
               placeholder="Search files and folders..."
               aria-label="Search files and folders"
+              role="combobox"
+              aria-expanded={searchOpen && hits.length > 0}
+              aria-controls="header-search-listbox"
+              aria-autocomplete="list"
+              aria-activedescendant={hitIndex >= 0 ? `header-search-option-${hitIndex}` : undefined}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onFocus={() => { if (hits.length > 0) setSearchOpen(true); }}
-              onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); setSearchOpen(false); } }}
+              onKeyDown={(e) => {
+                // FE-12: combobox keyboard support — arrows move through the
+                // result options, Enter activates the highlighted one, Escape
+                // dismisses. (aria-activedescendant tracks the highlight.)
+                if (e.key === 'Escape') { setQuery(''); setSearchOpen(false); return; }
+                if (!searchOpen || hits.length === 0) return;
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setHitIndex((prev) => {
+                    const count = hits.length;
+                    if (count === 0) return -1;
+                    const delta = e.key === 'ArrowDown' ? 1 : -1;
+                    return ((prev < 0 ? (e.key === 'ArrowDown' ? -1 : count) : prev) + delta + count) % count;
+                  });
+                } else if (e.key === 'Enter') {
+                  if (hitIndex >= 0 && hitIndex < hits.length) {
+                    e.preventDefault();
+                    openSearchHit(hits[hitIndex]!);
+                    setHitIndex(-1);
+                  }
+                }
+              }}
             />
             {searchOpen && (
-              <div className="search-results" role="listbox" aria-label="Search results">
+              <div className="search-results" role="listbox" id="header-search-listbox" aria-label="Search results">
                 {hits.length === 0 ? (
                   <p className="muted small" style={{ padding: '8px 10px', margin: 0 }}>
                     No CloudNest-managed files match.
                   </p>
                 ) : (
-                  hits.map((hit) => (
+                  hits.map((hit, i) => (
                     <button
                       key={hit.id}
                       type="button"
-                      className="search-result"
+                      className={`search-result${i === hitIndex ? ' active' : ''}`}
                       role="option"
-                      aria-selected={false}
+                      aria-selected={i === hitIndex}
+                      id={`header-search-option-${i}`}
                       onClick={() => openSearchHit(hit)}
                     >
                       <Folder size={15} aria-hidden="true" />
@@ -315,8 +345,23 @@ export default function App() {
                   className="account-scrim"
                   aria-label="Close account menu"
                   onClick={() => setAccountOpen(false)}
+                  onKeyDown={(e) => {
+                    // FE-12: Escape closes the menu and returns focus to the chip
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setAccountOpen(false);
+                      document.querySelector<HTMLButtonElement>('.account-chip')?.focus();
+                    }
+                  }}
+                  tabIndex={-1}
                 />
-                <div className="account-dropdown" role="menu">
+                <div className="account-dropdown" role="menu" onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setAccountOpen(false);
+                    document.querySelector<HTMLButtonElement>('.account-chip')?.focus();
+                  }
+                }}>
                   <button
                     type="button"
                     role="menuitem"

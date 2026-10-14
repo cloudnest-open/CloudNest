@@ -117,25 +117,3 @@ export function runMigrations(
   }
   return applied;
 }
-
-/**
- * Step 1 has no business schema yet; this placeholder migration only
- * proves the transactional migration mechanism works end to end.
- * Step 2 replaces it with the real metadata schema from the approved plans.
- */
-export const step1Migrations = [
-  {
-    version: 1,
-    name: '0001-migration-infrastructure-check',
-    up: (db: Database.Database): void => {
-      // No business tables in Step 1. Create nothing user-visible.
-      // Keep a tiny marker table so the mechanism is verifiably exercised.
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS app_meta (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL
-        );
-      `);
-    },
-  },
-] as const;

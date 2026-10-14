@@ -40,7 +40,6 @@ test('settings start from documented defaults', () => {
     assert.equal(all['upload.chunkSizeMiB'], 64, 'the default chunk size is 64 MiB');
     assert.equal(all['upload.workerLimit'], WORKER_LIMITS.autoDefault);
     assert.equal(all['security.confirmDestructive'], true);
-    assert.equal(all['domain.tunnelEnabled'], false, 'the tunnel is off by default');
   } finally {
     close();
   }

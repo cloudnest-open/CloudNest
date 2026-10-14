@@ -37,7 +37,6 @@ interface Settings {
   'share.defaultDownloadLimit': number | null;
   'security.confirmDestructive': boolean;
   'domain.publicBaseUrl': string | null;
-  'domain.tunnelEnabled': boolean;
 }
 
 interface SystemInfo {
@@ -200,15 +199,33 @@ export function SettingsPage() {
       {notice && <div className="card notice-card" role="status"><p>{notice}</p></div>}
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
 
-      <div className="tabs" role="tablist">
+      <div className="tabs" role="tablist" aria-label="Settings sections">
         {SECTIONS.map((s) => (
           <button
             key={s.key}
+            id={`settings-tab-${s.key}`}
             type="button"
             role="tab"
             aria-selected={section === s.key}
+            aria-controls={`settings-panel-${s.key}`}
+            tabIndex={section === s.key ? 0 : -1}
             className={`tab${section === s.key ? ' active' : ''}`}
             onClick={() => setSection(s.key)}
+            onKeyDown={(e) => {
+              // FE-12: WAI-ARIA tabs keyboard interaction — Left/Right move
+              // selection and focus together, Home/End jump to the ends.
+              const idx = SECTIONS.findIndex((x) => x.key === s.key);
+              let next: number | null = null;
+              if (e.key === 'ArrowRight') next = (idx + 1) % SECTIONS.length;
+              else if (e.key === 'ArrowLeft') next = (idx - 1 + SECTIONS.length) % SECTIONS.length;
+              else if (e.key === 'Home') next = 0;
+              else if (e.key === 'End') next = SECTIONS.length - 1;
+              if (next !== null) {
+                e.preventDefault();
+                setSection(SECTIONS[next]!.key);
+                document.getElementById(`settings-tab-${SECTIONS[next]!.key}`)?.focus();
+              }
+            }}
           >
             {s.label}
           </button>
@@ -216,6 +233,7 @@ export function SettingsPage() {
       </div>
 
       {section === 'general' && (
+        <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general">
         <section className="card">
           <h2>General</h2>
           <p className="muted small">Application version <strong>{system.appVersion}</strong></p>
@@ -244,9 +262,11 @@ export function SettingsPage() {
             Language selection is not available yet. The interface is currently English only.
           </p>
         </section>
+        </div>
       )}
 
       {section === 'upload' && (
+        <div role="tabpanel" id="settings-panel-upload" aria-labelledby="settings-tab-upload">
         <section className="card">
           <h2>Upload &amp; Storage</h2>
           <div className="upload-form">
@@ -296,9 +316,11 @@ export function SettingsPage() {
             override is not available yet.
           </p>
         </section>
+        </div>
       )}
 
       {section === 'downloads' && (
+        <div role="tabpanel" id="settings-panel-downloads" aria-labelledby="settings-tab-downloads">
         <section className="card">
           <h2>Downloads</h2>
           <div className="upload-form">
@@ -319,9 +341,11 @@ export function SettingsPage() {
             in total, regardless of this setting.
           </p>
         </section>
+        </div>
       )}
 
       {section === 'sharing' && (
+        <div role="tabpanel" id="settings-panel-sharing" aria-labelledby="settings-tab-sharing">
         <section className="card">
           <h2>Sharing &amp; Deletion</h2>
           <div className="upload-form">
@@ -367,9 +391,11 @@ export function SettingsPage() {
             CloudNest-owned chunk objects for that file, and revokes its links first.
           </p>
         </section>
+        </div>
       )}
 
       {section === 'domain' && (
+        <div role="tabpanel" id="settings-panel-domain" aria-labelledby="settings-tab-domain">
         <section className="card">
           <h2>Domain &amp; Remote Access</h2>
           <p className="muted small">
@@ -495,9 +521,11 @@ export function SettingsPage() {
             </div>
           )}
         </section>
+        </div>
       )}
 
       {section === 'security' && (
+        <div role="tabpanel" id="settings-panel-security" aria-labelledby="settings-tab-security">
         <>
           <ChangePasswordPanel onDone={(message) => setNotice(message)} />
           {keyWarning && (
@@ -513,9 +541,11 @@ export function SettingsPage() {
             </p>
           </section>
         </>
+        </div>
       )}
 
       {section === 'system' && (
+        <div role="tabpanel" id="settings-panel-system" aria-labelledby="settings-tab-system">
         <>
           <section className="card">
             <h2>System</h2>
@@ -565,9 +595,11 @@ export function SettingsPage() {
             </p>
           </section>
         </>
+        </div>
       )}
 
       {section === 'diagnostics' && (
+        <div role="tabpanel" id="settings-panel-diagnostics" aria-labelledby="settings-tab-diagnostics">
         <section className="card">
           <h2>Diagnostics</h2>
           <p className="muted small">
@@ -581,6 +613,7 @@ export function SettingsPage() {
           </div>
           {diagnostics && <pre className="diagnostics-output">{diagnostics}</pre>}
         </section>
+        </div>
       )}
 
       <section className="card">

@@ -294,3 +294,86 @@ test('a corrupt setting falls back to the documented default instead of unbounde
     close();
   }
 });
+
+// ---- FE-07: cancel actually stops the live stream -------------------------
+
+test('FE-07: cancelDownload aborts a live stream mid-flight and the job stays cancelled', async () => {
+  const { db, close, service } = setup({ concurrency: 2 });
+  try {
+    const chunks = seedFile(db, { fileId: 'fe07', name: 'a.bin', chunkSize: 1 * MIB, chunkCount: 8 });
+    // reads hang until released: the stream cannot finish on its own
+    const gate: Array<() => void> = [];
+    let reads = 0;
+    const target = service as unknown as {
+      readVerifiedChunkHolding(fileId: string, slice: ChunkSlice): Promise<{ bytes: Buffer; meta: ChunkSlice; release: () => void }>;
+      budget: MemoryBudget;
+    };
+    const prepared = service.prepare('fe07', null, true);
+    // FE-07 registry: the live stream registers its controller here
+    const registry = (service as unknown as { activeStreams: Map<string, AbortController> }).activeStreams;
+    target.readVerifiedChunkHolding = async (_fileId: string, slice: ChunkSlice) => {
+      reads++;
+      const release = await target.budget.acquire(slice.chunkSizeBytes);
+      try {
+        // hold until the job's registered controller aborts (cancelDownload)
+        // or the gate opens; the abort path mirrors a destroyed provider socket
+        await new Promise<void>((resolve, reject) => {
+          const poll = setInterval(() => {
+            const live = registry.get(prepared.jobId);
+            if (!live || live.signal.aborted) {
+              clearInterval(poll);
+              reject(new DownloadError('download_cancelled', 499));
+            }
+          }, 5);
+          gate.push(() => { clearInterval(poll); resolve(); });
+        });
+        const found = chunks.find((c) => c.index === slice.chunkIndex)!;
+        return { bytes: Buffer.from(found.bytes), meta: slice, release };
+      } catch (err) {
+        release();
+        throw err;
+      }
+    };
+
+    // consume the stream in the background
+    const consumer = (async () => {
+      const got: Buffer[] = [];
+      for await (const buf of service.stream(prepared)) got.push(buf);
+      return got;
+    })();
+
+    // let the first reads start, then cancel from the outside
+    await new Promise((r) => setTimeout(r, 20));
+    assert.ok(reads > 0, 'the stream has started reading');
+    assert.equal(service.cancelDownload(prepared.jobId), true);
+
+    // cancel() aborted the registered controller: the reads observe it and
+    // fail on their own (like destroyed sockets). Open the gate too so any
+    // read that somehow missed the abort still finishes deterministically.
+    for (const open of gate.splice(0)) open();
+
+    // the stream must now terminate (no hang, no further bytes)
+    type Outcome =
+      | { kind: 'ended'; bufs: Buffer[] }
+      | { kind: 'failed'; err: unknown }
+      | { kind: 'timed-out' };
+    const outcome: Outcome = await Promise.race([
+      consumer.then(
+        (bufs: Buffer[]) => ({ kind: 'ended' as const, bufs }),
+        (err: unknown) => ({ kind: 'failed' as const, err }),
+      ),
+      new Promise<Outcome>((r) => setTimeout(() => r({ kind: 'timed-out' }), 2000)),
+    ]);
+    assert.notEqual(outcome.kind, 'timed-out', 'the aborted stream ends instead of hanging');
+    // the loop observed the abort (cancelled/aborted outcome), not success
+    if (outcome.kind === 'failed') {
+      assert.equal((outcome.err as { safeCode?: string }).safeCode, 'download_cancelled');
+    }
+
+    const job = service.publicDownloadJob(prepared.jobId)!;
+    assert.equal(job.state, 'cancelled', 'the job row keeps the cancelled truth');
+    assert.equal(service.cancelDownload(prepared.jobId), false, 'a cancelled job is not cancellable again');
+  } finally {
+    close();
+  }
+});

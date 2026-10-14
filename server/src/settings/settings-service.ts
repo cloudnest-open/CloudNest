@@ -23,7 +23,6 @@ export interface SettingsShape {
   'share.defaultDownloadLimit': number | null;
   'security.confirmDestructive': boolean;
   'domain.publicBaseUrl': string | null;
-  'domain.tunnelEnabled': boolean;
 }
 
 export const SETTINGS_DEFAULTS: SettingsShape = {
@@ -37,7 +36,6 @@ export const SETTINGS_DEFAULTS: SettingsShape = {
   'share.defaultDownloadLimit': null,
   'security.confirmDestructive': true,
   'domain.publicBaseUrl': null,
-  'domain.tunnelEnabled': false,
 };
 
 export class SettingsError extends Error {
@@ -107,8 +105,7 @@ export function validateSetting(key: string, raw: unknown): unknown {
     case 'upload.spaceAwareRouting':
     case 'upload.verifyIntegrity':
     case 'share.requirePassword':
-    case 'security.confirmDestructive':
-    case 'domain.tunnelEnabled': {
+    case 'security.confirmDestructive': {
       if (typeof raw !== 'boolean') throw new SettingsError(`value for ${key} must be a boolean`);
       return raw;
     }

@@ -89,6 +89,15 @@ export function DownloadsPage() {
     void load();
   }, [load]);
 
+  // FE-09: real server-side byte progress is only useful if it is visible.
+  // While any download job is running, poll the list; stop when none is.
+  useEffect(() => {
+    const running = downloads.some((d) => d.state === 'running');
+    if (!running) return;
+    const timer = setTimeout(() => { void load(); }, 1000);
+    return () => clearTimeout(timer);
+  }, [downloads, load]);
+
   async function startDownload(file: FileView) {
     // FE-08: fetch first so a failed download surfaces IN-APP instead of
     // replacing the whole page with a raw JSON error document.

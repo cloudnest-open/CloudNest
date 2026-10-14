@@ -74,6 +74,12 @@ function destroyStream(stream: NodeJS.ReadableStream | null): void {
 export class DownloadService {
   private readonly q;
   private readonly providerQ;
+  /**
+   * FE-07: one abort entry per live streaming job. cancelDownload() fires the
+   * controller so the stream stops emitting and the job row already written
+   * as 'cancelled' stays the truth (the loop then re-marks it consistently).
+   */
+  private readonly activeStreams = new Map<string, AbortController>();
   constructor(
     private readonly db: Database.Database,
     private readonly store: CredentialsStore,
@@ -340,6 +346,17 @@ export class DownloadService {
       throw new DownloadError('chunk_hash_mismatch', 502);
     }
 
+    // FE-07: register this live stream so cancelDownload() can abort it. The
+    // external signal (client disconnect) and the registry controller are
+    // linked: either one stops the loop.
+    let registryController: AbortController | null = null;
+    if (prepared.jobId) {
+      registryController = new AbortController();
+      this.activeStreams.set(prepared.jobId, registryController);
+      signal?.addEventListener('abort', () => registryController?.abort(), { once: true });
+    }
+    const effectiveSignal = registryController?.signal ?? signal;
+
     const depth = Math.max(1, this.downloadConcurrency());
     const pending: Array<PrefetchSlot | null> = [];
     /** Reservations currently held by this stream but not yet released. */
@@ -384,7 +401,7 @@ export class DownloadService {
         const slot: PrefetchSlot = {
           index,
           handle,
-          promise: this.readVerifiedChunkHolding(prepared.fileId, slice, signal, handle),
+          promise: this.readVerifiedChunkHolding(prepared.fileId, slice, effectiveSignal, handle),
         };
         pending[index] = slot;
         inFlight++;
@@ -403,7 +420,7 @@ export class DownloadService {
     try {
       fill();
       for (let index = 0; index < prepared.slices.length; index++) {
-        if (signal?.aborted) throw new DownloadError('download_cancelled', 499);
+        if (effectiveSignal?.aborted) throw new DownloadError('download_cancelled', 499);
         const slot = pending[index]!;
         pending[index] = null;
         let chunk: VerifiedChunk;
@@ -454,15 +471,25 @@ export class DownloadService {
       const code = err instanceof DownloadError
         ? err.safeCode
         : err instanceof ProviderError ? err.safeCode : 'provider_unavailable';
-      this.q.finishJob.run({
-        id: prepared.jobId,
-        state: code === 'download_cancelled' ? 'cancelled' : 'failed',
-        last_safe_error_code: code,
-        updated_at: new Date().toISOString(),
-      });
+      // FE-07: an externally cancelled job already carries the truthful
+      // cancelled row; the loop must not overwrite it with 'failed' when its
+      // own late abort surfaces as a generic error.
+      const current = this.q.getJob.get(prepared.jobId) as DownloadJobRow | undefined;
+      const externallyCancelled = current?.state === 'cancelled' && current.last_safe_error_code === 'download_cancelled';
+      if (!externallyCancelled) {
+        this.q.finishJob.run({
+          id: prepared.jobId,
+          state: code === 'download_cancelled' ? 'cancelled' : 'failed',
+          last_safe_error_code: code,
+          updated_at: new Date().toISOString(),
+        });
+      }
       throw err;
     } finally {
       finished = true;
+      if (prepared.jobId && registryController) {
+        this.activeStreams.delete(prepared.jobId);
+      }
       // a consumer that stops iterating early must not strand reservations
       await abandonInFlight();
     }
@@ -488,6 +515,13 @@ export class DownloadService {
     const job = this.q.getJob.get(jobId) as DownloadJobRow | undefined;
     if (!job || job.job_type !== 'download') throw new DownloadError('file_not_found', 404);
     if (job.state !== 'running') return false;
+    // FE-07: abort the live stream BEFORE writing the row, so the loop's own
+    // cancellation handling cannot overwrite the cancelled state afterwards.
+    const live = this.activeStreams.get(jobId);
+    if (live) {
+      this.activeStreams.delete(jobId);
+      live.abort();
+    }
     this.q.finishJob.run({
       id: jobId, state: 'cancelled', last_safe_error_code: 'download_cancelled', updated_at: new Date().toISOString(),
     });

@@ -30,6 +30,7 @@ import { contentDisposition } from './downloads/range.js';
 import { settingsRouter } from './routes/settings.js';
 import { maintenanceRouter } from './routes/maintenance.js';
 import { SettingsService } from './settings/settings-service.js';
+import { redact } from './maintenance/diagnostics-service.js';
 import { MaintenanceService } from './maintenance/maintenance-service.js';
 import { DiagnosticsService } from './maintenance/diagnostics-service.js';
 import { TunnelService, hostOriginGuard } from './tunnel/tunnel-service.js';
@@ -335,7 +336,9 @@ export function createApp(options: {
       res.status(413).json({ error: 'Request body too large.' });
       return;
     }
-    console.error(`[cloudnest] request error: ${message}`);
+    // BE-04: third-party error messages can carry URLs or credential-shaped
+    // fragments; the central log goes through the same redactor diagnostics use.
+    console.error(`[cloudnest] request error: ${redact(message)}`);
     res.status(500).json({ error: 'Internal server error' });
   };
   app.use(errorHandler);

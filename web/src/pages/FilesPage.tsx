@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Folder, Pencil, RefreshCw, Share2 as ShareIcon, Trash2, Upload } from 'lucide-react';
 import { api } from '../api.js';
 import { useFileActions } from '../components/FileActionsProvider.js';
@@ -36,13 +36,17 @@ export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {
   const [search, setSearch] = useState(initialSearch);
   const [sortBy, setSortBy] = useState<'modified' | 'name' | 'size'>('modified');
   const [detail, setDetail] = useState<FileView | null>(null);
+  // FE-13: server-driven pagination so the library is not silently capped at
+  // the first 100 rows.
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 100;
 
   const load = useCallback(async () => {
     setLoading(true);
     // FE-04: a rejected fetch must surface a recoverable error, never a
     // permanent skeleton with no explanation.
     try {
-      const res = await api.listFiles(100, 0);
+      const res = await api.listFiles(PAGE_SIZE, page * PAGE_SIZE, search.trim());
       if (res.status === 200) {
         const data = res.data as { files: FileView[]; total: number };
         setFiles(data.files ?? []);
@@ -56,14 +60,23 @@ export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, search]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  // FE-13: the search box now drives the SERVER-side search; going back to an
+  // empty query shows the whole library again. Page resets on a new search.
+  const searchTimer = useRef<number | null>(null);
+  function onSearchChange(value: string): void {
+    setSearch(value);
+    setPage(0);
+    if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
+    searchTimer.current = window.setTimeout(() => void load(), 250);
+  }
+
   const visible = files
-    .filter((f) => (search ? f.originalName.toLowerCase().includes(search.toLowerCase()) : true))
     .sort((a, b) => {
       if (sortBy === 'name') return a.originalName.localeCompare(b.originalName);
       if (sortBy === 'size') return b.sizeBytes - a.sizeBytes;
@@ -96,7 +109,7 @@ export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {
               aria-label="Search files"
               placeholder="Search files..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => onSearchChange(e.target.value)}
             />
             <select
               aria-label="Sort files"
@@ -200,6 +213,32 @@ export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {
             </tbody>
           </table>
         )}
+        {!loading && total > files.length && files.length > 0 && (
+          <div className="card-tools" style={{ marginTop: 12, justifyContent: 'space-between' }}>
+            <span className="muted small">
+              Showing {page * PAGE_SIZE + 1}–{page * PAGE_SIZE + files.length} of {total} files
+            </span>
+            <span>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={page === 0 || loading}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+              >
+                Previous
+              </button>{' '}
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={(page + 1) * PAGE_SIZE >= total || loading}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </button>
+            </span>
+          </div>
+        )}
+
         <p className="muted small" style={{ marginTop: 12 }}>
           Downloads verify every chunk's checksum before any bytes are sent. Renaming changes metadata only and never
           moves provider objects. Deleting removes only the CloudNest-owned chunk objects and reports anything it could

@@ -12,7 +12,11 @@ web/ (React + Vite + TypeScript, plain CSS, no state-management library)
                        Shared Links, Cloud Accounts, Settings) + Light/Dark toggle
   src/api.ts           typed fetch client (CSRF-aware, raw Blob uploads)
   src/theme.ts         data-theme light|dark, persisted client-side, no flash
-  src/confirm.ts       destructive-action gate honouring the saved preference
+  src/confirm.tsx      destructive-action gate honouring the saved preference
+                       (ConfirmHost is mounted in App; preference-driven)
+  src/components/ui.tsx        shared UI kit (toasts, badges, formatters)
+  src/components/FileActionsProvider.tsx   cross-page share/rename/delete actions
+  src/pages/DashboardPage.tsx  real dashboard (accounts, storage, recent files)
 
 server/ (Express 5 + TypeScript)
   src/index.ts         entry: config, DB open + migrate, listen, graceful shutdown

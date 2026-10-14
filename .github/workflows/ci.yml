@@ -18,8 +18,10 @@ jobs:
     steps:
       # Third-party actions are pinned to immutable commit SHAs (M12.e). The
       # trailing comment names the release the SHA corresponds to; bumping the
-      # version means replacing the SHA, never loosening the pin.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+      # version means replacing the SHA, never loosening the pin. The checkout
+      # SHA below is 11 commits AHEAD of the v4.2.2 tag (post-v4.2.2 backport
+      # line, 2026-07-16) — it is NOT the v4.2.2 release commit.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # post-v4.2.2 backport (2026-07-16)
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
