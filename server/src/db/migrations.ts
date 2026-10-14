@@ -414,6 +414,127 @@ const M0007_PLACEMENT_STATES: Migration = {
   },
 };
 
+const M0008_DOWNLOAD_ENGINE: Migration = {
+  version: 8,
+  name: '0008-download-engine',
+  up: (db) => {
+    // A file whose chunks are missing or hash-mismatched needs an honest state
+    // rather than looking "completed". Rebuild the table to widen the CHECK,
+    // preserving every row and the foreign keys that reference it.
+    db.exec(`
+      CREATE TABLE files_new (
+        id TEXT PRIMARY KEY,
+        original_name TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+        mime_type TEXT,
+        chunk_size_bytes INTEGER NOT NULL CHECK(chunk_size_bytes > 0),
+        chunk_count INTEGER NOT NULL CHECK(chunk_count >= 0),
+        whole_sha256 TEXT,
+        manifest_hash TEXT,
+        state TEXT NOT NULL CHECK(state IN ('draft','uploading','completed','incomplete','needs_repair','deleting','deletion_pending','deleted','failed')),
+        created_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+    `);
+    db.exec(`
+      INSERT INTO files_new (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count,
+        whole_sha256, manifest_hash, state, created_at, completed_at)
+      SELECT id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count,
+        whole_sha256, manifest_hash, state, created_at, completed_at FROM files;
+    `);
+    db.exec('DROP TABLE files;');
+    db.exec('ALTER TABLE files_new RENAME TO files;');
+    db.exec('CREATE INDEX idx_files_state_created ON files(state, created_at);');
+    // re-create the child foreign keys that pointed at files
+    db.exec(`
+      CREATE TABLE file_chunks_new (
+        id TEXT PRIMARY KEY,
+        file_id TEXT NOT NULL REFERENCES files(id) ON DELETE RESTRICT,
+        chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
+        offset_bytes INTEGER NOT NULL CHECK(offset_bytes >= 0),
+        size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+        sha256 TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('pending','uploaded','failed')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(file_id, chunk_index)
+      );
+    `);
+    db.exec(`INSERT INTO file_chunks_new SELECT id, file_id, chunk_index, offset_bytes, size_bytes, sha256, state, created_at, updated_at FROM file_chunks;`);
+    db.exec('DROP TABLE file_chunks;');
+    db.exec('ALTER TABLE file_chunks_new RENAME TO file_chunks;');
+    db.exec('CREATE INDEX idx_file_chunks_file ON file_chunks(file_id, chunk_index);');
+
+    db.exec(`
+      CREATE TABLE chunk_placements_new (
+        id TEXT PRIMARY KEY,
+        chunk_id TEXT NOT NULL REFERENCES file_chunks(id) ON DELETE RESTRICT,
+        provider_account_id TEXT NOT NULL REFERENCES provider_accounts(id) ON DELETE RESTRICT,
+        remote_object_id TEXT,
+        remote_object_key TEXT,
+        state TEXT NOT NULL CHECK(state IN ('pending','uploading','uploaded','verified','failed','missing','deletion_pending','unavailable','deleting','deleted')),
+        is_active INTEGER NOT NULL CHECK(is_active IN (0,1)),
+        provider_checksum_type TEXT,
+        confirmed_size_bytes INTEGER CHECK(confirmed_size_bytes IS NULL OR confirmed_size_bytes >= 0),
+        last_safe_error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    db.exec(`INSERT INTO chunk_placements_new SELECT id, chunk_id, provider_account_id, remote_object_id, remote_object_key, state, is_active, provider_checksum_type, confirmed_size_bytes, last_safe_error_code, created_at, updated_at FROM chunk_placements;`);
+    db.exec('DROP TABLE chunk_placements;');
+    db.exec('ALTER TABLE chunk_placements_new RENAME TO chunk_placements;');
+    db.exec('CREATE INDEX idx_chunk_placements_chunk_state ON chunk_placements(chunk_id, state);');
+    db.exec('CREATE UNIQUE INDEX idx_chunk_placements_active ON chunk_placements(chunk_id) WHERE is_active = 1;');
+    db.exec('CREATE INDEX idx_chunk_placements_object_key ON chunk_placements(remote_object_key);');
+
+    db.exec(`
+      CREATE TABLE transfer_jobs_new (
+        id TEXT PRIMARY KEY,
+        file_id TEXT REFERENCES files(id) ON DELETE RESTRICT,
+        job_type TEXT NOT NULL CHECK(job_type IN ('upload','download','delete','repair','reconcile')),
+        state TEXT NOT NULL CHECK(state IN ('queued','running','paused','failed','completed','cancelled','deletion_pending')),
+        chunks_completed INTEGER NOT NULL DEFAULT 0 CHECK(chunks_completed >= 0),
+        chunks_total INTEGER NOT NULL DEFAULT 0 CHECK(chunks_total >= 0),
+        bytes_completed INTEGER NOT NULL DEFAULT 0 CHECK(bytes_completed >= 0),
+        retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count >= 0),
+        last_safe_error_code TEXT,
+        idempotency_key TEXT,
+        request_fingerprint TEXT,
+        requested_range_start_bytes INTEGER CHECK(requested_range_start_bytes IS NULL OR requested_range_start_bytes >= 0),
+        requested_range_end_bytes INTEGER CHECK(requested_range_end_bytes IS NULL OR requested_range_end_bytes >= 0),
+        requested_bytes INTEGER CHECK(requested_bytes IS NULL OR requested_bytes >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK(file_id IS NOT NULL OR job_type = 'reconcile')
+      );
+    `);
+    db.exec(`INSERT INTO transfer_jobs_new (id, file_id, job_type, state, chunks_completed, chunks_total, bytes_completed, retry_count, last_safe_error_code, idempotency_key, request_fingerprint, created_at, updated_at)
+      SELECT id, file_id, job_type, state, chunks_completed, chunks_total, bytes_completed, retry_count, last_safe_error_code, idempotency_key, request_fingerprint, created_at, updated_at FROM transfer_jobs;`);
+    db.exec('DROP TABLE transfer_jobs;');
+    db.exec('ALTER TABLE transfer_jobs_new RENAME TO transfer_jobs;');
+    db.exec('CREATE INDEX idx_transfer_jobs_state ON transfer_jobs(state, updated_at);');
+    db.exec('CREATE UNIQUE INDEX idx_transfer_jobs_idempotency ON transfer_jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;');
+
+    db.exec(`
+      CREATE TABLE share_link_items_new (
+        share_link_id TEXT NOT NULL REFERENCES share_links(id) ON DELETE CASCADE,
+        file_id TEXT NOT NULL REFERENCES files(id) ON DELETE RESTRICT,
+        PRIMARY KEY (share_link_id, file_id)
+      );
+    `);
+    db.exec('INSERT INTO share_link_items_new SELECT share_link_id, file_id FROM share_link_items;');
+    db.exec('DROP TABLE share_link_items;');
+    db.exec('ALTER TABLE share_link_items_new RENAME TO share_link_items;');
+    db.exec('CREATE INDEX idx_share_link_items_link ON share_link_items(share_link_id);');
+
+    const violations = db.pragma('foreign_key_check');
+    if (Array.isArray(violations) ? violations.length > 0 : Boolean(violations)) {
+      throw new Error('foreign_key_check failed after the download-engine rebuild');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -422,4 +543,5 @@ export const allMigrations: readonly Migration[] = [
   M0005_CHUNK_PLACEMENT_OBJECT_KEY,
   M0006_UPLOAD_ENGINE,
   M0007_PLACEMENT_STATES,
+  M0008_DOWNLOAD_ENGINE,
 ];

@@ -6,6 +6,7 @@ import { ProviderSetupCard } from './components/ProviderSetupCard.js';
 import { UploadsPage } from './pages/UploadsPage.js';
 import { FilesPage } from './pages/FilesPage.js';
 import { DashboardSummary } from './components/DashboardSummary.js';
+import { DownloadsPage } from './pages/DownloadsPage.js';
 
 const NAV_ITEMS = [
   'Dashboard',
@@ -187,6 +188,8 @@ export default function App() {
             <UploadsPage />
           ) : active === 'Files' ? (
             <FilesPage />
+          ) : active === 'Downloads' ? (
+            <DownloadsPage />
           ) : active !== 'Dashboard' ? (
             <section className="card placeholder-card">
               <h1>{active}</h1>

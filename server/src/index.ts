@@ -20,6 +20,13 @@ for (const migration of applied) {
 }
 
 const app = createApp({ appVersion: config.appVersion, db: opened.db, sessionSecret, dataDir: config.dataDir, appBaseUrl: config.appBaseUrl });
+// a stream cannot survive a restart: report interrupted downloads truthfully
+const downloads = app.get('downloads') as { recoverDownloadsOnStartup: () => number } | undefined;
+if (downloads) {
+  const interrupted = downloads.recoverDownloadsOnStartup();
+  if (interrupted > 0) console.log(`[cloudnest] marked ${interrupted} interrupted download(s) as failed`);
+}
+
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`[cloudnest] listening on http://127.0.0.1:${config.port}`);
   console.log(`[cloudnest] data directory: ${config.dataDir}`);

@@ -19,6 +19,8 @@ import { ProviderAccountService } from './services/provider-account-service.js';
 import { makeProviderQueries } from './db/provider-queries.js';
 import { rawChunkRouter, uploadsRouter } from './routes/uploads.js';
 import { UploadService } from './uploads/upload-service.js';
+import { downloadsRouter } from './routes/downloads.js';
+import { DownloadService } from './downloads/download-service.js';
 
 /**
  * Express app factory (Step 2).
@@ -116,6 +118,13 @@ export function createApp(options: {
   app.use(providerAccountsRouter({ queries, csrf, store: credentialsStore, accounts: accountService, appBaseUrl: options.appBaseUrl }));
   app.set('providerAccounts', accountService);
   app.set('credentialsStore', credentialsStore);
+
+  // 4c. download routes. They stream file bytes, so nothing in front of them
+  //     may compress or transform the response: Content-Length, Range and ETag
+  //     must describe the exact reconstructed file bytes.
+  const downloads = new DownloadService(options.db, credentialsStore);
+  app.use(downloadsRouter({ queries, csrf, downloads }));
+  app.set('downloads', downloads);
 
   // 5. authenticated admin API.
   //    The router is mounted under the /api/admin prefix ONLY. Mounting it at

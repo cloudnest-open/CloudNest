@@ -118,6 +118,16 @@ export const api = {
   uploadChunkRaw: (jobId: string, chunkIndex: number, body: Blob): Promise<{ status: number; data: unknown }> =>
     request('PUT', `/api/uploads/${jobId}/chunks/${chunkIndex}`, body),
 
+  // ---- downloads + rename (Step 5 / M10) ----
+  fileDetails: (fileId: string) => request('GET', `/api/files/${fileId}`),
+  renameFile: (fileId: string, name: string) => request('POST', `/api/files/${fileId}/rename`, { name }),
+  listDownloads: (limit = 50, offset = 0) => request('GET', `/api/downloads?limit=${limit}&offset=${offset}`),
+  getDownload: (jobId: string) => request('GET', `/api/downloads/${jobId}`),
+  cancelDownload: (jobId: string) => request('POST', `/api/downloads/${jobId}/cancel`),
+
+  /** URL for a browser-native download (Range/resume handled by the browser). */
+  downloadUrl: (fileId: string) => `/api/files/${fileId}/download`,
+
   /** Internal: expose the CSRF token flow for raw-body uploads. */
   refreshCsrf: refreshCsrfToken,
 };

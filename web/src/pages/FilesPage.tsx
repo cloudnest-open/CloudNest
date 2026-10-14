@@ -51,6 +51,8 @@ export function FilesPage() {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'created'>('created');
   const [detail, setDetail] = useState<FileView | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,6 +72,25 @@ export function FilesPage() {
     void load();
   }, [load]);
 
+  async function onRename(file: FileView): Promise<void> {
+    const next = window.prompt('New file name:', file.originalName);
+    if (!next || next === file.originalName) return;
+    setBusyId(file.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await api.renameFile(file.id, next);
+      if (res.status === 200) {
+        setNotice(`Renamed to ${next}. Only the CloudNest metadata changed; provider objects were not moved.`);
+        await load();
+      } else {
+        setError('The file could not be renamed.');
+      }
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const visible = files
     .filter((f) => (search ? f.originalName.toLowerCase().includes(search.toLowerCase()) : true))
     .sort((a, b) => {
@@ -87,6 +108,7 @@ export function FilesPage() {
         </button>
       </div>
 
+      {notice && <div className="card notice-card" role="status"><p>{notice}</p></div>}
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
 
       <section className="card">
@@ -148,11 +170,28 @@ export function FilesPage() {
                   </td>
                   <td className="actions">
                     <button type="button" className="btn-secondary" onClick={() => setDetail(file)}>Details</button>
-                    {/* Step 5 features: shown as unavailable rather than faked */}
-                    <button type="button" className="btn-secondary" disabled title="Available in Step 5">Download</button>
-                    <button type="button" className="btn-secondary" disabled title="Available in Step 5">Rename</button>
-                    <button type="button" className="btn-secondary" disabled title="Available in Step 5">Share</button>
-                    <button type="button" className="btn-danger" disabled title="Available in Step 5">Delete</button>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      disabled={file.state !== 'completed' || busyId === file.id}
+                      onClick={() => {
+                        setNotice(`Starting download of ${file.originalName}. Your browser manages the transfer and resume.`);
+                        window.location.assign(api.downloadUrl(file.id));
+                      }}
+                    >
+                      Download
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      disabled={busyId === file.id}
+                      onClick={() => void onRename(file)}
+                    >
+                      Rename
+                    </button>
+                    {/* still later-step features, shown as unavailable rather than faked */}
+                    <button type="button" className="btn-secondary" disabled title="Available in a later step">Share</button>
+                    <button type="button" className="btn-danger" disabled title="Available in a later step">Delete</button>
                   </td>
                 </tr>
               ))}
@@ -160,8 +199,8 @@ export function FilesPage() {
           </table>
         )}
         <p className="muted small">
-          Download, rename, sharing and deletion arrive in a later step; they are intentionally disabled here.
-          File contents are stored only as chunk objects inside each provider's CloudNest folder.
+          Downloads verify every chunk's checksum before any bytes are sent. Renaming changes metadata only and
+          never moves provider objects. Sharing and deletion arrive in a later step and stay disabled here.
         </p>
       </section>
 
