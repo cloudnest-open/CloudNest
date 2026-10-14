@@ -35,6 +35,30 @@ if (downloads) {
   if (interrupted > 0) console.log(`[cloudnest] marked ${interrupted} interrupted download(s) as failed`);
 }
 
+// BE-03: bounded, periodic cleanup of expired session rows, share download
+// sessions, and unlock grants. Previously these only died lazily when read,
+// so long-running instances accumulated dead rows forever.
+const shares = app.get('shares') as {
+  cleanupExpiredSessions?: () => number;
+  cleanupExpiredUnlockGrants?: () => number;
+} | undefined;
+const sessionStoreCleanup = (app.get('sessionStore') as { cleanupExpired?: () => number } | undefined)?.cleanupExpired;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // hourly is plenty for metadata rows
+function sweepExpiredRows(): void {
+  try {
+    let swept = 0;
+    if (sessionStoreCleanup) swept += sessionStoreCleanup();
+    if (shares?.cleanupExpiredSessions) swept += shares.cleanupExpiredSessions();
+    if (shares?.cleanupExpiredUnlockGrants) swept += shares.cleanupExpiredUnlockGrants();
+    if (swept > 0) console.log(`[cloudnest] cleanup: expired ${swept} session/grant row(s)`);
+  } catch {
+    // cleanup is best-effort; rows remain for the next sweep
+  }
+}
+sweepExpiredRows();
+const cleanupTimer = setInterval(sweepExpiredRows, CLEANUP_INTERVAL_MS);
+cleanupTimer.unref();
+
 // deletions that were interrupted must not be silently abandoned
 const deletions = app.get('deletions') as { resumePending: () => Promise<{ attempted: number; completed: number }> } | undefined;
 if (deletions) {

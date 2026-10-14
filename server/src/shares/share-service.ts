@@ -354,4 +354,15 @@ export class ShareService {
       "UPDATE share_download_sessions SET state = 'expired', updated_at = ? WHERE state = 'active' AND expires_at <= ?",
     ).run(new Date().toISOString(), Date.now()).changes;
   }
+
+  /**
+   * Bounded cleanup of expired unlock grants (M0010 / SH-1). Rows whose TTL
+   * has passed are marked expired so the table cannot grow without bound on
+   * a long-running instance (BE-03 hygiene).
+   */
+  cleanupExpiredUnlockGrants(): number {
+    return this.db.prepare(
+      "UPDATE share_unlock_grants SET state = 'expired', updated_at = ? WHERE state = 'active' AND expires_at <= ?",
+    ).run(new Date().toISOString(), Date.now()).changes;
+  }
 }

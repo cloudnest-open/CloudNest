@@ -272,6 +272,22 @@ export class UploadService {
     return this.q.listFiles.all(limit, offset) as unknown as FileRow[];
   }
 
+  /**
+   * FE-02: search the whole library in SQL before pagination. An empty term
+   * degenerates to the plain paginated listing.
+   */
+  searchFiles(search: string, limit: number, offset: number): FileRow[] {
+    const term = search.trim().toLowerCase();
+    if (term === '') return this.listFiles(limit, offset);
+    return this.q.searchFiles.all(term, limit, offset) as unknown as FileRow[];
+  }
+
+  countSearchedFiles(search: string): number {
+    const term = search.trim().toLowerCase();
+    if (term === '') return this.countFiles();
+    return (this.q.countSearchedFiles.get(term) as { n: number }).n;
+  }
+
   countFiles(): number {
     return (this.q.countFiles.get() as { n: number }).n;
   }
@@ -370,6 +386,12 @@ export class UploadService {
       const chunkId = existingChunk?.id ?? this.q.newId();
       if (existingChunk) {
         this.q.deactivatePlacements.run(now, chunkId);
+        // UL-2: the re-uploaded bytes are now the truth for this index; the
+        // stored digest must follow, or later verification would compare the
+        // new placement against a stale hash and brick the file.
+        this.db.prepare(
+          'UPDATE file_chunks SET sha256 = ?, size_bytes = ?, updated_at = ? WHERE id = ?',
+        ).run(input.sha256, input.sizeBytes, now, chunkId);
       } else {
         this.q.insertChunk.run({
           id: chunkId, file_id: file.id, chunk_index: input.chunkIndex,
@@ -458,10 +480,16 @@ export class UploadService {
       this.q.markAllocationReleased.run(now, allocation.id);
       this.recomputeReservedInflight(input.jobId);
     }
+    // UL-4: bytes_completed must reflect the durable chunk rows. Zeroing it
+    // after any single chunk failure made real progress vanish from the UI.
+    const failJob = this.q.getJob.get(input.jobId) as JobRow | undefined;
+    const durableChunks = failJob?.file_id
+      ? (this.q.listChunks.all(failJob.file_id) as Array<{ size_bytes: number }>)
+      : [];
     this.q.updateJobProgress.run({
       id: input.jobId,
-      chunks_completed: this.q.listChunks.all(this.q.getJob.get(input.jobId) ? (this.q.getJob.get(input.jobId) as JobRow).file_id ?? '' : '').length,
-      bytes_completed: 0,
+      chunks_completed: durableChunks.length,
+      bytes_completed: durableChunks.reduce((n, c) => n + c.size_bytes, 0),
       last_safe_error_code: input.safeCode,
       updated_at: now,
     });

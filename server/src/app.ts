@@ -119,6 +119,18 @@ export function createApp(options: {
 
   // 3. server-side sessions in the shared SQLite connection
   const sessionStore = new SqliteSessionStore(options.db);
+  // BE-01/BE-02: once the tunnel serves the app, sessions must ride HTTPS and
+  // rate limits must key per real visitor (Cloudflare-Connecting-IP), not the
+  // shared 127.0.0.1 hop. Both switch on the tunnel's own state, never on
+  // request data a client could forge.
+  const tunnelActive = (): boolean => tunnel.status().enabled;
+  app.use((req, _res, next) => {
+    if (tunnelActive() && !req.app.get('cloudnest trust proxy flipped')) {
+      req.app.set('cloudnest trust proxy flipped', true);
+      req.app.set('trust proxy', 1); // the first hop (cloudflared) is loopback
+    }
+    next();
+  });
   app.use(
     session({
       name: 'cloudnest.sid',
@@ -133,7 +145,9 @@ export function createApp(options: {
         httpOnly: true,
         sameSite: 'lax',
         path: '/',
-        secure: false, // loopback-only local mode in Step 2; HTTPS/tunnel must enable Secure
+        // BE-01: loopback-only local mode stays non-Secure; a live tunnel
+        // means the app is reached over HTTPS, so the cookie must be Secure.
+        secure: tunnelActive(),
         maxAge: 12 * 60 * 60 * 1000, // 12-hour idle timeout, rolling
       },
     }),
@@ -172,7 +186,7 @@ export function createApp(options: {
   //    exposes nothing beyond the version string.
   app.use(healthRouter(options.appVersion));
   app.use(setupRouter(queries, csrf, () => options.db));
-  app.use(authRouter(queries, csrf));
+  app.use(authRouter(queries, csrf, tunnelActive));
 
   // 4b. provider + account management (admin session + CSRF; OAuth callback
   //     is GET and is protected by one-time session-bound state instead)
@@ -195,11 +209,12 @@ export function createApp(options: {
   const shares = new ShareService(options.db);
   const deletions = new DeletionService(options.db, credentialsStore, shares);
   app.use(sharesRouter({ queries, csrf, shares, deletions, appBaseUrl: options.appBaseUrl, db: options.db }));
-  app.use(gatedPublicSharesRouter({ db: options.db, shares, csrf }));
+  app.use(gatedPublicSharesRouter({ db: options.db, shares, csrf, tunnelRunning: tunnelActive }));
   app.use(
     publicSharesRouter({
       shares,
       csrf,
+      tunnelRunning: tunnelActive,
       downloadFileInfo: (fileId: string) => {
         const file = downloads.getFile(fileId);
         if (!file) return null;

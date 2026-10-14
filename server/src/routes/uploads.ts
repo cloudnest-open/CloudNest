@@ -85,6 +85,9 @@ export function rawChunkRouter(deps: {
         if (!job) throw new UploadError('job_not_found', 404);
         if (job.state === 'cancelled') throw new UploadError('job_not_resumable', 409);
         if (job.state === 'paused') throw new UploadError('job_paused', 409);
+        // UL-2: a completed file is immutable from the upload path; a late or
+        // replayed chunk PUT must not write a divergent placement under it.
+        if (job.state === 'completed') throw new UploadError('job_not_resumable', 409);
         const allocation = deps.uploads.listAllocations(jobId).find((a) => a.chunk_index === chunkIndex);
         if (!allocation) throw new UploadError('invalid_upload_metadata', 400);
         // authority comes from the persisted allocation, never from the client
@@ -262,9 +265,10 @@ export function uploadsRouter(deps: {
     const offset = Math.max(0, Number(req.query['offset'] ?? 0) || 0);
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 50) || 50));
     const search = typeof req.query['search'] === 'string' ? req.query['search'].toLowerCase() : '';
-    let files = deps.uploads.listFiles(limit, offset).map((f) => deps.uploads.publicFile(f.id));
-    if (search) files = files.filter((f) => (f?.originalName ?? '').toLowerCase().includes(search));
-    res.json({ files, total: deps.uploads.countFiles() });
+    // FE-02: filtering happens in SQL before limit/offset, so a search sees
+    // the entire library; `total` reflects the same filter.
+    const files = deps.uploads.searchFiles(search, limit, offset).map((f) => deps.uploads.publicFile(f.id));
+    res.json({ files, total: deps.uploads.countSearchedFiles(search) });
   });
 
   for (const action of ['pause', 'resume', 'cancel', 'retry'] as const) {

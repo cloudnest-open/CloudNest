@@ -89,11 +89,43 @@ export function DownloadsPage() {
     void load();
   }, [load]);
 
-  function startDownload(file: FileView) {
-    // the browser performs a native download and manages Range/resume itself
-    setNotice(`Starting download of ${file.originalName}. Your browser handles the transfer and any resume.`);
-    window.location.assign(api.downloadUrl(file.id));
-    setTimeout(() => void load(), 1500);
+  async function startDownload(file: FileView) {
+    // FE-08: fetch first so a failed download surfaces IN-APP instead of
+    // replacing the whole page with a raw JSON error document.
+    setNotice(`Starting download of ${file.originalName}...`);
+    try {
+      const res = await fetch(api.downloadUrl(file.id));
+      if (!res.ok) {
+        let code = '';
+        try {
+          const body = (await res.json()) as { code?: string };
+          code = body.code ?? '';
+        } catch {
+          // non-JSON failure body: fall back to the status alone
+        }
+        setError(code
+          ? `The download failed (${code}). Check the file's chunks and provider accounts, then retry.`
+          : `The download failed (HTTP ${res.status}). Check the file's chunks and provider accounts, then retry.`);
+        return;
+      }
+      // success: hand the verified stream to the browser as a file
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition') ?? '';
+      const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
+      const name = match ? decodeURIComponent(match[1] ?? match[2] ?? '') : file.originalName;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setNotice(`Downloaded ${name}.`);
+      setTimeout(() => void load(), 1500);
+    } catch {
+      setError('Could not reach the server for the download. Check that CloudNest is running, then retry.');
+    }
   }
 
   async function cancel(jobId: string) {

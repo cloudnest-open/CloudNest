@@ -3,18 +3,27 @@ import rateLimit from 'express-rate-limit';
 import { verifyPassword, hashPassword, validatePasswordPolicy } from '../auth/password.js';
 import type { Queries } from '../db/queries.js';
 import type { CsrfBundle } from '../auth/csrf.js';
+import { makeLimiterKey } from '../middleware/limiter-key.js';
 
 /**
  * Authentication routes. Generic errors only — never reveal whether an
  * admin row exists, never echo a password, never log secrets.
  */
-export function authRouter(queries: Queries, csrf: CsrfBundle): Router {
+export function authRouter(
+  queries: Queries,
+  csrf: CsrfBundle,
+  /** BE-02: whether the Cloudflare tunnel is currently serving traffic. */
+  tunnelRunning: () => boolean = () => false,
+): Router {
   const router = Router();
+  // BE-02: behind the tunnel every visitor shares one socket address, so the
+  // login limiter keys on the verified CF client header instead.
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 10,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
+    keyGenerator: makeLimiterKey(tunnelRunning),
     message: { error: 'Too many attempts. Try again later.' },
   });
 

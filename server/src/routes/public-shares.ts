@@ -11,6 +11,7 @@ import {
   requireGrantForLink,
   resolvePublicLink,
 } from '../shares/unlock-gate.js';
+import { makeLimiterKey } from '../middleware/limiter-key.js';
 
 /**
  * SH-1 remediation router — the gate-aware public share endpoints.
@@ -64,15 +65,21 @@ export function gatedPublicSharesRouter(deps: {
   db: Database.Database;
   shares: ShareService;
   csrf: CsrfBundle;
+  /** BE-02: whether the Cloudflare tunnel is currently serving traffic. */
+  tunnelRunning: () => boolean;
 }): Router {
   const router = Router();
 
+  // BE-02: behind the tunnel, per-visitor keying uses the verified CF client
+  // header; direct loopback traffic keeps the socket address.
   const unlockLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false,
+    keyGenerator: makeLimiterKey(deps.tunnelRunning),
     message: { error: 'share_rate_limited' },
   });
   const downloadLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false,
+    keyGenerator: makeLimiterKey(deps.tunnelRunning),
     message: { error: 'share_rate_limited' },
   });
 

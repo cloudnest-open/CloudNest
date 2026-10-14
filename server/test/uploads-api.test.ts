@@ -295,3 +295,32 @@ test('FE-05/ST-01: the served workerLimit mirrors the admin setting', async () =
     await app.close();
   }
 });
+
+test('FE-02: file search runs before pagination and sees the whole library', async () => {
+  const { app, client } = await authed();
+  try {
+    // seed 12 files; only the OLDEST one matches the search term. The old
+    // post-pagination filter (limit 10) would have missed it entirely.
+    for (let i = 1; i <= 12; i++) {
+      const name = i === 12 ? 'needle-unique-report.txt' : `filler-${String(i).padStart(2, '0')}.bin`;
+      const { openDatabase } = await import('../src/db/index.js');
+      const { db, close } = openDatabase(app.dbPath);
+      try {
+        const now = new Date().toISOString();
+        // created_at staggered so page order is deterministic
+        db.prepare(
+          `INSERT INTO files (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, manifest_hash, created_at, completed_at)
+           VALUES (?, ?, 10, 'text/plain', 10, 1, 'completed', ?, ?, ?)`,
+        ).run(`fe02-${i}`, name, 'a'.repeat(64), now, now);
+      } finally { close(); }
+    }
+    const res = await client.get('/api/files?limit=10&offset=0&search=needle-unique');
+    assert.equal(res.status, 200);
+    const body = res.body as { files: Array<{ originalName: string }>; total: number };
+    assert.equal(body.files.length, 1, 'the matching file is found beyond the first page');
+    assert.equal(body.files[0]!.originalName, 'needle-unique-report.txt');
+    assert.equal(body.total, 1, 'the total reflects the same filter');
+  } finally {
+    await app.close();
+  }
+});

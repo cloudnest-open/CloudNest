@@ -405,6 +405,58 @@ test('UL-3: cancel sweeps every attempt of a chunk, not just the newest', async 
   }
 });
 
+// ---- UL-2 / UL-4 -----------------------------------------------------------
+
+test('UL-2: re-committing a chunk refreshes the stored digest', () => {
+  const { db, close, service, q } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 16 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    const a1 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.commitChunk({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a1.objectKey,
+      remoteObjectId: 'r1', sha256: 'a'.repeat(64), sizeBytes: 8 * MIB,
+    });
+    // a re-upload at the same index with DIFFERENT bytes commits a new digest
+    const a2 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.commitChunk({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a2.objectKey,
+      remoteObjectId: 'r2', sha256: 'b'.repeat(64), sizeBytes: 8 * MIB,
+    });
+    const chunk = q.getChunk.get(plan.fileId, 0) as { sha256: string };
+    assert.equal(chunk.sha256, 'b'.repeat(64), 'the stored digest follows the live placement');
+  } finally {
+    close();
+  }
+});
+
+test('UL-4: a failed chunk keeps honest byte progress', () => {
+  const { db, close, service, q } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 24 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    // two chunks complete...
+    for (const idx of [0, 1]) {
+      const a = service.beginAttempt({ jobId: plan.jobId, chunkIndex: idx, accountId: 'acc-a' });
+      service.commitChunk({
+        jobId: plan.jobId, chunkIndex: idx, accountId: 'acc-a', objectKey: a.objectKey,
+        remoteObjectId: `r${idx}`, sha256: 'c'.repeat(64), sizeBytes: 8 * MIB,
+      });
+    }
+    // ...then one fails
+    const a2 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 2, accountId: 'acc-a' });
+    service.recordFailure({
+      jobId: plan.jobId, chunkIndex: 2, accountId: 'acc-a', objectKey: a2.objectKey,
+      safeCode: 'provider_unavailable', bytesReceived: 0, remoteObjectId: null,
+    });
+    const job = q.getJob.get(plan.jobId) as { chunks_completed: number; bytes_completed: number };
+    assert.equal(job.chunks_completed, 2, 'durable chunk rows are still counted');
+    assert.equal(job.bytes_completed, 16 * MIB, 'bytes completed reflect real progress, not zero');
+  } finally {
+    close();
+  }
+});
+
 test('resume reports only the chunks that are still missing', () => {
   const { db, close, service } = setup();
   try {

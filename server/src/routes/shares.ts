@@ -10,6 +10,7 @@ import { requireAdmin } from '../middleware/require-admin.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type Database from 'better-sqlite3';
 import { revokeGrantsForLink } from '../shares/unlock-gate.js';
+import { makeLimiterKey } from '../middleware/limiter-key.js';
 
 /**
  * Share links and deletion (M11.a–d).
@@ -221,6 +222,8 @@ export function sharesRouter(deps: {
 export function publicSharesRouter(deps: {
   shares: ShareService;
   csrf: CsrfBundle;
+  /** BE-02: whether the Cloudflare tunnel is currently serving traffic. */
+  tunnelRunning: () => boolean;
   /** Metadata for an authorized shared file (name/size/type only). */
   downloadFileInfo: (fileId: string) => { sizeBytes: number; mimeType: string | null; disposition: string } | null;
   /** Stream a file's verified chunks; never returns provider URLs. */
@@ -230,10 +233,12 @@ export function publicSharesRouter(deps: {
 
   const unlockLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false,
+    keyGenerator: makeLimiterKey(deps.tunnelRunning),
     message: { error: 'share_rate_limited' },
   });
   const downloadLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false,
+    keyGenerator: makeLimiterKey(deps.tunnelRunning),
     message: { error: 'share_rate_limited' },
   });
 

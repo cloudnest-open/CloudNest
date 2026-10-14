@@ -90,6 +90,14 @@ export function makeUploadQueries(db: Database.Database) {
     ),
     getFile: db.prepare('SELECT * FROM files WHERE id = ?'),
     listFiles: db.prepare('SELECT * FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?'),
+    // FE-02: the search filter runs in SQL BEFORE pagination, so a query sees
+    // the whole library instead of only the newest page of rows.
+    searchFiles: db.prepare(
+      "SELECT * FROM files WHERE lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    ),
+    countSearchedFiles: db.prepare(
+      "SELECT COUNT(*) AS n FROM files WHERE lower(original_name) LIKE '%' || ? || '%'",
+    ),
     countFiles: db.prepare('SELECT COUNT(*) AS n FROM files'),
     completeFile: db.prepare(
       `UPDATE files SET state = 'completed', manifest_hash = @manifest_hash, completed_at = @completed_at WHERE id = @id`,
