@@ -74,15 +74,24 @@ export class Client {
   readonly jar = new Jar();
   constructor(private readonly baseUrl: string) {}
 
-  private async raw(method: string, path: string, body?: unknown, csrfToken?: string): Promise<ApiResponse> {
+  private async raw(
+    method: string,
+    path: string,
+    body?: unknown,
+    csrfToken?: string,
+    extraHeaders?: Record<string, string>,
+  ): Promise<ApiResponse> {
+    const isJson = body !== undefined && !(body instanceof Blob) && !(body instanceof Uint8Array);
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: {
+        ...(body !== undefined && !isJson ? { 'content-type': 'application/octet-stream' } : {}),
         ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
         ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        ...(extraHeaders ?? {}),
         ...(this.jar.header() ? { cookie: this.jar.header() } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: body === undefined ? undefined : isJson ? JSON.stringify(body) : (body as BodyInit),
       redirect: 'manual',
     });
     this.jar.capture(res);
@@ -101,23 +110,28 @@ export class Client {
   }
 
   /** Unsafe request with a fresh CSRF token fetched first. */
-  async post(path: string, body?: unknown): Promise<ApiResponse> {
-    return this.send('POST', path, body);
+  async post(path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<ApiResponse> {
+    return this.send('POST', path, body, extraHeaders);
   }
 
   /** Any unsafe verb with a fresh CSRF token fetched first. */
-  async send(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<ApiResponse> {
+  async send(
+    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<ApiResponse> {
     const tokenRes = await this.raw('GET', '/api/auth/csrf-token');
     const token = (tokenRes.body as { csrfToken?: string })?.csrfToken ?? '';
-    return this.raw(method, path, body, token);
+    return this.raw(method, path, body, token, extraHeaders);
   }
 
-  async put(path: string, body?: unknown): Promise<ApiResponse> {
-    return this.send('PUT', path, body);
+  async put(path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<ApiResponse> {
+    return this.send('PUT', path, body, extraHeaders);
   }
 
-  async patch(path: string, body?: unknown): Promise<ApiResponse> {
-    return this.send('PATCH', path, body);
+  async patch(path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<ApiResponse> {
+    return this.send('PATCH', path, body, extraHeaders);
   }
 
   /** Unsafe request with an explicit (possibly wrong) token. */

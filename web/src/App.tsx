@@ -3,6 +3,9 @@ import { api, refreshCsrfToken } from './api.js';
 import { FirstRunPage, LoginPage, ChangePasswordPanel } from './pages/AuthPages.js';
 import { CloudAccountsPage } from './pages/CloudAccountsPage.js';
 import { ProviderSetupCard } from './components/ProviderSetupCard.js';
+import { UploadsPage } from './pages/UploadsPage.js';
+import { FilesPage } from './pages/FilesPage.js';
+import { DashboardSummary } from './components/DashboardSummary.js';
 
 const NAV_ITEMS = [
   'Dashboard',
@@ -180,6 +183,10 @@ export default function App() {
             </>
           ) : active === 'Cloud Accounts' ? (
             <CloudAccountsPage onGoToSettings={() => { setActive('Settings'); setSettingsSection('providers'); }} />
+          ) : active === 'Uploads' ? (
+            <UploadsPage />
+          ) : active === 'Files' ? (
+            <FilesPage />
           ) : active !== 'Dashboard' ? (
             <section className="card placeholder-card">
               <h1>{active}</h1>
@@ -188,19 +195,7 @@ export default function App() {
           ) : (
             <>
               <h1 className="page-title">Dashboard</h1>
-              <section className="card">
-                <h2>Storage overview</h2>
-                <p className="muted">No cloud accounts connected yet.</p>
-                <p className="muted">Storage usage will appear here after you connect accounts in a later step.</p>
-              </section>
-              <section className="card">
-                <h2>Uploads</h2>
-                <p className="muted">Uploads will be available in a later step.</p>
-              </section>
-              <section className="card">
-                <h2>Recent files</h2>
-                <p className="muted">No files yet. Files you upload in a later step will appear here.</p>
-              </section>
+              <DashboardSummary />
             </>
           )}
         </main>

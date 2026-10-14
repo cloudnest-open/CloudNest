@@ -319,3 +319,33 @@ body {
 @media (max-width: 767px) {
   .accounts-table { display: block; overflow-x: auto; }
 }
+
+/* Step 4 / M9.e: uploads and files */
+.upload-form { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
+.upload-form label { font-size: 13px; color: var(--cn-text-muted); margin-top: 8px; }
+.upload-form input[type="file"] { font-size: 13px; }
+.upload-form select {
+  padding: 8px 10px; border: 1px solid var(--cn-border); border-radius: 8px;
+  background: var(--cn-surface); color: var(--cn-text); font-size: 14px; max-width: 160px;
+}
+.plan-preview { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--cn-border); }
+
+.progress-track {
+  height: 8px; width: 100%; background: var(--cn-surface-muted);
+  border-radius: 999px; overflow: hidden; margin: 8px 0 4px;
+}
+.progress-fill { height: 100%; background: var(--cn-primary); transition: width 200ms ease-out; }
+
+.files-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.files-toolbar label { font-size: 13px; color: var(--cn-text-muted); }
+.files-toolbar input[type="search"] {
+  padding: 7px 10px; border: 1px solid var(--cn-border); border-radius: 8px;
+  background: var(--cn-surface); color: var(--cn-text); font-size: 13px; min-width: 180px;
+}
+.files-toolbar select {
+  padding: 7px 10px; border: 1px solid var(--cn-border); border-radius: 8px;
+  background: var(--cn-surface); color: var(--cn-text); font-size: 13px;
+}
+.plain-list { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
+.plain-list li { margin-bottom: 4px; }
+.btn-secondary[disabled], .btn-danger[disabled] { opacity: 0.5; cursor: not-allowed; }

@@ -92,7 +92,6 @@ export function createApp(options: {
   //     and multer memory storage for this route.
   const uploads = new UploadService(options.db, credentialsStore);
   app.use(rawChunkRouter({ queries, csrf, uploads, store: credentialsStore }));
-  app.use(uploadsRouter({ queries, csrf, uploads }));
   app.set('uploads', uploads);
 
   // 2. bounded JSON parser (8 KiB cap on auth/setup bodies; 400 on malformed)
@@ -102,6 +101,10 @@ export function createApp(options: {
       type: 'application/json',
     }),
   );
+
+  // 2b. JSON upload routes (plan/status/control) — these need a parsed body, so
+  //     they are mounted after the JSON parser and never see raw chunk bytes.
+  app.use(uploadsRouter({ queries, csrf, uploads }));
 
   // 4. public setup/auth routes (unsafe methods are CSRF-protected inside)
   app.use(setupRouter(queries, csrf, () => options.db));
@@ -114,13 +117,16 @@ export function createApp(options: {
   app.set('providerAccounts', accountService);
   app.set('credentialsStore', credentialsStore);
 
-  // 5. authenticated admin API (allow-list pattern: everything under /api/admin/*)
+  // 5. authenticated admin API.
+  //    The router is mounted under the /api/admin prefix ONLY. Mounting it at
+  //    the root would run requireAdmin on every request, including the UI
+  //    itself, and would break the sign-in page.
   const admin = express.Router();
   admin.use(requireAdmin(queries));
-  admin.get('/api/admin/ping', (_req, res) => {
+  admin.get('/ping', (_req, res) => {
     res.json({ ok: true });
   });
-  app.use(admin);
+  app.use('/api/admin', admin);
 
   // 6. JSON 404 for unknown /api/* paths (never the UI HTML)
   app.use('/api', (_req, res) => {
