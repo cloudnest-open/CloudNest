@@ -1,22 +1,24 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Cloud, Database, FileText, Link as LinkIcon, Plus, Upload, ArrowRight,
-  Share2 as ShareIcon, Pencil, Trash2, RefreshCw,
+  Cloud, Database, FileText, Link as LinkIcon, Plus, Upload, RefreshCw, Activity,
 } from 'lucide-react';
 import { api } from '../api.js';
+import { FileTable, type FileTableRow } from '../components/FileTable.js';
+import { ProviderLogo } from '../components/ProviderLogo.js';
 import {
-  Badge, EmptyState, ProviderTile, ProgressBar, SkeletonRows, TypeIcon,
-  formatBytes, formatDateTime, PROVIDER_LABELS,
+  Badge, EmptyState, ProgressBar, SkeletonRows, pageList,
+  formatBytes, formatDateTime, PROVIDER_LABELS, typeLabel,
 } from '../components/ui.js';
-import { useFileActions } from '../components/FileActionsProvider.js';
 
 /**
- * Dashboard (design pack §7): heading, four real summary cards, provider
- * cards and the latest CloudNest-managed files.
+ * Dashboard (reference spec §5): Reference 01's primary hierarchy — heading,
+ * four real summary cards, the five always-present provider slots, the Recent
+ * Files table with real server-side pagination, and a right rail with Recent
+ * Activity (truthful empty state) above Storage Usage.
  *
  * Honesty rules enforced here: every number comes from the API, unknown/stale
- * quota renders as "Unknown" (never 0), and an unhealthy account can never be
- * labelled "Connected".
+ * quota renders as "Unknown"/"Not connected" (never 0 or invented), and an
+ * unhealthy account can never be labelled "Connected".
  */
 
 type Page = 'Files' | 'Uploads' | 'Cloud Accounts' | 'Shared Links';
@@ -35,16 +37,6 @@ interface AccountDetail {
   lastQuotaCheckAt: string | null;
 }
 
-interface FileRow {
-  id: string;
-  originalName: string;
-  sizeBytes: number;
-  chunkCount: number;
-  state: string;
-  storedAcross: string[];
-  createdAt: string;
-}
-
 interface Summary {
   accounts: Array<{ id: string; provider: string; status: string; quotaStatus: string }>;
   activeJobs: number;
@@ -60,35 +52,95 @@ interface Summary {
     lastCheckedAt: string | null;
   };
   activeShareLinks: number;
-  recentFileList: FileRow[];
+  recentFileList: Array<{
+    id: string;
+    originalName: string;
+    sizeBytes: number;
+    state: string;
+    storedAcross: string[];
+    createdAt: string;
+  }>;
 }
 
-/** One account's health, expressed as dot tone + honest label. */
-function accountHealth(account: AccountDetail): { tone: 'ok' | 'warn' | 'bad' | 'muted'; label: string } {
-  if (account.status === 'needs_reauth') return { tone: 'warn', label: 'Needs attention — reconnect' };
-  if (account.status === 'error') return { tone: 'bad', label: 'Error — check the account' };
-  if (account.status === 'disconnected') return { tone: 'muted', label: 'Disconnected' };
-  if (account.quotaStatus !== 'current') return { tone: 'warn', label: 'Quota not refreshed' };
-  return { tone: 'ok', label: 'Connected' };
+/** Reference 01's five provider slots, always present, in this exact order. */
+const PROVIDER_ORDER = ['google_drive', 'dropbox', 'pcloud', 'mega', 'onedrive'] as const;
+
+interface ProviderSlot {
+  provider: string;
+  label: string;
+  status: 'ok' | 'warn' | 'bad' | 'muted';
+  statusLabel: string;
+  usedBytes: number | null;
+  totalBytes: number | null;
+  experimental: boolean;
+  action: 'connect' | 'manage';
 }
 
-function usageTone(account: AccountDetail): 'primary' | 'warning' | 'danger' {
-  if (account.status === 'error' || account.status === 'needs_reauth') return 'danger';
-  const total = account.quotaTotalBytes;
-  const used = account.quotaUsedBytes;
-  if (typeof total === 'number' && total > 0 && typeof used === 'number' && used / total >= 0.9) return 'warning';
-  return 'primary';
+function buildProviderSlots(accounts: AccountDetail[]): ProviderSlot[] {
+  return PROVIDER_ORDER.map((provider) => {
+    const label = PROVIDER_LABELS[provider] ?? provider;
+    const list = accounts.filter((a) => a.provider === provider);
+    if (list.length === 0) {
+      return {
+        provider, label,
+        status: 'muted', statusLabel: 'Not connected',
+        usedBytes: null, totalBytes: null,
+        experimental: provider === 'mega',
+        action: 'connect',
+      };
+    }
+    const hasError = list.some((a) => a.status === 'error');
+    const needsReauth = list.some((a) => a.status === 'needs_reauth');
+    const allDisconnected = list.every((a) => a.status === 'disconnected');
+    let status: ProviderSlot['status'] = 'ok';
+    let statusLabel = 'Connected';
+    if (hasError) { status = 'bad'; statusLabel = 'Error — check account'; }
+    else if (needsReauth) { status = 'warn'; statusLabel = 'Needs attention'; }
+    else if (allDisconnected) { status = 'muted'; statusLabel = 'Not connected'; }
+    else if (list.some((a) => a.quotaStatus !== 'current')) { status = 'warn'; statusLabel = 'Quota not refreshed'; }
+    // Aggregate the provider's accounts only when every quota figure is known;
+    // partial data must never be presented as a complete quota.
+    const fullyKnown = list.every(
+      (a) => typeof a.quotaTotalBytes === 'number' && typeof a.quotaUsedBytes === 'number',
+    );
+    const usedBytes = fullyKnown ? list.reduce((sum, a) => sum + (a.quotaUsedBytes ?? 0), 0) : null;
+    const totalBytes = fullyKnown ? list.reduce((sum, a) => sum + (a.quotaTotalBytes ?? 0), 0) : null;
+    return {
+      provider, label, status, statusLabel,
+      usedBytes, totalBytes,
+      experimental: provider === 'mega',
+      action: allDisconnected ? 'connect' : 'manage',
+    };
+  });
 }
+
+interface RecentFile {
+  id: string;
+  originalName: string;
+  sizeBytes: number;
+  state: string;
+  storedAcross: string[];
+  createdAt: string;
+  completedAt: string | null;
+}
+
+const RECENT_PAGE_SIZE = 5;
 
 export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
-  const actions = useFileActions();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+
+  // Recent Files: a real, server-paged window over the whole library.
+  const [files, setFiles] = useState<RecentFile[]>([]);
+  const [filesTotal, setFilesTotal] = useState(0);
+  const [filesLoading, setFilesLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  const [fileSearch, setFileSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
   const [sortBy, setSortBy] = useState<'modified' | 'name' | 'size'>('modified');
 
-  const load = useCallback(async () => {
+  const loadSummary = useCallback(async () => {
     setLoading(true);
     // FE-04: network failures become a visible, recoverable error state
     try {
@@ -106,21 +158,72 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
     }
   }, []);
 
+  const loadFiles = useCallback(async () => {
+    setFilesLoading(true);
+    try {
+      const res = await api.listFiles(RECENT_PAGE_SIZE, page * RECENT_PAGE_SIZE, fileSearch.trim());
+      if (res.status === 200) {
+        const data = res.data as { files: RecentFile[]; total: number };
+        setFiles(data.files ?? []);
+        setFilesTotal(data.total ?? 0);
+      } else {
+        setFiles([]);
+        setFilesTotal(0);
+      }
+    } catch {
+      setFiles([]);
+      setFilesTotal(0);
+    } finally {
+      setFilesLoading(false);
+    }
+  }, [page, fileSearch]);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadSummary();
+  }, [loadSummary]);
+
+  useEffect(() => {
+    void loadFiles();
+  }, [loadFiles]);
+
+  const reloadAll = useCallback(() => {
+    void loadSummary();
+    void loadFiles();
+  }, [loadSummary, loadFiles]);
+
+  const searchTimer = useRef<number | null>(null);
+  function onSearchChange(value: string): void {
+    setFileSearch(value);
+    setPage(0);
+    if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
+    searchTimer.current = window.setTimeout(() => void loadFiles(), 250);
+  }
 
   const storage = summary?.storage;
   const accounts = summary?.accountsDetailed ?? [];
-  const healthy = accounts.filter((a) => accountHealth(a).tone === 'ok').length;
+  const healthy = accounts.filter((a) => a.status === 'connected' && a.quotaStatus === 'current').length;
   const attention = accounts.length - healthy;
-  const files = (summary?.recentFileList ?? [])
-    .filter((f) => (search ? f.originalName.toLowerCase().includes(search.toLowerCase()) : true))
+  const slots = buildProviderSlots(accounts);
+
+  const typeOptions = Array.from(new Set(files.map((f) => typeLabel(f.originalName)))).sort();
+  const visible = files
+    .filter((f) => (typeFilter === 'all' ? true : typeLabel(f.originalName) === typeFilter))
     .sort((a, b) => {
       if (sortBy === 'name') return a.originalName.localeCompare(b.originalName);
       if (sortBy === 'size') return b.sizeBytes - a.sizeBytes;
-      return (b.createdAt ?? '').localeCompare(a.createdAt ?? '');
+      return ((b.completedAt ?? b.createdAt) ?? '').localeCompare((a.completedAt ?? a.createdAt) ?? '');
     });
+
+  const fileRows: FileTableRow[] = visible.map((f) => ({
+    id: f.id,
+    originalName: f.originalName,
+    sizeBytes: f.sizeBytes,
+    state: f.state,
+    storedAcross: f.storedAcross,
+    modifiedAt: f.completedAt ?? f.createdAt,
+  }));
+
+  const totalPages = Math.max(1, Math.ceil(filesTotal / RECENT_PAGE_SIZE));
 
   const storageKnown = Boolean(storage) && storage!.usableBytes !== null && storage!.totalBytes !== null;
   const usedPct = storageKnown && (storage!.totalBytes ?? 0) > 0
@@ -134,9 +237,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
           <h1 className="page-title">Dashboard</h1>
           <p className="muted">Manage your files, cloud accounts and storage across multiple providers.</p>
         </div>
-        <button type="button" className="btn-secondary" onClick={() => void load()} disabled={loading}>
+        <button type="button" className="btn-secondary" onClick={reloadAll} disabled={loading || filesLoading}>
           <RefreshCw size={15} aria-hidden="true" />
-          {loading ? 'Refreshing…' : 'Refresh'}
+          {loading || filesLoading ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
@@ -203,57 +306,49 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
             </section>
           </div>
 
-          {/* ---- provider accounts ---- */}
+          {/* ---- provider slots: five cards, always present (reference 01) ---- */}
           <h2 className="section-title">Cloud Provider Accounts</h2>
           {loading && accounts.length === 0 ? (
             <section className="card"><SkeletonRows rows={2} /></section>
-          ) : accounts.length === 0 ? (
-            <section className="card">
-              <EmptyState
-                icon={Cloud}
-                title="No cloud accounts connected"
-                body="Connect Google Drive, Dropbox, OneDrive, pCloud or MEGA to start storing chunks across providers."
-              >
-                <button type="button" className="btn-primary" onClick={() => onNavigate('Cloud Accounts')}>
-                  <Plus size={15} aria-hidden="true" />
-                  Connect account
-                </button>
-              </EmptyState>
-            </section>
           ) : (
             <div className="provider-grid">
-              {accounts.map((account) => {
-                const health = accountHealth(account);
-                const total = account.quotaTotalBytes;
-                const used = account.quotaUsedBytes;
-                const pct = typeof total === 'number' && total > 0 && typeof used === 'number'
-                  ? Math.min(100, (used / total) * 100)
-                  : null;
+              {slots.map((slot) => {
+                const known = slot.usedBytes !== null && slot.totalBytes !== null && slot.totalBytes > 0;
                 return (
-                  <section className="provider-card" key={account.id}>
+                  <section className="provider-card" key={slot.provider}>
                     <div className="provider-card-head">
                       <span className="provider-id">
-                        <ProviderTile provider={account.provider} />
-                        <strong>{PROVIDER_LABELS[account.provider] ?? account.provider}</strong>
+                        <ProviderLogo provider={slot.provider} size={24} />
+                        <strong>{slot.label}</strong>
                       </span>
-                      {account.provider === 'mega' && <Badge tone="warn">Experimental</Badge>}
+                      {slot.experimental && <Badge tone="warn">Experimental</Badge>}
                     </div>
                     <p className="small muted">
-                      {pct === null
-                        ? 'Capacity unknown — refresh the quota on Cloud Accounts.'
-                        : `${formatBytes(used)} used of ${formatBytes(total)}`}
+                      {known
+                        ? `${formatBytes(slot.usedBytes)} used of ${formatBytes(slot.totalBytes)}`
+                        : slot.action === 'connect'
+                          ? 'Not connected yet'
+                          : 'Capacity unknown — refresh the quota on Cloud Accounts.'}
                     </p>
-                    {pct !== null && <ProgressBar value={pct} tone={usageTone(account)} />}
-                    <p className={`small provider-status status-text-${health.tone}`}>
-                      <span className={`status-dot status-${health.tone === 'bad' ? 'down' : health.tone === 'ok' ? 'ok' : 'warn'}`} aria-hidden="true" />
-                      {health.label}
+                    {known && (
+                      <ProgressBar
+                        value={Math.min(100, ((slot.usedBytes ?? 0) / (slot.totalBytes ?? 1)) * 100)}
+                        tone="success"
+                      />
+                    )}
+                    <p className={`small provider-status status-text-${slot.status}`}>
+                      <span
+                        className={`status-dot status-${slot.status === 'bad' ? 'down' : slot.status === 'ok' ? 'ok' : slot.status === 'warn' ? 'warn' : 'muted'}`}
+                        aria-hidden="true"
+                      />
+                      {slot.statusLabel}
                     </p>
                     <button
                       type="button"
                       className="btn-secondary btn-block"
                       onClick={() => onNavigate('Cloud Accounts')}
                     >
-                      Manage
+                      {slot.action === 'connect' ? 'Connect' : 'Manage'}
                     </button>
                   </section>
                 );
@@ -261,7 +356,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
             </div>
           )}
 
-          {/* ---- recent files ---- */}
+          {/* ---- recent files: real server-paged table ---- */}
           <section className="card">
             <div className="card-head">
               <h2>Recent Files</h2>
@@ -270,32 +365,43 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                   type="search"
                   aria-label="Search files"
                   placeholder="Search files..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  value={fileSearch}
+                  onChange={(e) => onSearchChange(e.target.value)}
                 />
+                <select
+                  aria-label="Filter by type"
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value)}
+                >
+                  <option value="all">All Types</option>
+                  {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
                 <select
                   aria-label="Sort files"
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as 'modified' | 'name' | 'size')}
                 >
-                  <option value="modified">Sort by: Modified</option>
+                  <option value="modified">Sort by: Modified (Newest)</option>
                   <option value="name">Sort by: Name</option>
                   <option value="size">Sort by: Size</option>
                 </select>
                 <button type="button" className="btn-secondary" onClick={() => onNavigate('Files')}>
                   View all
-                  <ArrowRight size={15} aria-hidden="true" />
                 </button>
               </div>
             </div>
 
-            {files.length === 0 ? (
+            {filesLoading && files.length === 0 ? (
+              <SkeletonRows rows={4} />
+            ) : visible.length === 0 ? (
               <EmptyState
                 icon={Upload}
-                title={search ? 'No files match your search' : 'No files yet'}
-                body={search ? 'Clear the search to see the latest files.' : 'Upload a file and it will appear here as one logical file.'}
+                title={fileSearch || typeFilter !== 'all' ? 'No files match your filters' : 'No files yet'}
+                body={fileSearch || typeFilter !== 'all'
+                  ? 'Clear the search or type filter to see more files.'
+                  : 'Upload a file and it will appear here as one logical file.'}
               >
-                {!search && (
+                {!fileSearch && typeFilter === 'all' && (
                   <button type="button" className="btn-primary" onClick={() => onNavigate('Uploads')}>
                     <Upload size={15} aria-hidden="true" />
                     Upload files
@@ -303,74 +409,73 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                 )}
               </EmptyState>
             ) : (
-              <table className="accounts-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Size</th>
-                    <th>Stored in</th>
-                    <th>Last modified</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {files.map((file) => (
-                    <tr key={file.id}>
-                      <td>
-                        <span className="file-name-cell">
-                          <TypeIcon name={file.originalName} />
-                          <span className="ellipsis">{file.originalName}</span>
-                          <Badge tone={file.state === 'completed' ? 'ok' : file.state === 'deleted' ? 'muted' : 'warn'}>
-                            {file.state}
-                          </Badge>
-                        </span>
-                      </td>
-                      <td>{formatBytes(file.sizeBytes)}</td>
-                      <td>
-                        <span className="file-name-cell">
-                          {file.storedAcross.length === 0
-                            ? <span className="muted small">Not yet placed</span>
-                            : file.storedAcross.slice(0, 2).map((p) => <ProviderTile key={p} provider={p} size={20} />)}
-                          {file.storedAcross.length > 2 && <span className="muted small">+{file.storedAcross.length - 2}</span>}
-                        </span>
-                      </td>
-                      <td className="muted small">{formatDateTime(file.createdAt)}</td>
-                      <td>
-                        <span className="actions">
+              <FileTable
+                rows={fileRows}
+                reload={reloadAll}
+                resetKey={`${page}|${typeFilter}|${fileSearch}`}
+                footer={
+                  <div className="files-footer">
+                    <span className="muted small">
+                      {typeFilter === 'all'
+                        ? `Showing ${page * RECENT_PAGE_SIZE + 1}–${page * RECENT_PAGE_SIZE + visible.length} of ${filesTotal} files`
+                        : `${visible.length} of ${filesTotal} files match “${typeFilter}” on this page`}
+                    </span>
+                    <nav className="pagination" aria-label="Recent files pagination">
+                      <button
+                        type="button"
+                        className="page-btn"
+                        disabled={page === 0 || filesLoading}
+                        aria-label="Previous page"
+                        onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      >
+                        ‹
+                      </button>
+                      {pageList(page + 1, totalPages).map((p, i) =>
+                        p === 'gap' ? (
+                          <span key={`gap-${i}`} className="pagination-gap" aria-hidden="true">…</span>
+                        ) : (
                           <button
+                            key={p}
                             type="button"
-                            className="btn-inline"
-                            disabled={file.state !== 'completed'}
-                            onClick={() => void actions.share(file, load)}
+                            className={`page-btn${p === page + 1 ? ' active' : ''}`}
+                            aria-current={p === page + 1 ? 'page' : undefined}
+                            onClick={() => setPage(p - 1)}
                           >
-                            <ShareIcon size={14} aria-hidden="true" />
-                            Share
+                            {p}
                           </button>
-                          <button type="button" className="btn-inline" onClick={() => actions.rename(file, load)}>
-                            <Pencil size={14} aria-hidden="true" />
-                            Rename
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-inline btn-inline-danger"
-                            disabled={file.state === 'deleted'}
-                            onClick={() => actions.remove(file, load)}
-                          >
-                            <Trash2 size={14} aria-hidden="true" />
-                            Delete
-                          </button>
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        ),
+                      )}
+                      <button
+                        type="button"
+                        className="page-btn"
+                        disabled={page + 1 >= totalPages || filesLoading}
+                        aria-label="Next page"
+                        onClick={() => setPage((p) => p + 1)}
+                      >
+                        ›
+                      </button>
+                    </nav>
+                  </div>
+                }
+              />
             )}
           </section>
         </div>
 
-        {/* ---- right rail: real storage usage only ---- */}
+        {/* ---- right rail: Recent Activity above Storage Usage (reference 01) ---- */}
         <aside className="dash-rail">
+          <section className="card">
+            <div className="card-head">
+              <h2>Recent Activity</h2>
+            </div>
+            {/* No activity/audit event source exists yet; the card and its slot
+                stay present with a truthful empty state (reference spec §1.5). */}
+            <EmptyState
+              icon={Activity}
+              title="No recent activity yet"
+              body="Uploads, downloads and account events will appear here."
+            />
+          </section>
           <section className="card">
             <h2>Storage Usage</h2>
             <p className="small muted">Across all providers</p>
@@ -393,17 +498,6 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
               </p>
             )}
           </section>
-          <section className="card">
-            <h2>Uploads</h2>
-            {summary && summary.activeJobs > 0 ? (
-              <p className="small"><strong>{summary.activeJobs}</strong> active upload job(s)</p>
-            ) : (
-              <p className="muted small">No uploads in progress.</p>
-            )}
-            <button type="button" className="btn-secondary btn-block" onClick={() => onNavigate('Uploads')}>
-              Open Uploads
-            </button>
-          </section>
         </aside>
       </div>
     </>
@@ -417,14 +511,14 @@ function Donut({ percent }: { percent: number }) {
   const filled = (Math.max(0, Math.min(100, percent)) / 100) * circumference;
   return (
     <svg width="96" height="96" viewBox="0 0 88 88" role="img" aria-label={`${percent}% of quota used`}>
-      <circle cx="44" cy="44" r={radius} fill="none" stroke="var(--cn-surface-muted)" strokeWidth="11" />
+      <circle cx="44" cy="44" r={radius} fill="none" stroke="var(--cn-surface-muted)" strokeWidth="9" />
       <circle
         cx="44"
         cy="44"
         r={radius}
         fill="none"
         stroke="var(--cn-primary)"
-        strokeWidth="11"
+        strokeWidth="9"
         strokeLinecap="round"
         strokeDasharray={`${filled} ${circumference - filled}`}
         transform="rotate(-90 44 44)"

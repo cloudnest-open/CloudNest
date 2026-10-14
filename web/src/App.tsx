@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Cloud, House, Folder, CloudUpload, Download, Link, Settings as SettingsIcon,
-  Sun, Moon, LogOut, Search, ChevronDown, UserRound,
+  Sun, Moon, LogOut, Search, ChevronDown, Bell,
 } from 'lucide-react';
 import { api, refreshCsrfToken } from './api.js';
 import { FirstRunPage, LoginPage } from './pages/AuthPages.js';
@@ -12,7 +12,7 @@ import { DashboardPage } from './pages/DashboardPage.js';
 import { DownloadsPage } from './pages/DownloadsPage.js';
 import { SharedLinksPage } from './pages/SharedLinksPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
-import { ToastProvider } from './components/ui.js';
+import { EmptyState, ToastProvider } from './components/ui.js';
 import { FileActionsProvider } from './components/FileActionsProvider.js';
 import { currentTheme, toggleTheme } from './theme.js';
 import { setConfirmDestructivePreference, ConfirmHost } from './confirm.js';
@@ -46,7 +46,7 @@ function formatBytes(bytes: number): string {
   let value = bytes / 1024;
   let i = 0;
   while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[i]}`;
+  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
 }
 
 interface SearchHit {
@@ -68,6 +68,11 @@ export default function App() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [theme, setTheme] = useState(currentTheme());
+  // Real account identity from the backend drives the avatar initials.
+  const [username, setUsername] = useState('admin');
+  // Notification bell: a real toggle whose panel truthfully reports the
+  // (currently empty) notification list — never a decorative icon.
+  const [bellOpen, setBellOpen] = useState(false);
   // Global search over CloudNest-managed files (real data; never a fake index).
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -89,6 +94,8 @@ export default function App() {
         }
         const me = await api.me();
         const authenticated = (me.data as { authenticated?: boolean })?.authenticated === true;
+        const meUsername = (me.data as { username?: string }).username;
+        if (meUsername) setUsername(meUsername);
         setAuthState(authenticated ? 'ready' : 'login');
       } catch {
         setServerError('Cannot reach the local server. Is CloudNest running?');
@@ -238,9 +245,11 @@ export default function App() {
           })}
         </nav>
         <div className="sidebar-footer">
-          <span className={health ? 'status-dot status-ok' : 'status-dot status-down'} aria-hidden="true" />
-          <span className="status-text">
-            {health ? `Local server: connected (v${health.version})` : 'Local server: not connected'}
+          <span className="status-line">
+            <span className={health ? 'status-dot status-ok' : 'status-dot status-down'} aria-hidden="true" />
+            <span className="status-text">
+              {health ? `Local server: connected (v${health.version})` : 'Local server: not connected'}
+            </span>
           </span>
           <button
             type="button"
@@ -321,6 +330,37 @@ export default function App() {
               </div>
             )}
           </div>
+          <div className="bell-menu">
+            <button
+              type="button"
+              className="bell-btn"
+              aria-haspopup="dialog"
+              aria-expanded={bellOpen}
+              aria-label="Notifications"
+              title="Notifications"
+              onClick={() => setBellOpen((open) => !open)}
+            >
+              <Bell size={17} aria-hidden="true" />
+            </button>
+            {bellOpen && (
+              <>
+                <button
+                  type="button"
+                  className="account-scrim"
+                  aria-label="Close notifications"
+                  tabIndex={-1}
+                  onClick={() => setBellOpen(false)}
+                />
+                <div className="account-dropdown bell-dropdown" role="dialog" aria-label="Notifications">
+                  <EmptyState
+                    icon={Bell}
+                    title="No notifications yet"
+                    body="Upload, share and account events will appear here."
+                  />
+                </div>
+              </>
+            )}
+          </div>
           <div className="account-menu">
             <button
               type="button"
@@ -329,11 +369,9 @@ export default function App() {
               aria-expanded={accountOpen}
               onClick={() => setAccountOpen((open) => !open)}
             >
-              <span className="account-avatar" aria-hidden="true">
-                <UserRound size={16} />
-              </span>
+              <span className="account-avatar" aria-hidden="true">{username.charAt(0).toUpperCase()}</span>
               <span className="account-text">
-                <strong>admin</strong>
+                <strong>{username}</strong>
                 <span className="muted">CloudNest administrator</span>
               </span>
               <ChevronDown size={15} aria-hidden="true" className="muted" />

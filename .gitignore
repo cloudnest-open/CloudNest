@@ -31,3 +31,9 @@ data/
 .DS_Store
 Thumbs.db
 .directory
+
+# Browser verification artifacts (screenshots/snapshots, never committed)
+.playwright-mcp/
+
+# Visual-test fixture database (spec §1.4 — test-only, never in production)
+fixture-data/

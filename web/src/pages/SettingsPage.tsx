@@ -68,7 +68,7 @@ function formatBytes(bytes: number): string {
   let value = bytes / 1024;
   let i = 0;
   while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
-  return `${value.toFixed(1)} ${units[i]}`;
+  return `${value.toFixed(1)}\u00A0${units[i]}`;
 }
 
 export function SettingsPage() {

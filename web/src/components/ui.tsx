@@ -4,7 +4,7 @@ import {
 } from 'react';
 import {
   AlertTriangle, CheckCircle2, Info, X, Cloud, Folder, FileText, FileArchive,
-  FileSpreadsheet, FileImage, Presentation, File, type LucideIcon,
+  FileSpreadsheet, FileImage, Presentation, File, Trash2, type LucideIcon,
 } from 'lucide-react';
 
 /**
@@ -22,7 +22,7 @@ export function formatBytes(bytes: number | null | undefined): string {
   let value = bytes / 1024;
   let i = 0;
   while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[i]}`;
+  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
 }
 
 /** Locale date-time, e.g. "Oct 14, 2026, 10:24 AM". */
@@ -71,6 +71,28 @@ export function ProviderTile({ provider, size = 28 }: { provider: string; size?:
 
 /* --- file type icon ------------------------------------------------------ */
 
+/**
+ * Friendly type word derived from the real file name (never invented data):
+ * the Files table and Dashboard's Recent Files show this in a Type column.
+ */
+export function typeLabel(name: string): string {
+  const lower = name.toLowerCase();
+  const dot = lower.lastIndexOf('.');
+  const ext = dot >= 0 ? lower.slice(dot + 1) : '';
+  if (['xlsx', 'xls', 'csv'].includes(ext)) return 'Excel';
+  if (['docx', 'doc', 'odt', 'rtf'].includes(ext)) return 'Word';
+  if (['pptx', 'ppt', 'odp'].includes(ext)) return 'PowerPoint';
+  if (ext === 'pdf') return 'PDF';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'Zip';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp'].includes(ext)) return 'Image';
+  if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) return 'Video';
+  if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(ext)) return 'Audio';
+  if (ext === 'fig') return 'Figma';
+  if (['txt', 'md'].includes(ext)) return 'Text';
+  if (ext === '') return 'File';
+  return ext.toUpperCase();
+}
+
 export function TypeIcon({ name, size = 18 }: { name: string; size?: number }) {
   const lower = name.toLowerCase();
   const pick = (Icon: LucideIcon, color: string) => (
@@ -97,7 +119,7 @@ export function FolderIcon({ size = 18 }: { size?: number }) {
 
 /* --- progress ------------------------------------------------------------ */
 
-export function ProgressBar({ value, tone = 'primary' }: { value: number; tone?: 'primary' | 'warning' | 'danger' }) {
+export function ProgressBar({ value, tone = 'primary' }: { value: number; tone?: 'primary' | 'success' | 'warning' | 'danger' }) {
   const pct = Math.max(0, Math.min(100, value));
   return (
     <div className="progress-track" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
@@ -138,6 +160,19 @@ export function SkeletonRows({ rows = 3 }: { rows?: number }) {
       ))}
     </div>
   );
+}
+
+/** Compact numbered page window like the reference: 1 … p-1 p p+1 … N. */
+export function pageList(current: number, count: number): Array<number | 'gap'> {
+  if (count <= 7) return Array.from({ length: count }, (_, i) => i + 1);
+  const pages: Array<number | 'gap'> = [1];
+  const lo = Math.max(2, current - 1);
+  const hi = Math.min(count - 1, current + 1);
+  if (lo > 2) pages.push('gap');
+  for (let p = lo; p <= hi; p++) pages.push(p);
+  if (hi < count - 1) pages.push('gap');
+  pages.push(count);
+  return pages;
 }
 
 /* --- dialog (focus-trapped, Escape closes) ------------------------------- */
@@ -223,7 +258,7 @@ export function ConfirmDialog({ title, lines, confirmLabel, onConfirm, onClose }
       }
     >
       <div className="confirm-body">
-        <span className="confirm-icon" aria-hidden="true"><AlertTriangle size={16} /></span>
+        <span className="confirm-icon" aria-hidden="true"><Trash2 size={16} /></span>
         <div>
           <p className="confirm-line">{lines[0]}</p>
           <p className="small">{lines[1]}</p>

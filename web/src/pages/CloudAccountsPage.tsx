@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ProviderInfo, type AccountInfo } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
+import { ProviderLogo } from '../components/ProviderLogo.js';
 
 /**
  * Cloud Accounts: real database rows only. Unknown quota is shown as unknown,
@@ -17,7 +18,7 @@ function formatBytes(bytes: number | null): string {
     value /= 1024;
     i++;
   }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[i]}`;
+  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
 }
 
 function statusLabel(account: AccountInfo): { text: string; tone: string } {
@@ -181,7 +182,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     <>
       <div className="page-head">
         <h1 className="page-title">Cloud Accounts</h1>
-        <button type="button" className="btn-primary btn-inline" onClick={() => setPickerOpen((v) => !v)}>
+        <button type="button" className="btn-primary btn-compact" onClick={() => setPickerOpen((v) => !v)}>
           + Connect Account
         </button>
       </div>
@@ -207,7 +208,10 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
               return (
                 <div key={p.id} className="provider-card">
                   <div className="provider-card-head">
-                    <strong>{p.displayName}</strong>
+                    <span className="provider-id">
+                      <ProviderLogo provider={p.id} size={24} />
+                      <strong>{p.displayName}</strong>
+                    </span>
                     {p.experimental && <span className="tag tag-warn">Experimental</span>}
                   </div>
                   <p className={`setup-state setup-${s.tone}`}>Setup: {s.text}</p>
@@ -281,7 +285,10 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                 return (
                   <tr key={a.id}>
                     <td>
-                      {a.displayName}
+                      <span className="file-name-cell">
+                        <ProviderLogo provider={a.provider} size={20} />
+                        {a.displayName}
+                      </span>
                       {a.experimental && <span className="tag tag-warn">Beta</span>}
                     </td>
                     <td className="ellipsis">{a.displayLabel}</td>

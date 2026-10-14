@@ -1,7 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, type ProviderInfo } from '../api.js';
+import { ProviderLogo } from './ProviderLogo.js';
 
-/** Settings → Provider Setup: one-time app credentials per provider. */
+/**
+ * Settings → Provider Setup: one-time app credentials per provider
+ * (reference spec §12.2). The heading and card live in SettingsPage; this
+ * renders the per-provider rows: identity mark + status pill, then the
+ * Client ID → Client secret → callback URI (+ Copy) → note → Save/Cancel form.
+ */
 export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -53,8 +59,7 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
   }
 
   return (
-    <section className="card">
-      <h2>Provider Setup</h2>
+    <>
       <p className="muted">
         Configure CloudNest's own application credentials once per provider. This is separate from connecting
         your accounts — the Connect button cannot bypass each provider's app registration.
@@ -66,6 +71,7 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
         {providers.map((p) => (
           <div key={p.id} className="setup-row">
             <div className="setup-row-head">
+              <ProviderLogo provider={p.id} size={22} />
               <strong>{p.displayName}</strong>
               <span className={`state state-${p.verificationStatus === 'verified' ? 'ok' : p.verificationStatus === 'needs_correction' ? 'bad' : 'warn'}`}>
                 {!p.requiresAppConfig
@@ -143,6 +149,6 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
           </div>
         ))}
       </div>
-    </section>
+    </>
   );
 }

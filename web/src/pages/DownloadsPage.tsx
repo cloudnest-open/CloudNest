@@ -41,7 +41,7 @@ function formatBytes(bytes: number | null | undefined): string {
     value /= 1024;
     i++;
   }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[i]}`;
+  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
 }
 
 const ERROR_HELP: Record<string, string> = {

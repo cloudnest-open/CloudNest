@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { CloudUpload, Pause, Play, RotateCcw, X } from 'lucide-react';
 import { api } from '../api.js';
 
 /**
@@ -66,7 +67,7 @@ function formatBytes(bytes: number | null | undefined): string {
     value /= 1024;
     i++;
   }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[i]}`;
+  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
 }
 
 /** The exact safe codes the server may return, with plain-language remedies. */
@@ -110,6 +111,10 @@ export function UploadsPage() {
   const [resumeReport, setResumeReport] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const runningRef = useRef(false);
+  // Drag-and-drop surface (design pack §9): the hidden input still carries the
+  // real file; the dropzone button and drop events both feed it.
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadSummary = useCallback(async () => {
     // FE-04: an unreachable server is reported, not hidden behind stale zeros
@@ -455,10 +460,13 @@ export function UploadsPage() {
           streamed straight to your connected accounts.
         </p>
         <div className="upload-form">
-          <label htmlFor="upload-file">File</label>
           <input
+            ref={fileInputRef}
             id="upload-file"
             type="file"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
             onChange={(e) => {
               setSelected(e.target.files?.[0] ?? null);
               setPlannedChunks(null);
@@ -467,6 +475,44 @@ export function UploadsPage() {
               setResumeReport(null);
             }}
           />
+          <button
+            type="button"
+            className={`dropzone${dragOver ? ' dragover' : ''}`}
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const file = e.dataTransfer.files?.[0];
+              if (!file) return;
+              setSelected(file);
+              setPlannedChunks(null);
+              setJobId(null);
+              setNotice(null);
+              setResumeReport(null);
+            }}
+          >
+            <CloudUpload className="dropzone-icon" size={28} strokeWidth={1.6} aria-hidden="true" />
+            <strong>Drag &amp; drop a file here</strong>
+            <span className="muted">or click to choose a file from your device</span>
+          </button>
+          {selected ? (
+            <p className="dropzone-hint">
+              <strong>{selected.name}</strong> — {formatBytes(selected.size)}{' '}
+              <button
+                type="button"
+                className="btn-inline"
+                disabled={uploading}
+                onClick={() => { setSelected(null); setPlannedChunks(null); setJobId(null); }}
+              >
+                <X size={13} aria-hidden="true" />
+                Remove
+              </button>
+            </p>
+          ) : (
+            <p className="muted small dropzone-hint">The file stays on this device; only its chunks are sent.</p>
+          )}
           <label htmlFor="upload-chunk-size">Chunk size</label>
           <select
             id="upload-chunk-size"
@@ -559,10 +605,22 @@ export function UploadsPage() {
             </p>
           )}
           <div className="actions">
-            <button type="button" className="btn-secondary" disabled={!(currentJob.jobId === jobId) || busy || uploading} onClick={() => void pause()}>Pause</button>
-            <button type="button" className="btn-secondary" disabled={!(currentJob.jobId === jobId) || busy || uploading} onClick={() => void resume()}>Resume</button>
-            <button type="button" className="btn-secondary" disabled={!(currentJob.jobId === jobId) || busy || uploading} onClick={() => void retry()}>Retry</button>
-            <button type="button" className="btn-danger" disabled={!(currentJob.jobId === jobId) || busy || !currentJob.cancellable} onClick={() => void cancel()}>Cancel</button>
+            <button type="button" className="btn-secondary btn-compact" disabled={!(currentJob.jobId === jobId) || busy || uploading} onClick={() => void pause()}>
+              <Pause size={14} aria-hidden="true" />
+              Pause
+            </button>
+            <button type="button" className="btn-secondary btn-compact" disabled={!(currentJob.jobId === jobId) || busy || uploading} onClick={() => void resume()}>
+              <Play size={14} aria-hidden="true" />
+              Resume
+            </button>
+            <button type="button" className="btn-secondary btn-compact" disabled={!(currentJob.jobId === jobId) || busy || uploading} onClick={() => void retry()}>
+              <RotateCcw size={14} aria-hidden="true" />
+              Retry
+            </button>
+            <button type="button" className="btn-danger btn-compact" disabled={!(currentJob.jobId === jobId) || busy || !currentJob.cancellable} onClick={() => void cancel()}>
+              <X size={14} aria-hidden="true" />
+              Cancel
+            </button>
           </div>
         </section>
       )}
