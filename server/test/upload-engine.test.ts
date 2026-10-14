@@ -300,6 +300,111 @@ test('re-uploading a chunk deactivates the previous placement instead of duplica
   }
 });
 
+// ---- UL-1: terminal states stay terminal ----------------------------------
+
+test('UL-1: a cancelled job cannot be resurrected by pause or resume', async () => {
+  const { db, close, service, q } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 16 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    await service.cancel(plan.jobId);
+    const afterCancel = q.getJob.get(plan.jobId) as { state: string };
+    assert.ok(['cancelled', 'deletion_pending'].includes(afterCancel.state));
+
+    assert.throws(() => service.pause(plan.jobId), /job_not_resumable/, 'pause refuses a cancelled job');
+    assert.throws(() => service.resume(plan.jobId), /job_not_resumable/, 'resume refuses a cancelled job');
+    const still = q.getJob.get(plan.jobId) as { state: string };
+    assert.equal(still.state, afterCancel.state, 'the terminal state is unchanged');
+  } finally {
+    close();
+  }
+});
+
+test('UL-1: a completed job cannot be retried back into running', () => {
+  const { db, close, service, q } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 8 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.commitChunk({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a0.objectKey,
+      remoteObjectId: 'r1', sha256: 'c'.repeat(64), sizeBytes: 8 * MIB,
+    });
+    assert.equal((q.getJob.get(plan.jobId) as { state: string }).state, 'completed');
+    assert.throws(() => service.resume(plan.jobId), /job_not_resumable/, 'resume refuses a completed job');
+    assert.throws(() => service.pause(plan.jobId), /job_not_resumable/, 'pause refuses a completed job');
+    assert.equal((q.getJob.get(plan.jobId) as { state: string }).state, 'completed', 'stays complete');
+  } finally {
+    close();
+  }
+});
+
+// ---- UL-3: no remote object is orphaned ----------------------------------
+
+test('UL-3: a failure after the object exists records a cleanup obligation', () => {
+  const { db, close, service, q } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 8 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    // the object exists remotely (e.g. hash/size mismatch after upload)
+    service.recordFailure({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a0.objectKey,
+      safeCode: 'chunk_hash_mismatch', bytesReceived: 8 * MIB, remoteObjectId: 'remote-orphan-1',
+    });
+    const attempt = q.getAttempt.get(a0.attemptId) as { state: string; remote_object_id: string | null };
+    assert.equal(attempt.state, 'cleanup_pending', 'a live remote object becomes a durable obligation');
+    assert.equal(attempt.remote_object_id, 'remote-orphan-1');
+    const obligations = service.pendingCleanups() as Array<{ id: string }>;
+    assert.equal(obligations.length, 1, 'the obligation is visible to the cleanup sweeper');
+  } finally {
+    close();
+  }
+});
+
+test('UL-3: a failure before any object exists stays a plain failure', () => {
+  const { db, close, service, q } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 8 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.recordFailure({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a0.objectKey,
+      safeCode: 'provider_unavailable', bytesReceived: 0, remoteObjectId: null,
+    });
+    assert.equal((q.getAttempt.get(a0.attemptId) as { state: string }).state, 'failed');
+    assert.equal((service.pendingCleanups() as unknown[]).length, 0, 'nothing to clean up');
+  } finally {
+    close();
+  }
+});
+
+test('UL-3: cancel sweeps every attempt of a chunk, not just the newest', async () => {
+  const { db, close, service, q } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 8 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    // attempt 1 uploads an object, then fails with a mismatch -> obligation
+    const a1 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.recordFailure({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a1.objectKey,
+      safeCode: 'chunk_size_mismatch', bytesReceived: 100, remoteObjectId: 'orphan-old',
+    });
+    // attempt 2 is the newer, live one
+    const a2 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    const attemptsForChunk = (q.listAttemptsForChunk.all(plan.jobId, 0) as Array<{ id: string; state: string }>);
+    assert.equal(attemptsForChunk.length, 2, 'two attempts exist for the chunk');
+    // the old attempt must still be reachable as an obligation after cancel
+    await service.cancel(plan.jobId);
+    const states = (q.listAttemptsForChunk.all(plan.jobId, 0) as Array<{ id: string; state: string }>)
+      .map((a) => a.state);
+    assert.ok(!states.includes('failed'), 'no attempt is left merely failed while holding an object');
+    void a2;
+  } finally {
+    close();
+  }
+});
+
 test('resume reports only the chunks that are still missing', () => {
   const { db, close, service } = setup();
   try {

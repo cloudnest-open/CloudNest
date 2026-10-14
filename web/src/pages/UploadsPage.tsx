@@ -93,6 +93,8 @@ export function UploadsPage() {
   const [chunkMiB, setChunkMiB] = useState<number>(DEFAULT_CHUNK_MIB);
   const [plannedChunks, setPlannedChunks] = useState<ChunkPlanEntry[] | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  /** FE-01: the job picked from Recent uploads for a restart resume. */
+  const [resumeTarget, setResumeTarget] = useState<JobView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
@@ -216,6 +218,24 @@ export function UploadsPage() {
         for (let i = 0; i < job.chunksTotal; i++) if (!done.has(i)) indices.push(i);
       }
 
+      // FE-03: the job's PERSISTED geometry drives every slice, never the
+      // current chunk-size select — after a restart that select may differ
+      // from the plan this job was created with.
+      const geometry = new Map<number, { offsetBytes: number; sizeBytes: number }>();
+      for (let off = 0; ; off += 500) {
+        const page = await api.resumeManifest(id, off, 500);
+        if (page.status !== 200) break;
+        const pageChunks = (page.data as { chunks: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number }> }).chunks ?? [];
+        for (const c of pageChunks) geometry.set(c.chunkIndex, { offsetBytes: c.offsetBytes, sizeBytes: c.sizeBytes });
+        if (pageChunks.length < 500) break;
+      }
+      const jobResGeom = await api.getUploadJob(id);
+      const chunksTotal = jobResGeom.status === 200 ? (jobResGeom.data as { job: JobView }).job.chunksTotal : 0;
+      const fallbackGeometry = (index: number): { offsetBytes: number; sizeBytes: number } => {
+        const offset = index * chunkSizeBytes;
+        return { offsetBytes: offset, sizeBytes: Math.min(chunkSizeBytes, Math.max(0, selected.size - offset)) };
+      };
+
       let cursor = 0;
       const workerCount = Math.min(MAX_GLOBAL_WORKERS, Math.max(1, indices.length));
       const workers = Array.from({ length: workerCount }, async () => {
@@ -224,10 +244,9 @@ export function UploadsPage() {
           const chunkIndex = indices[cursor++] as number;
           // at most two chunks in flight per account is enforced server-side by
           // the persisted allocation; the client keeps its own global bound
-          const offset = chunkIndex * chunkSizeBytes;
-          const size = Math.min(chunkSizeBytes, selected.size - offset);
-          if (size <= 0) continue;
-          const slice = selected.slice(offset, offset + size);
+          const geo = geometry.get(chunkIndex) ?? fallbackGeometry(chunkIndex);
+          if (geo.sizeBytes <= 0 || geo.offsetBytes >= selected.size) continue;
+          const slice = selected.slice(geo.offsetBytes, geo.offsetBytes + geo.sizeBytes);
           const res = await api.uploadChunkRaw(id, chunkIndex, slice);
           if (res.status !== 200) {
             const described = describeError(res.data, 'A chunk failed to upload.');
@@ -257,21 +276,32 @@ export function UploadsPage() {
   /**
    * Resume after a browser restart: re-read only the chunks that already
    * completed, comparing each source slice with its stored digest.
+   * FE-01: the job is picked from Recent uploads (resumeTarget), so the flow
+   * survives a restart where no plan was created in this session.
+   * FE-03: the manifest is paged fully (the server caps one page at 500).
    */
   async function prepareResume(): Promise<void> {
-    if (!jobId || !selected) {
-      setError('Choose the original file, then use Resume.');
+    const target = resumeTarget;
+    if (!target || !selected) {
+      setError('Pick the interrupted upload below and choose the original file, then use Resume.');
       return;
     }
+    const targetId = target.jobId;
     setBusy(true);
     setError(null);
     try {
-      const manifest = await api.resumeManifest(jobId, 1000);
-      if (manifest.status !== 200) {
-        setError('Could not read the resume information for this upload.');
-        return;
+      // page through the whole manifest; the server caps one page at 500
+      const chunks: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number; sha256: string }> = [];
+      for (let off = 0; ; off += 500) {
+        const page = await api.resumeManifest(targetId, off, 500);
+        if (page.status !== 200) {
+          setError('Could not read the resume information for this upload.');
+          return;
+        }
+        const pageChunks = (page.data as { chunks: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number; sha256: string }> }).chunks ?? [];
+        chunks.push(...pageChunks);
+        if (pageChunks.length < 500) break;
       }
-      const chunks = (manifest.data as { chunks: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number; sha256: string }> }).chunks ?? [];
       // verify only completed slices; other bytes were never read, so they have
       // no earlier digest and cannot be compared (documented V1 limitation)
       const mismatched: number[] = [];
@@ -286,7 +316,7 @@ export function UploadsPage() {
         return;
       }
       const done = new Set(chunks.map((c) => c.chunkIndex));
-      const jobRes = await api.getUploadJob(jobId);
+      const jobRes = await api.getUploadJob(targetId);
       const total = jobRes.status === 200 ? (jobRes.data as { job: JobView }).job.chunksTotal : 0;
       const missing: number[] = [];
       for (let i = 0; i < total; i++) if (!done.has(i)) missing.push(i);
@@ -295,7 +325,8 @@ export function UploadsPage() {
         `Verified ${chunks.length} previously uploaded chunk(s); ${missing.length} still to send. ` +
           'Note: chunks that were never uploaded cannot be compared with an earlier checksum because those bytes were never read.',
       );
-      await runUpload(jobId, missing);
+      setJobId(targetId);
+      await runUpload(targetId, missing);
     } finally {
       setBusy(false);
     }

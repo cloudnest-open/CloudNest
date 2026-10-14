@@ -105,8 +105,8 @@ export const api = {
     request('POST', '/api/uploads/plan', body, { 'idempotency-key': idempotencyKey }),
   listUploads: () => request('GET', '/api/uploads'),
   getUploadJob: (jobId: string) => request('GET', `/api/uploads/${jobId}`),
-  resumeManifest: (jobId: string, limit = 200) =>
-    request('GET', `/api/uploads/${jobId}/resume-manifest?limit=${limit}`),
+  resumeManifest: (jobId: string, offset = 0, limit = 200) =>
+    request('GET', `/api/uploads/${jobId}/resume-manifest?offset=${offset}&limit=${limit}`),
   pauseUpload: (jobId: string) => request('POST', `/api/uploads/${jobId}/pause`),
   resumeUpload: (jobId: string) => request('POST', `/api/uploads/${jobId}/resume`),
   cancelUpload: (jobId: string) => request('POST', `/api/uploads/${jobId}/cancel`),

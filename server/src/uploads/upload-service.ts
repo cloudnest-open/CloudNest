@@ -419,9 +419,18 @@ export class UploadService {
         id: attempt.id, bytes_received: input.bytesReceived, sha256: null,
         remote_object_id: input.remoteObjectId ?? null, updated_at: now,
       });
-      this.q.markAttemptFailed.run({
-        id: attempt.id, safe_error_code: input.safeCode, bytes_received: input.bytesReceived, updated_at: now,
-      });
+      if (input.remoteObjectId) {
+        // UL-3: a live remote object must not leak. The obligation is recorded
+        // before anything else so a crash cannot forget it; retryPendingCleanups
+        // and cancel() both sweep cleanup_pending rows.
+        this.q.markAttemptCleanupPending.run({
+          id: attempt.id, safe_error_code: input.safeCode, updated_at: now,
+        });
+      } else {
+        this.q.markAttemptFailed.run({
+          id: attempt.id, safe_error_code: input.safeCode, bytes_received: input.bytesReceived, updated_at: now,
+        });
+      }
     } else {
       // no attempt row (validation failed before any remote work)
       this.q.insertAttempt.run({
@@ -432,9 +441,16 @@ export class UploadService {
       });
       const fresh = this.q.getAttemptByObjectKey.get(input.objectKey) as { id: string } | undefined;
       if (fresh) {
-        this.q.markAttemptFailed.run({
-          id: fresh.id, safe_error_code: input.safeCode, bytes_received: input.bytesReceived, updated_at: now,
-        });
+        if (input.remoteObjectId) {
+          // UL-3: same obligation as above for the freshly-inserted attempt row
+          this.q.markAttemptCleanupPending.run({
+            id: fresh.id, safe_error_code: input.safeCode, updated_at: now,
+          });
+        } else {
+          this.q.markAttemptFailed.run({
+            id: fresh.id, safe_error_code: input.safeCode, bytes_received: input.bytesReceived, updated_at: now,
+          });
+        }
       }
     }
     const allocation = this.q.getAllocation.get(input.jobId, input.chunkIndex) as AllocationRow | undefined;
@@ -499,7 +515,11 @@ export class UploadService {
   pause(jobId: string): void {
     const job = this.q.getJob.get(jobId) as JobRow | undefined;
     if (!job) throw new UploadError('job_not_found', 404);
-    if (job.state === 'completed') throw new UploadError('job_not_resumable', 409);
+    // UL-1: a cancelled job is terminal; pausing it would let resume()
+    // resurrect work the user explicitly discarded.
+    if (job.state === 'completed' || job.state === 'cancelled') {
+      throw new UploadError('job_not_resumable', 409);
+    }
     this.q.updateJobState.run({
       id: jobId, state: 'paused', last_safe_error_code: job.last_safe_error_code, updated_at: new Date().toISOString(),
     });
@@ -509,7 +529,12 @@ export class UploadService {
   resume(jobId: string): { missingChunks: number[] } {
     const job = this.q.getJob.get(jobId) as JobRow | undefined;
     if (!job?.file_id) throw new UploadError('job_not_found', 404);
-    if (job.state === 'cancelled') throw new UploadError('job_not_resumable', 409);
+    // UL-1: both terminal states refuse; retry on a completed job would flip
+    // it to running with zero missing chunks, cancel on a cancelled job would
+    // silently resurrect discarded work.
+    if (job.state === 'cancelled' || job.state === 'completed') {
+      throw new UploadError('job_not_resumable', 409);
+    }
     const done = new Set(
       (this.q.listChunks.all(job.file_id) as Array<{ chunk_index: number }>).map((c) => c.chunk_index),
     );
@@ -530,11 +555,13 @@ export class UploadService {
     const job = this.q.getJob.get(jobId) as JobRow | undefined;
     if (!job) throw new UploadError('job_not_found', 404);
     const allocations = this.q.listAllocations.all(jobId) as AllocationRow[];
-    const attempts = allocations.map((a) =>
-      (this.q.listAttemptsForChunk.all(jobId, a.chunk_index) as Array<{
+    // UL-3: every superseded attempt may hold a live remote object; sweeping
+    // only the newest one leaked permanent provider orphans.
+    const attempts = allocations.flatMap((a) =>
+      this.q.listAttemptsForChunk.all(jobId, a.chunk_index) as Array<{
         id: string; object_key: string; state: string; remote_object_id: string | null; provider_account_id: string;
-      }>)[0],
-    ).filter((a): a is NonNullable<typeof a> => a !== undefined);
+      }>,
+    );
 
     let cleaned = 0;
     let cleanupPending = false;

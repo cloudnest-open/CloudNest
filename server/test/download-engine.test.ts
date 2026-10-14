@@ -221,6 +221,55 @@ test('the default budget is 128 MiB as the plan specifies', () => {
   assert.equal(GLOBAL_BUDGET_BYTES, 128 * 1024 * 1024);
 });
 
+// DL-1 regression: one drain pass must not grant two waiters that only fit
+// jointly. Pre-fix, both 64-byte waiters below resolved against the stale
+// total and the peak reached 168 instead of the true bound of 104.
+test('multiple queued waiters can never jointly exceed the capacity (DL-1)', async () => {
+  const budget = new MemoryBudget(100);
+  const r1 = await budget.acquire(40);
+  const r2 = await budget.acquire(40);
+  assert.equal(budget.usedBytes, 80);
+
+  const grants: number[] = [];
+  const w1 = budget.acquire(64).then((release) => { grants.push(1); return release; });
+  const w2 = budget.acquire(64).then((release) => { grants.push(2); return release; });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(grants, [], 'neither over-capacity waiter is granted yet');
+
+  r1(); // frees 40; inUse = 40 while r2 still holds its 40
+  await new Promise((r) => setTimeout(r, 10));
+  // 40 + 64 = 104 > 100, so even the first waiter must STILL wait;
+  // nothing may be granted until the true total fits.
+  assert.deepEqual(grants, [], 'a grant is issued only when the true total fits');
+  assert.ok(budget.usedBytes <= 100, 'the committed total never exceeds capacity');
+
+  r2(); // frees the remaining 40; now one 64-byte waiter fits (64 <= 100)
+  const rel1 = await w1;
+  assert.deepEqual(grants, [1], 'exactly one waiter is granted');
+  assert.ok(budget.usedBytes <= 100);
+  assert.ok(budget.peakBytes <= 100, 'the observed peak never exceeds the capacity');
+
+  rel1();
+  const rel2 = await w2;
+  assert.deepEqual(grants, [1, 2], 'the second waiter follows once capacity frees');
+  assert.ok(budget.peakBytes <= 100);
+  rel2();
+  assert.equal(budget.usedBytes, 0, 'all permits are returned');
+});
+
+test('a single drain pass cannot over-commit two jointly-fitting waiters (DL-1)', async () => {
+  const budget = new MemoryBudget(128);
+  const hold = await budget.acquire(80);
+  const a = budget.acquire(64);
+  const b = budget.acquire(64);
+  hold(); // frees 80; 64+64=128 fits ONLY jointly with nothing else held
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(budget.usedBytes, 128, 'both grants are accounted: exactly the capacity');
+  assert.ok(budget.peakBytes <= 128, 'the peak stays within the capacity');
+  ra(); rb();
+  assert.equal(budget.usedBytes, 0);
+});
+
 test('releasing a permit twice cannot corrupt the accounting', async () => {
   const budget = new MemoryBudget(100);
   const release = await budget.acquire(50);
