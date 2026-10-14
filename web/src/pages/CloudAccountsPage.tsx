@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ProviderInfo, type AccountInfo } from '../api.js';
+import { confirmDestructive } from '../confirm.js';
 
 /**
  * Cloud Accounts: real database rows only. Unknown quota is shown as unknown,
@@ -127,7 +128,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   }
 
   async function disconnect(account: AccountInfo) {
-    if (!window.confirm(`Disconnect ${account.displayLabel}? Local credentials are removed. No remote files are deleted.`)) return;
+    if (!(await confirmDestructive(`Disconnect ${account.displayLabel}? Local credentials are removed. No remote files are deleted.`))) return;
     await withBusy(account.id, async () => {
       const res = await api.disconnect(account.id);
       const data = res.data as { warning?: string | null };

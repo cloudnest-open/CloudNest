@@ -80,6 +80,8 @@ export function assessAccountCapacity(input: AccountCapacityInput): AccountCapac
       safeNonNegative(input.outstandingReservationBytes) -
       safeNonNegative(input.safetyMarginBytes ?? DEFAULT_SAFETY_MARGIN_BYTES),
   );
+  // usableNow === 0 is NOT usable space: a fully reserved or exactly-full
+  // account must never be offered as a placement target.
   if (usableNow <= 0) {
     return { ...base, eligible: false, reasonCode: 'no_usable_space' };
   }
@@ -123,22 +125,69 @@ export interface AllocationAssignment {
 }
 
 /**
+ * Routing policy for a plan (M12.a `upload.spaceAwareRouting`).
+ *
+ * - `capacity-aware` (default, and the V1 behaviour): chunks are placed into
+ *   the account with the most usable space first.
+ * - `balanced`: chunks are spread round-robin across the eligible accounts so
+ *   no single provider fills up first, while EVERY account still stays within
+ *   its own usable byte budget.
+ *
+ * Both strategies obey the same hard rules: a chunk is a whole unit placed in a
+ * single account, and an account is never assigned more than its usable bytes.
+ */
+export type RoutingStrategy = 'capacity-aware' | 'balanced';
+
+/**
  * Capacity-aware assignment. Deterministic given the same inputs: chunks are
  * filled from accounts in descending usable-space order, always allocating a
  * whole chunk to a single account.
+ *
+ * With `balanced` the chunks are distributed round-robin instead, taking the
+ * next account in a stable rotation that still has room for the chunk. The
+ * fail-closed rule is unchanged: if no account can hold the chunk, the whole
+ * plan fails rather than partially reserving capacity.
  */
 export function allocateChunks(
   chunkSizes: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number }>,
   eligible: AccountCapacity[],
+  strategy: RoutingStrategy = 'capacity-aware',
 ): AllocationAssignment[] | null {
   if (eligible.length === 0 && chunkSizes.length > 0) return null;
   // deterministic ordering: most free space first, then stable account id
-  const pools = [...eligible]
+  const ordered = [...eligible]
     .sort((a, b) => (b.usableBytes - a.usableBytes) || a.accountId.localeCompare(b.accountId))
     .map((a) => ({ accountId: a.accountId, remaining: a.usableBytes }));
+
   const assignments: AllocationAssignment[] = [];
+  if (strategy === 'balanced') {
+    let cursor = 0;
+    for (const chunk of chunkSizes) {
+      let chosen: (typeof ordered)[number] | null = null;
+      let usedStep = 0;
+      for (let step = 0; step < ordered.length; step++) {
+        const pool = ordered[(cursor + step) % ordered.length]!;
+        if (pool.remaining >= chunk.sizeBytes) {
+          chosen = pool;
+          usedStep = step;
+          break;
+        }
+      }
+      if (!chosen) return null; // cannot place this chunk: the whole plan must fail
+      chosen.remaining -= chunk.sizeBytes;
+      cursor = (cursor + usedStep + 1) % ordered.length;
+      assignments.push({
+        chunkIndex: chunk.chunkIndex,
+        accountId: chosen.accountId,
+        sizeBytes: chunk.sizeBytes,
+        offsetBytes: chunk.offsetBytes,
+      });
+    }
+    return assignments;
+  }
+
   for (const chunk of chunkSizes) {
-    const pool = pools.find((p) => p.remaining >= chunk.sizeBytes);
+    const pool = ordered.find((p) => p.remaining >= chunk.sizeBytes);
     if (!pool) return null; // cannot place this chunk: the whole plan must fail
     pool.remaining -= chunk.sizeBytes;
     assignments.push({

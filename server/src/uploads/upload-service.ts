@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { makeUploadQueries, type JobRow, type FileRow, type AllocationRow } from '../db/upload-queries.js';
 import { makeProviderQueries } from '../db/provider-queries.js';
 import { planChunks, chunkBounds, sanitizeDisplayName, generateObjectKey, ChunkMathError, type ChunkSizeMiB } from './chunk-math.js';
-import { preflight, allocateChunks, outstandingReservationBytes, type AccountCapacityInput } from './capacity.js';
+import { preflight, allocateChunks, outstandingReservationBytes, type AccountCapacityInput, type RoutingStrategy } from './capacity.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
@@ -26,12 +26,38 @@ export class UploadError extends Error {
 
 const PROVIDER_UPLOAD_READY = new Set(['google_drive', 'dropbox', 'onedrive', 'pcloud']);
 
+/**
+ * Provider checksum algorithms that are the SAME function as our own SHA-256,
+ * so a provider value may be compared byte-for-byte. A provider checksum with a
+ * DIFFERENT algorithm (Dropbox content_hash, OneDrive quickXorHash) is never
+ * compared against SHA-256 — that would be a false verification claim.
+ */
+const SHA256_COMPARABLE_CHECKSUM_TYPES = new Set(['sha256', 'sha-256', 'gdrive_sha256']);
+
+/**
+ * Compare a provider checksum against our own digest, but only when the
+ * algorithm is genuinely the same. Returns 'match' | 'mismatch' | 'not-comparable'.
+ */
+export function compareProviderChecksum(
+  provider: { type?: string; value?: string } | undefined | null,
+  ourSha256: string,
+): 'match' | 'mismatch' | 'not-comparable' {
+  if (!provider?.type || !provider.value) return 'not-comparable';
+  if (!SHA256_COMPARABLE_CHECKSUM_TYPES.has(provider.type.toLowerCase())) return 'not-comparable';
+  return provider.value.toLowerCase() === ourSha256.toLowerCase() ? 'match' : 'mismatch';
+}
+
 export interface PlanRequest {
   originalName: string;
   sizeBytes: number;
   chunkSizeMiB: ChunkSizeMiB;
   mimeType?: string | null;
   idempotencyKey: string;
+  /**
+   * M12.a `upload.spaceAwareRouting`. Defaults to 'capacity-aware', which is the
+   * exact V1 behaviour, so a caller that does not pass it is unaffected.
+   */
+  routingStrategy?: RoutingStrategy;
 }
 
 export interface PlanResult {
@@ -145,7 +171,11 @@ export class UploadService {
       const b = chunkBounds(plan, i);
       chunkDescriptors.push({ chunkIndex: b.chunkIndex, offsetBytes: b.offsetBytes, sizeBytes: b.sizeBytes });
     }
-    const assignments = allocateChunks(chunkDescriptors, capacity.assessment.eligible);
+    const assignments = allocateChunks(
+      chunkDescriptors,
+      capacity.assessment.eligible,
+      req.routingStrategy ?? 'capacity-aware',
+    );
     if (!assignments) throw new UploadError('capacity_insufficient', 409);
 
     // one transaction: file + job + every allocation, or nothing at all

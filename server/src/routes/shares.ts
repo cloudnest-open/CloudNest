@@ -7,6 +7,7 @@ import { DeletionError } from '../deletions/deletion-service.js';
 import type { Queries } from '../db/queries.js';
 import type { CsrfBundle } from '../auth/csrf.js';
 import { requireAdmin } from '../middleware/require-admin.js';
+import type { SettingsService } from '../settings/settings-service.js';
 
 /**
  * Share links and deletion (M11.a–d).
@@ -27,12 +28,62 @@ function shareError(res: Response, err: unknown): void {
   res.status(500).json({ error: 'share_failed', code: 'share_failed' });
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * M12.a — settings are read per request, never cached at construction, so a
+ * saved preference applies to the very next share. When no settings service is
+ * available, every default stays exactly as it was before settings existed.
+ */
+function resolveSettings(req: Request, injected?: SettingsService): SettingsService | null {
+  if (injected) return injected;
+  const registered = req.app.get('settings') as SettingsService | undefined;
+  return typeof registered?.get === 'function' ? registered : null;
+}
+
+/**
+ * The single origin a share URL is built from: a configured public base URL
+ * wins, otherwise the fixed app base URL. A request's Host header is never
+ * consulted, so a hostile Host cannot forge a share link.
+ */
+function effectiveBaseUrl(appBaseUrl: string, settings: SettingsService | null): string {
+  return settings?.get('domain.publicBaseUrl') ?? appBaseUrl;
+}
+
+/**
+ * Effective expiry. An explicit body value wins — including an explicit null,
+ * which keeps meaning "never expires"; only an omitted value falls back to the
+ * configured number of days, materialized as a real timestamp from now.
+ */
+function effectiveExpiresAt(raw: unknown, settings: SettingsService | null): string | null {
+  if (raw !== undefined) return typeof raw === 'string' ? raw : null;
+  const days = settings?.get('share.defaultExpiryDays') ?? null;
+  if (days === null) return null;
+  return new Date(Date.now() + days * DAY_MS).toISOString();
+}
+
+/**
+ * Effective download limit. An absent value and an explicit 0 both mean "use
+ * the configured default"; a negative value is refused here, in the route's own
+ * safe error style, so it can never reach the database. Every other number is
+ * passed through to the service, whose existing validation still applies.
+ */
+function effectiveDownloadLimit(raw: unknown, settings: SettingsService | null): number | null {
+  if (typeof raw === 'number') {
+    if (raw < 0) throw new ShareError('invalid_share_metadata', 400);
+    if (raw !== 0) return raw;
+  }
+  return settings?.get('share.defaultDownloadLimit') ?? null;
+}
+
 export function sharesRouter(deps: {
   queries: Queries;
   csrf: CsrfBundle;
   shares: ShareService;
   deletions: DeletionService;
   appBaseUrl: string;
+  /** Optional: a caller without a settings service keeps today's defaults. */
+  settings?: SettingsService;
 }): Router {
   const router = Router();
   const adminOnly = requireAdmin(deps.queries);
@@ -45,15 +96,22 @@ export function sharesRouter(deps: {
     };
     const fileIds = Array.isArray(body.fileIds) ? body.fileIds.filter((v): v is string => typeof v === 'string') : [];
     try {
-      let created: { id: string; url: string; fileIds: string[] };
+      const settings = resolveSettings(req, deps.settings);
       const common = {
         fileIds,
-        expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null,
-        downloadLimit: typeof body.downloadLimit === 'number' ? body.downloadLimit : null,
-        baseUrl: deps.appBaseUrl,
+        expiresAt: effectiveExpiresAt(body.expiresAt, settings),
+        downloadLimit: effectiveDownloadLimit(body.downloadLimit, settings),
+        baseUrl: effectiveBaseUrl(deps.appBaseUrl, settings),
       };
-      if (typeof body.password === 'string' && body.password.length > 0) {
-        created = await deps.shares.createWithPassword({ ...common, password: body.password });
+      const password = typeof body.password === 'string' && body.password.length > 0 ? body.password : null;
+      // A "passwords required" policy must never silently yield an open link,
+      // so the caller is asked to supply one instead.
+      if (password === null && settings?.get('share.requirePassword') === true) {
+        throw new ShareError('share_password_required_by_policy', 400);
+      }
+      let created: { id: string; url: string; fileIds: string[] };
+      if (password !== null) {
+        created = await deps.shares.createWithPassword({ ...common, password });
       } else {
         created = deps.shares.create(common);
       }
@@ -99,7 +157,10 @@ export function sharesRouter(deps: {
   router.post('/api/share-links/:id/rotate', adminOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
-      const rotated = deps.shares.rotate(String(req.params['id']), deps.appBaseUrl);
+      const rotated = deps.shares.rotate(
+        String(req.params['id']),
+        effectiveBaseUrl(deps.appBaseUrl, resolveSettings(req, deps.settings)),
+      );
       res.json({ ok: true, url: rotated.url });
     } catch (err) {
       shareError(res, err);

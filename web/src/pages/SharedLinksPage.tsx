@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { confirmDestructive } from '../confirm.js';
 
 /**
  * Shared Links (Step 5 / M11.e).
@@ -100,7 +101,7 @@ export function SharedLinksPage() {
   }
 
   async function revoke(id: string): Promise<void> {
-    if (!window.confirm('Revoke this link? Anyone holding the URL will lose access immediately. The files are not deleted.')) return;
+    if (!(await confirmDestructive('Revoke this link? Anyone holding the URL will lose access immediately. The files are not deleted.'))) return;
     const res = await api.revokeShareLink(id);
     if (res.status === 200) {
       setNotice('Link revoked. The stored files were not deleted.');
@@ -111,7 +112,7 @@ export function SharedLinksPage() {
   }
 
   async function rotate(id: string): Promise<void> {
-    if (!window.confirm('Rotate this link? The old URL stops working immediately and a new URL is issued once.')) return;
+    if (!(await confirmDestructive('Rotate this link? The old URL stops working immediately and a new URL is issued once.'))) return;
     const res = await api.rotateShareLink(id);
     if (res.status === 200) {
       setCreatedUrl((res.data as { url: string }).url);
@@ -123,10 +124,10 @@ export function SharedLinksPage() {
   }
 
   async function removeFile(file: FileView): Promise<void> {
-    if (!window.confirm(
+    if (!(await confirmDestructive(
       `Delete "${file.originalName}"?\n\nThis removes the CloudNest-owned chunk objects from your connected accounts. ` +
       'Any share links for it are revoked first. Provider objects that cannot be confirmed deleted are reported as pending.',
-    )) return;
+    ))) return;
     setError(null);
     const res = await api.deleteFile(file.id);
     if (res.status === 202) {

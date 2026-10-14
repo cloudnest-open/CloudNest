@@ -1,7 +1,8 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { UploadService, PlanRequest } from '../uploads/upload-service.js';
-import { UploadError } from '../uploads/upload-service.js';
+import { UploadError, compareProviderChecksum } from '../uploads/upload-service.js';
+import type { SettingsService } from '../settings/settings-service.js';
 import { assertAllowedChunkSizeMiB, DEFAULT_CHUNK_SIZE_MIB, mibToBytes, ChunkMathError } from '../uploads/chunk-math.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
 import type { Queries } from '../db/queries.js';
@@ -43,6 +44,7 @@ export function rawChunkRouter(deps: {
   csrf: CsrfBundle;
   uploads: UploadService;
   store: CredentialsStore;
+  settings: SettingsService;
 }): Router {
   const router = Router();
   const adminOnly = requireAdmin(deps.queries);
@@ -125,6 +127,20 @@ export function rawChunkRouter(deps: {
           });
           throw new UploadError('chunk_size_mismatch', 400);
         }
+        // M12.a `upload.verifyIntegrity`: when enabled, a provider checksum is
+        // honoured when AND ONLY when its algorithm is the same as ours. A
+        // mismatch is a failure; a different algorithm is never compared and
+        // never labelled as a verified checksum.
+        if (deps.settings.get('upload.verifyIntegrity')) {
+          const verdict = compareProviderChecksum(ref.providerChecksum, sha256);
+          if (verdict === 'mismatch') {
+            deps.uploads.recordFailure({
+              jobId, chunkIndex, accountId: allocation.provider_account_id, objectKey,
+              safeCode: 'chunk_hash_mismatch', bytesReceived: bytes, remoteObjectId: ref.remoteObjectId,
+            });
+            throw new UploadError('chunk_hash_mismatch', 502);
+          }
+        }
         const result = deps.uploads.commitChunk({
           jobId, chunkIndex, accountId: allocation.provider_account_id, objectKey,
           remoteObjectId: ref.remoteObjectId, sha256, sizeBytes: bytes,
@@ -154,6 +170,7 @@ export function uploadsRouter(deps: {
   queries: Queries;
   csrf: CsrfBundle;
   uploads: UploadService;
+  settings: SettingsService;
 }): Router {
   const router = Router();
   const adminOnly = requireAdmin(deps.queries);
@@ -173,8 +190,11 @@ export function uploadsRouter(deps: {
       return;
     }
     try {
+      // M12.a: an explicit per-request chunk size still wins; otherwise the
+      // saved Upload & Storage setting is the default (never for an already
+      // uploaded logical file, whose geometry is stored per file).
       const chunkSizeMiB = body['chunkSizeMiB'] === undefined
-        ? DEFAULT_CHUNK_SIZE_MIB
+        ? deps.settings.effectiveChunkSizeMiB()
         : assertAllowedChunkSizeMiB(body['chunkSizeMiB']);
       const plan: PlanRequest = {
         originalName: body['originalName'] as string,
@@ -182,6 +202,7 @@ export function uploadsRouter(deps: {
         chunkSizeMiB,
         mimeType: typeof body['mimeType'] === 'string' ? (body['mimeType'] as string) : null,
         idempotencyKey,
+        routingStrategy: deps.settings.get('upload.spaceAwareRouting') ? 'capacity-aware' : 'balanced',
       };
       const result = deps.uploads.plan(plan);
       res.status(result.reused ? 200 : 201).json({
@@ -204,7 +225,9 @@ export function uploadsRouter(deps: {
   router.get('/api/uploads', adminOnly, (_req, res) => {
     res.set('Cache-Control', 'no-store');
     const jobs = deps.uploads.listJobs(50).map((job) => deps.uploads.publicJob(job.id));
-    res.json({ jobs });
+    // M12.a: the worker bound the UI must respect is served from settings, so
+    // the client can never invent a higher limit than the admin configured.
+    res.json({ jobs, workerLimit: deps.settings.effectiveWorkerLimit() });
   });
 
   router.get('/api/uploads/:jobId', adminOnly, (req, res) => {

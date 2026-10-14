@@ -25,6 +25,14 @@ import { sharesRouter, publicSharesRouter } from './routes/shares.js';
 import { ShareService } from './shares/share-service.js';
 import { DeletionService } from './deletions/deletion-service.js';
 import { contentDisposition } from './downloads/range.js';
+import { settingsRouter } from './routes/settings.js';
+import { maintenanceRouter } from './routes/maintenance.js';
+import { SettingsService } from './settings/settings-service.js';
+import { MaintenanceService } from './maintenance/maintenance-service.js';
+import { DiagnosticsService } from './maintenance/diagnostics-service.js';
+import { TunnelService, hostOriginGuard } from './tunnel/tunnel-service.js';
+import { PROVIDER_IDS } from './providers/types.js';
+import { getAdapter } from './providers/registry.js';
 
 /**
  * Express app factory (Step 2).
@@ -38,6 +46,8 @@ export function createApp(options: {
   sessionSecret: string;
   dataDir: string;
   appBaseUrl: string;
+  dbPath: string;
+  port: number;
   webDistDir?: string;
 }): Express {
   const app = express();
@@ -64,6 +74,45 @@ export function createApp(options: {
 
   const credentialsStore = new CredentialsStore(options.db, options.dataDir);
   const accountService = new ProviderAccountService(options.db, makeProviderQueries(options.db), credentialsStore);
+  // M12.a: settings are created up front because the upload routers — mounted
+  // below, deliberately BEFORE any body parser — read chunk size, worker limit,
+  // routing strategy and integrity policy from here.
+  const settings = new SettingsService(options.db);
+
+  // M12.b: the tunnel service is created before the middleware so the Host/Origin
+  // guard can consult the session's published hostnames; it spawns nothing until
+  // the owner explicitly connects Cloudflare.
+  const tunnel = new TunnelService(options.dataDir, {
+    // the tunnel runtime token is encrypted with the SAME credential key the
+    // provider credentials use; the key never leaves the process
+    keyProvider: () => credentialsStore.getKey(),
+  });
+
+  // 1b. Host/Origin enforcement (M12.b): only loopback names, the configured
+  //     base-URL host and a configured/published public hostname may address the
+  //     app, and a state-changing request must not carry a foreign Origin. The
+  //     allowlist is evaluated per request from configuration and the running
+  //     tunnel — never from request data — so a spoofed Host cannot widen it.
+  const hostnameOf = (url: string): string | null => {
+    try {
+      return new URL(url).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+  const baseHostname = hostnameOf(options.appBaseUrl);
+  const loopbackHostnames = new Set(['127.0.0.1', 'localhost', '::1']);
+  app.use(
+    hostOriginGuard({ allowedHosts: [] }, (hostname) => {
+      const host = hostname.toLowerCase();
+      if (loopbackHostnames.has(host)) return true;
+      if (baseHostname !== null && host === baseHostname) return true;
+      const publicBase = settings.get('domain.publicBaseUrl');
+      const publicHost = publicBase === null ? null : hostnameOf(publicBase);
+      if (publicHost !== null && host === publicHost) return true;
+      return tunnel.startAllowedHosts().includes(host);
+    }),
+  );
 
   // 3. server-side sessions in the shared SQLite connection
   const sessionStore = new SqliteSessionStore(options.db);
@@ -97,7 +146,7 @@ export function createApp(options: {
   //     parser) so nothing buffers a chunk body. The plan forbids express.raw
   //     and multer memory storage for this route.
   const uploads = new UploadService(options.db, credentialsStore);
-  app.use(rawChunkRouter({ queries, csrf, uploads, store: credentialsStore }));
+  app.use(rawChunkRouter({ queries, csrf, uploads, store: credentialsStore, settings }));
   app.set('uploads', uploads);
 
   // 2. bounded JSON parser (8 KiB cap on auth/setup bodies; 400 on malformed)
@@ -110,9 +159,13 @@ export function createApp(options: {
 
   // 2b. JSON upload routes (plan/status/control) — these need a parsed body, so
   //     they are mounted after the JSON parser and never see raw chunk bytes.
-  app.use(uploadsRouter({ queries, csrf, uploads }));
+  app.use(uploadsRouter({ queries, csrf, uploads, settings }));
 
   // 4. public setup/auth routes (unsafe methods are CSRF-protected inside)
+  //    `/api/health` is one of the explicitly allow-listed public routes: the
+  //    built-in UI polls it for the sidebar's local-server status, and it
+  //    exposes nothing beyond the version string.
+  app.use(healthRouter(options.appVersion));
   app.use(setupRouter(queries, csrf, () => options.db));
   app.use(authRouter(queries, csrf));
 
@@ -126,7 +179,7 @@ export function createApp(options: {
   // 4c. download routes. They stream file bytes, so nothing in front of them
   //     may compress or transform the response: Content-Length, Range and ETag
   //     must describe the exact reconstructed file bytes.
-  const downloads = new DownloadService(options.db, credentialsStore);
+  const downloads = new DownloadService(options.db, credentialsStore, settings);
   app.use(downloadsRouter({ queries, csrf, downloads }));
   app.set('downloads', downloads);
 
@@ -158,6 +211,63 @@ export function createApp(options: {
   );
   app.set('shares', shares);
   app.set('deletions', deletions);
+
+  // 4e. backup/restore, diagnostics and the optional tunnel (settings and the
+  //     tunnel service itself are created above so the upload path and the
+  //     Host/Origin guard can already use them).
+  const capabilityMatrix = () =>
+    Object.fromEntries(
+      PROVIDER_IDS.map((id) => {
+        const adapter = getAdapter(id);
+        // Honesty rule: this matrix states the DECLARED capability and an
+        // explicitly unverified evidence level. It must never claim a test run
+        // that did not happen, so 'live-tested' is never inferred here.
+        const uploadDeclared = adapter?.capabilities.upload ?? false;
+        return [id, {
+          experimental: adapter?.experimental ?? false,
+          upload: uploadDeclared,
+          download: adapter?.capabilities.download ?? false,
+          list: adapter?.capabilities.list ?? false,
+          capability: uploadDeclared ? 'declared' : 'not-declared',
+          evidence: 'not verified in this environment (no live provider credentials configured)',
+          status: adapter?.experimental ? 'experimental' : uploadDeclared ? 'mock-tested' : 'blocked',
+        }];
+      }),
+    );
+  const diagnostics = new DiagnosticsService(
+    options.db,
+    options.dataDir,
+    options.appVersion,
+    { providers: capabilityMatrix(), liveTests: 'opt-in only; none recorded in this environment' },
+  );
+  const maintenance = new MaintenanceService(options.db, options.dataDir, options.appVersion);
+  const counts = (): Record<string, number> => {
+    const read = (table: string): number => {
+      try {
+        return (options.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+      } catch {
+        return -1;
+      }
+    };
+    return {
+      files: read('files'),
+      chunks: read('file_chunks'),
+      placements: read('chunk_placements'),
+      providerAccounts: read('provider_accounts'),
+      shareLinks: read('share_links'),
+      jobs: read('transfer_jobs'),
+    };
+  };
+  app.use(settingsRouter({
+    queries, csrf, settings, appVersion: options.appVersion, dataDir: options.dataDir,
+    port: options.port, appBaseUrl: options.appBaseUrl, tunnelStatus: () => tunnel.status(),
+  }));
+  app.use(maintenanceRouter({
+    queries, csrf, maintenance, diagnostics, tunnel, dbPath: options.dbPath, counts,
+  }));
+  app.set('settings', settings);
+  app.set('tunnel', tunnel);
+  app.set('capabilityMatrix', capabilityMatrix);
 
   // 5. authenticated admin API.
   //    The router is mounted under the /api/admin prefix ONLY. Mounting it at

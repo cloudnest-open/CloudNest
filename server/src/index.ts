@@ -19,7 +19,15 @@ for (const migration of applied) {
   console.log(`[cloudnest] migration applied: ${migration.version} ${migration.name}`);
 }
 
-const app = createApp({ appVersion: config.appVersion, db: opened.db, sessionSecret, dataDir: config.dataDir, appBaseUrl: config.appBaseUrl });
+const app = createApp({
+  appVersion: config.appVersion,
+  db: opened.db,
+  sessionSecret,
+  dataDir: config.dataDir,
+  appBaseUrl: config.appBaseUrl,
+  dbPath: config.dbPath,
+  port: config.port,
+});
 // a stream cannot survive a restart: report interrupted downloads truthfully
 const downloads = app.get('downloads') as { recoverDownloadsOnStartup: () => number } | undefined;
 if (downloads) {
@@ -47,6 +55,13 @@ function shutdown(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[cloudnest] received ${signal}; shutting down gracefully`);
+  // stop the connector this process owns and remove the runtime token file
+  const tunnel = app.get('tunnel') as { stop: () => unknown } | undefined;
+  try {
+    tunnel?.stop();
+  } catch {
+    // a failed tunnel stop must not prevent the database from closing cleanly
+  }
   server.close(() => {
     try {
       opened.close();

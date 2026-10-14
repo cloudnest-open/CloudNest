@@ -4,6 +4,7 @@ import { makeDownloadQueries, type DownloadJobRow, type ChunkRow, type Placement
 import { makeProviderQueries } from '../db/provider-queries.js';
 import { MemoryBudget, globalDownloadBudget } from './memory-budget.js';
 import { chunksForRange, type ResolvedRange, type ChunkSlice } from './range.js';
+import { SETTINGS_DEFAULTS, WORKER_LIMITS, type SettingsService } from '../settings/settings-service.js';
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
@@ -42,16 +43,66 @@ export interface DownloadPrepared {
   chunksTotal: number;
 }
 
+/** One prefetched chunk read: verified bytes, its slice, and its reservation. */
+interface VerifiedChunk {
+  /** The full chunk bytes, verified against the stored size and SHA-256. */
+  bytes: Buffer;
+  /** The sub-slice of that chunk the client actually asked for. */
+  meta: ChunkSlice;
+  /** Returns this chunk's reservation to the shared budget. Idempotent. */
+  release: () => void;
+}
+
+interface ReadHandle {
+  /** The provider stream the read is pulling, so an abort can stop it promptly. */
+  stream: NodeJS.ReadableStream | null;
+}
+
+interface PrefetchSlot {
+  index: number;
+  promise: Promise<VerifiedChunk>;
+  handle: ReadHandle;
+}
+
+/** Stop a provider stream so an aborted or failed read cannot hold a connection. */
+function destroyStream(stream: NodeJS.ReadableStream | null): void {
+  if (!stream) return;
+  const destroyable = stream as unknown as { destroy?: () => void };
+  if (typeof destroyable.destroy === 'function') destroyable.destroy();
+}
+
 export class DownloadService {
   private readonly q;
   private readonly providerQ;
   constructor(
     private readonly db: Database.Database,
     private readonly store: CredentialsStore,
+    /** M12.a: only the typed getter is needed; read per stream, never cached. */
+    private readonly settings: Pick<SettingsService, 'get'>,
     private readonly budget: MemoryBudget = globalDownloadBudget,
   ) {
     this.q = makeDownloadQueries(db);
     this.providerQ = makeProviderQueries(db);
+  }
+
+  /**
+   * Effective prefetch depth for one stream (M12.a).
+   *
+   * Read at stream time, never cached in the constructor, so changing the setting
+   * governs the next download without a restart. Clamped to the same 1..8 range
+   * the settings validator enforces: this is the code that actually spends
+   * memory, so a hand-edited or corrupt row must never widen the bound.
+   */
+  private downloadConcurrency(): number {
+    let configured: unknown;
+    try {
+      configured = this.settings.get('download.concurrency');
+    } catch {
+      return SETTINGS_DEFAULTS['download.concurrency'];
+    }
+    const value = Number(configured);
+    if (!Number.isInteger(value)) return SETTINGS_DEFAULTS['download.concurrency'];
+    return Math.min(Math.max(value, 1), WORKER_LIMITS.hardCeiling);
   }
 
   getFile(fileId: string) {
@@ -152,6 +203,27 @@ export class DownloadService {
    * other's chunks.
    */
   private async readVerifiedChunk(fileId: string, slice: ChunkSlice, signal?: AbortSignal): Promise<Buffer> {
+    const verified = await this.readVerifiedChunkHolding(fileId, slice, signal);
+    try {
+      return verified.bytes;
+    } finally {
+      verified.release();
+    }
+  }
+
+  /**
+   * Read and verify one chunk, KEEPING its memory reservation.
+   *
+   * The caller owns the returned `release` and must call it exactly once, from a
+   * `finally`. Keeping the reservation alive is what makes the prefetch bound
+   * meaningful: bytes that are read ahead still occupy the shared budget.
+   */
+  private async readVerifiedChunkHolding(
+    fileId: string,
+    slice: ChunkSlice,
+    signal?: AbortSignal,
+    handle?: ReadHandle,
+  ): Promise<VerifiedChunk> {
     const resolved = this.activePlacement(slice.chunkIndex, fileId);
     if (!resolved) throw new DownloadError('chunk_missing', 409);
     const placements = resolved.placement;
@@ -172,6 +244,8 @@ export class DownloadService {
       if (!remoteId) throw new DownloadError('chunk_missing', 409);
 
       const out = await adapter.downloadObjectStream(bundle, remoteId, appConfig);
+      // expose the live stream so an abandoned read can be destroyed promptly
+      if (handle) handle.stream = out.stream;
       const parts: Buffer[] = [];
       let received = 0;
       for await (const piece of out.stream) {
@@ -193,9 +267,11 @@ export class DownloadService {
         this.markChunkProblem(fileId, slice.chunkIndex);
         throw new DownloadError('chunk_hash_mismatch', 502);
       }
-      return payload;
-    } finally {
+      return { bytes: payload, meta: slice, release };
+    } catch (err) {
+      // a failed read must not leak its reservation
       release();
+      throw err;
     }
   }
 
@@ -237,35 +313,144 @@ export class DownloadService {
     return this.manifestMatches(fileId);
   }
 
+  /**
+   * Stream the prepared download in order, reading ahead with a BOUNDED
+   * pipeline (M12.a `download.concurrency`).
+   *
+   * Contract, unchanged from the serial implementation:
+   * - bytes are yielded strictly in order;
+   * - each chunk is hash-verified BEFORE its bytes are yielded;
+   * - a verification failure throws `chunk_hash_mismatch` and marks the file
+   *   `needs_repair`;
+   * - an abort throws `download_cancelled` promptly and stops the reads;
+   * - progress comes from real completed chunks and never double counts.
+   *
+   * The bound matters because bytes read ahead still occupy the process-wide
+   * verification-buffer budget: at most `concurrency` chunk reservations and at
+   * most `concurrency` in-flight provider reads exist at any moment. A verified
+   * chunk's reservation ends before the next read starts, so the ceiling is
+   * exactly `concurrency` chunks — not concurrency+1. On failure, abort or an
+   * early-stopping consumer, the in-flight reads are destroyed, awaited and
+   * every reservation is returned in a `finally` — deterministically, with no
+   * stranding.
+   */
   async *stream(prepared: DownloadPrepared, signal?: AbortSignal): AsyncGenerator<Buffer> {
     if (!this.manifestMatches(prepared.fileId) && prepared.slices.length > 0) {
       this.q.setFileState.run('needs_repair', prepared.fileId);
       throw new DownloadError('chunk_hash_mismatch', 502);
     }
+
+    const depth = Math.max(1, this.downloadConcurrency());
+    const pending: Array<PrefetchSlot | null> = [];
+    /** Reservations currently held by this stream but not yet released. */
+    const held = new Set<() => void>();
+    let inFlight = 0;
+    /** Once true, no further read is started and the budget is being drained. */
+    let finished = false;
+    let nextToStart = 0;
     let chunksDone = 0;
     let bytesDone = 0;
+
+    const releaseAll = (): void => {
+      for (const release of held) release();
+      held.clear();
+    };
+
+    /**
+     * Abandon every read that has not been awaited yet: destroy its provider
+     * stream, wait for it to settle, then return its reservation. A settled
+     * read has either moved its release into `held` or released its own
+     * reservation on failure — waiting makes the release deterministic instead
+     * of leaving it to a racing task after the stream is already gone.
+     */
+    const abandonInFlight = async (): Promise<void> => {
+      for (const slot of pending) {
+        if (slot) destroyStream(slot.handle.stream);
+      }
+      const unsettled: Array<Promise<VerifiedChunk>> = [];
+      for (const slot of pending) {
+        if (slot) unsettled.push(slot.promise);
+      }
+      await Promise.allSettled(unsettled);
+      releaseAll();
+    };
+
+    /** Start the next read unless the look-ahead window is already full. */
+    const fill = (): void => {
+      while (!finished && inFlight < depth && nextToStart < prepared.slices.length) {
+        const index = nextToStart++;
+        const slice = prepared.slices[index]!;
+        const handle: ReadHandle = { stream: null };
+        const slot: PrefetchSlot = {
+          index,
+          handle,
+          promise: this.readVerifiedChunkHolding(prepared.fileId, slice, signal, handle),
+        };
+        pending[index] = slot;
+        inFlight++;
+        slot.promise.then(
+          (value) => {
+            held.add(value.release);
+          },
+          () => {
+            // the failure is surfaced when the slot is awaited; this handler only
+            // prevents an unhandled rejection while the failure waits its turn
+          },
+        );
+      }
+    };
+
     try {
-      for (const slice of prepared.slices) {
+      fill();
+      for (let index = 0; index < prepared.slices.length; index++) {
         if (signal?.aborted) throw new DownloadError('download_cancelled', 499);
-        const full = await this.readVerifiedChunk(prepared.fileId, slice, signal);
+        const slot = pending[index]!;
+        pending[index] = null;
+        let chunk: VerifiedChunk;
+        try {
+          chunk = await slot.promise;
+        } catch (err) {
+          inFlight--;
+          // a failed read must never start new ones
+          throw err;
+        }
+        inFlight--;
+        const slice = chunk.meta;
         // emit only the requested sub-slice of this chunk
-        const sub = full.subarray(slice.sliceStartInChunk, slice.sliceStartInChunk + slice.sliceLength);
-        if (sub.length !== slice.sliceLength) throw new DownloadError('chunk_hash_mismatch', 502);
-        chunksDone++;
-        bytesDone += sub.length;
-        this.q.updateJobProgress.run({
-          id: prepared.jobId,
-          chunks_completed: chunksDone,
-          bytes_completed: bytesDone,
-          last_safe_error_code: null,
-          updated_at: new Date().toISOString(),
-        });
+        const sub = chunk.bytes.subarray(
+          slice.sliceStartInChunk,
+          slice.sliceStartInChunk + slice.sliceLength,
+        );
+        try {
+          if (sub.length !== slice.sliceLength) throw new DownloadError('chunk_hash_mismatch', 502);
+          chunksDone++;
+          bytesDone += sub.length;
+          this.q.updateJobProgress.run({
+            id: prepared.jobId,
+            chunks_completed: chunksDone,
+            bytes_completed: bytesDone,
+            last_safe_error_code: null,
+            updated_at: new Date().toISOString(),
+          });
+        } finally {
+          // verification is complete, so this chunk's reservation ends BEFORE
+          // any further read is started: the window ceiling stays `depth`
+          // chunks, and the delivered bytes belong to the consumer from here,
+          // exactly as in the serial loop
+          chunk.release();
+          held.delete(chunk.release);
+        }
+        // keep the window full while there is still work to read
+        if (index + 1 < prepared.slices.length) fill();
         yield sub;
       }
+      finished = true;
       this.q.finishJob.run({
         id: prepared.jobId, state: 'completed', last_safe_error_code: null, updated_at: new Date().toISOString(),
       });
     } catch (err) {
+      finished = true;
+      await abandonInFlight();
       const code = err instanceof DownloadError
         ? err.safeCode
         : err instanceof ProviderError ? err.safeCode : 'provider_unavailable';
@@ -276,6 +461,10 @@ export class DownloadService {
         updated_at: new Date().toISOString(),
       });
       throw err;
+    } finally {
+      finished = true;
+      // a consumer that stops iterating early must not strand reservations
+      await abandonInFlight();
     }
   }
 

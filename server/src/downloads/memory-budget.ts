@@ -10,12 +10,28 @@ export const GLOBAL_BUDGET_BYTES = 128 * 1024 * 1024;
 
 export class MemoryBudget {
   private inUse = 0;
+  private peak = 0;
   private readonly waiters: Array<{ bytes: number; resolve: () => void }> = [];
 
   constructor(private readonly capacity = GLOBAL_BUDGET_BYTES) {}
 
   get usedBytes(): number {
     return this.inUse;
+  }
+
+  /**
+   * Highest simultaneous reservation observed since the last reset.
+   *
+   * Exposed so a test can PROVE the prefetch pipeline never exceeded its bound
+   * instead of trusting the code to be correct.
+   */
+  get peakBytes(): number {
+    return this.peak;
+  }
+
+  /** Forget the observed peak (test helper; never affects live reservations). */
+  resetPeak(): void {
+    this.peak = this.inUse;
   }
 
   get availableBytes(): number {
@@ -32,12 +48,14 @@ export class MemoryBudget {
     if (wanted === 0) return () => {};
     if (this.inUse + wanted <= this.capacity) {
       this.inUse += wanted;
+      if (this.inUse > this.peak) this.peak = this.inUse;
       return this.makeRelease(wanted);
     }
     await new Promise<void>((resolve) => {
       this.waiters.push({ bytes: wanted, resolve });
     });
     this.inUse += wanted;
+    if (this.inUse > this.peak) this.peak = this.inUse;
     return this.makeRelease(wanted);
   }
 

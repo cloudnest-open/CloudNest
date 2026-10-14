@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { api, refreshCsrfToken } from './api.js';
-import { FirstRunPage, LoginPage, ChangePasswordPanel } from './pages/AuthPages.js';
+import { FirstRunPage, LoginPage } from './pages/AuthPages.js';
 import { CloudAccountsPage } from './pages/CloudAccountsPage.js';
-import { ProviderSetupCard } from './components/ProviderSetupCard.js';
 import { UploadsPage } from './pages/UploadsPage.js';
 import { FilesPage } from './pages/FilesPage.js';
 import { DashboardSummary } from './components/DashboardSummary.js';
 import { DownloadsPage } from './pages/DownloadsPage.js';
 import { SharedLinksPage } from './pages/SharedLinksPage.js';
+import { SettingsPage } from './pages/SettingsPage.js';
+import { currentTheme, toggleTheme } from './theme.js';
+import { setConfirmDestructivePreference } from './confirm.js';
 
 const NAV_ITEMS = [
   'Dashboard',
@@ -33,7 +35,7 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [settingsSection, setSettingsSection] = useState<'security' | 'providers'>('security');
+  const [theme, setTheme] = useState(currentTheme());
 
   useEffect(() => {
     (async () => {
@@ -84,6 +86,25 @@ export default function App() {
       .then((res) => res.json() as Promise<Health>)
       .then((data) => !cancelled && setHealth(data))
       .catch(() => !cancelled && setHealth(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [authState]);
+
+  // Seed the destructive-action confirmation gate from the saved preference.
+  // The theme needs no such bootstrap: theme.ts resolves it from local storage
+  // before the first paint.
+  useEffect(() => {
+    if (authState !== 'ready') return;
+    let cancelled = false;
+    api.getSettings()
+      .then((res) => {
+        if (cancelled || res.status !== 200) return;
+        const saved = (res.data as { settings?: Record<string, unknown> }).settings;
+        const confirmDestructive = saved?.['security.confirmDestructive'];
+        if (typeof confirmDestructive === 'boolean') setConfirmDestructivePreference(confirmDestructive);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -140,6 +161,14 @@ export default function App() {
           <span className="status-text">
             {health ? `Local server: connected (v${health.version})` : 'Local server: not connected'}
           </span>
+          <button
+            type="button"
+            className="btn-logout"
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            onClick={() => setTheme(toggleTheme())}
+          >
+            {theme === 'dark' ? '☀ Light' : '☾ Dark'}
+          </button>
           <button type="button" className="btn-logout" onClick={logout}>
             Sign out
           </button>
@@ -163,28 +192,9 @@ export default function App() {
             </div>
           )}
           {active === 'Settings' ? (
-            <>
-              <h1 className="page-title">Settings</h1>
-              <div className="tabs" role="tablist">
-                <button type="button" role="tab" aria-selected={settingsSection === 'security'} className={`tab${settingsSection === 'security' ? ' active' : ''}`} onClick={() => setSettingsSection('security')}>
-                  Security
-                </button>
-                <button type="button" role="tab" aria-selected={settingsSection === 'providers'} className={`tab${settingsSection === 'providers' ? ' active' : ''}`} onClick={() => setSettingsSection('providers')}>
-                  Provider Setup
-                </button>
-              </div>
-              {settingsSection === 'security' ? (
-                <ChangePasswordPanel onDone={(message) => setNotice(message)} />
-              ) : (
-                <ProviderSetupCard onChanged={() => undefined} />
-              )}
-              <section className="card">
-                <h2>Other settings</h2>
-                <p className="muted">Not implemented yet. These controls will arrive in a later step.</p>
-              </section>
-            </>
+            <SettingsPage />
           ) : active === 'Cloud Accounts' ? (
-            <CloudAccountsPage onGoToSettings={() => { setActive('Settings'); setSettingsSection('providers'); }} />
+            <CloudAccountsPage onGoToSettings={() => setActive('Settings')} />
           ) : active === 'Uploads' ? (
             <UploadsPage />
           ) : active === 'Files' ? (

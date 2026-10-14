@@ -12,6 +12,25 @@
   --cn-focus: #2563EB;
   --cn-success-text: #166534;
   --cn-danger-text: #B42318;
+  color-scheme: light;
+}
+
+/* Dark theme is a semantic-token mapping (design pack §5.2), never a colour
+   inversion: every token keeps its meaning and only its value changes. */
+[data-theme='dark'] {
+  --cn-page: #0B1220;
+  --cn-surface: #111B2E;
+  --cn-surface-muted: #17243A;
+  --cn-text: #E6EDF7;
+  --cn-text-muted: #A5B4C7;
+  --cn-border: #26354D;
+  --cn-primary: #6EA8FE;
+  --cn-primary-hover: #8AB8FF;
+  --cn-primary-soft: #172D4F;
+  --cn-focus: #8AB8FF;
+  --cn-success-text: #6EE7B7;
+  --cn-danger-text: #F87171;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -262,6 +281,10 @@ body {
   cursor: pointer;
 }
 .btn-logout:hover { background: var(--cn-surface-muted); color: var(--cn-text); }
+/* Step 6: the footer now carries a Light/Dark toggle beside Sign out, so the
+   status line takes its own row and the two buttons wrap below it. */
+.sidebar-footer { flex-wrap: wrap; }
+.sidebar-footer .status-text { flex: 1 1 100%; }
 .notice-card { border-color: var(--cn-success-text); }
 .notice-card p { color: var(--cn-success-text); margin: 0; }
 
@@ -349,3 +372,11 @@ body {
 .plain-list { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
 .plain-list li { margin-bottom: 4px; }
 .btn-secondary[disabled], .btn-danger[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* Step 6 / M12: settings additions */
+.checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 10px; }
+.diagnostics-output {
+  background: var(--cn-surface-muted); border: 1px solid var(--cn-border); border-radius: 8px;
+  padding: 12px; font-size: 12px; max-height: 420px; overflow: auto; white-space: pre-wrap;
+  margin-top: 12px;
+}

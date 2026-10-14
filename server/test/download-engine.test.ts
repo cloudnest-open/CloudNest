@@ -9,6 +9,7 @@ import { allMigrations } from '../src/db/migrations.js';
 import { MemoryBudget, GLOBAL_BUDGET_BYTES } from '../src/downloads/memory-budget.js';
 import { DownloadService, DownloadError } from '../src/downloads/download-service.js';
 import { CredentialsStore } from '../src/providers/credentials-store.js';
+import { SettingsService } from '../src/settings/settings-service.js';
 
 const MIB = 1024 * 1024;
 
@@ -17,7 +18,8 @@ function setup() {
   const { db, close } = openDatabase(path.join(dir, 't.db'));
   runMigrations(db, allMigrations);
   const store = new CredentialsStore(db, dir);
-  const service = new DownloadService(db, store);
+  // M12.a: the download service reads `download.concurrency` from real settings
+  const service = new DownloadService(db, store, new SettingsService(db));
   return { db, close, store, service, dir };
 }
 

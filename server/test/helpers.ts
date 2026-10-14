@@ -1,5 +1,7 @@
 import express from 'express';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import crypto from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { openDatabase, runMigrations } from '../src/db/index.js';
@@ -15,12 +17,22 @@ export interface TestApp {
 
 /** Start the real app on an ephemeral port with a temp database. */
 export async function startTestApp(): Promise<TestApp> {
-  const dataDir = fs.mkdtempSync('cloudnest-testapp-');
+  // the temp database belongs in the OS temp directory, never inside the repo
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cloudnest-testapp-'));
   const dbPath = `${dataDir}/test.db`;
   const { db, close } = openDatabase(dbPath);
   runMigrations(db, allMigrations);
   const secret = crypto.randomBytes(32).toString('base64url');
-  const app: express.Express = createApp({ appVersion: 'test', db, sessionSecret: secret, dataDir, appBaseUrl: 'http://127.0.0.1:8787', webDistDir: dataDir });
+  const app: express.Express = createApp({
+    appVersion: 'test',
+    db,
+    sessionSecret: secret,
+    dataDir,
+    appBaseUrl: 'http://127.0.0.1:8787',
+    dbPath,
+    port: 0,
+    webDistDir: dataDir,
+  });
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const port = (server.address() as { port: number }).port;

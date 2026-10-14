@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { confirmDestructive } from '../confirm.js';
 
 /**
- * Files (Step 4 / M9.e).
+ * Files (Step 4 / M9.e, completed in Step 6 / M12).
  *
- * One row per logical file — never one row per chunk. Download, share and
- * delete are deliberately disabled here: they belong to Step 5 and the UI must
- * not offer controls that do not work yet.
+ * One row per logical file — never one row per chunk. Download, rename, share
+ * and delete all work from here; deletion follows the same durable,
+ * verified-outcome flow as the Shared Links page.
  */
 
 interface FileView {
@@ -53,6 +54,7 @@ export function FilesPage() {
   const [detail, setDetail] = useState<FileView | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,8 +93,66 @@ export function FilesPage() {
     }
   }
 
-  const visible = files
-    .filter((f) => (search ? f.originalName.toLowerCase().includes(search.toLowerCase()) : true))
+  /**
+   * Create a single-file share link with the saved Sharing defaults. The raw
+   * URL is shown once; the server keeps only a hash of the token.
+   */
+  async function onShare(file: FileView): Promise<void> {
+    setBusyId(file.id);
+    setError(null);
+    setNotice(null);
+    setShareUrl(null);
+    try {
+      const res = await api.createShareLink({ fileIds: [file.id] });
+      if (res.status === 201) {
+        setShareUrl((res.data as { url: string }).url);
+        setNotice('Link created with your saved Sharing defaults. The URL below is shown only once — copy it now.');
+      } else {
+        const body = res.data as { code?: string };
+        setError(
+          body.code === 'share_password_required_by_policy'
+            ? 'Your Sharing settings require a password for new links. Create the link from the Shared Links page, where you can set one.'
+            : `The link could not be created (${body.code ?? 'unknown'}).`,
+        );
+      }
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Durable deletion: revokes shares, deletes only CloudNest-owned objects, reports the real outcome. */
+  async function onDelete(file: FileView): Promise<void> {
+    if (!(await confirmDestructive(
+      `Delete "${file.originalName}"?\n\nThis removes the CloudNest-owned chunk objects from your connected accounts. ` +
+      'Any share links for it are revoked first. Provider objects that cannot be confirmed deleted are reported as pending.',
+    ))) return;
+    setBusyId(file.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await api.deleteFile(file.id);
+      if (res.status === 202) {
+        const jobId = (res.data as { jobId: string }).jobId;
+        // drive it to a terminal state so the owner sees the real outcome
+        const retry = await api.retryDeletion(jobId);
+        const state = retry.status === 200
+          ? (retry.data as { result?: { state?: string } }).result?.state ?? 'unknown'
+          : 'unknown';
+        setNotice(
+          state === 'completed'
+            ? 'Deletion completed: every CloudNest-owned chunk object is confirmed gone.'
+            : 'Deletion is still pending: some objects could not be confirmed deleted. The obligation is recorded and can be retried.',
+        );
+        await load();
+      } else {
+        setError('Could not queue that deletion.');
+      }
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const visible = files    .filter((f) => (search ? f.originalName.toLowerCase().includes(search.toLowerCase()) : true))
     .sort((a, b) => {
       if (sortBy === 'name') return a.originalName.localeCompare(b.originalName);
       if (sortBy === 'size') return b.sizeBytes - a.sizeBytes;
@@ -110,6 +170,32 @@ export function FilesPage() {
 
       {notice && <div className="card notice-card" role="status"><p>{notice}</p></div>}
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
+
+      {shareUrl && (
+        <section className="card">
+          <h2>New link URL</h2>
+          <div className="copy-row">
+            <code className="callback-uri">{shareUrl}</code>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                void navigator.clipboard.writeText(shareUrl).then(
+                  () => setNotice('URL copied.'),
+                  () => setNotice('Copy failed; select the URL and copy it manually.'),
+                );
+              }}
+            >
+              Copy
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => setShareUrl(null)}>Dismiss</button>
+          </div>
+          <p className="muted small">
+            This URL cannot be shown again — CloudNest stores only a hash of the token. Rotate or revoke links on the
+            Shared Links page.
+          </p>
+        </section>
+      )}
 
       <section className="card">
         <div className="files-toolbar">
@@ -189,9 +275,22 @@ export function FilesPage() {
                     >
                       Rename
                     </button>
-                    {/* still later-step features, shown as unavailable rather than faked */}
-                    <button type="button" className="btn-secondary" disabled title="Available in a later step">Share</button>
-                    <button type="button" className="btn-danger" disabled title="Available in a later step">Delete</button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      disabled={file.state !== 'completed' || busyId === file.id}
+                      onClick={() => void onShare(file)}
+                    >
+                      Share
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-danger"
+                      disabled={file.state === 'deleted' || busyId === file.id}
+                      onClick={() => void onDelete(file)}
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -200,7 +299,8 @@ export function FilesPage() {
         )}
         <p className="muted small">
           Downloads verify every chunk's checksum before any bytes are sent. Renaming changes metadata only and
-          never moves provider objects. Sharing and deletion arrive in a later step and stay disabled here.
+          never moves provider objects. Sharing creates a link with your saved defaults; deleting removes only the
+          CloudNest-owned chunk objects and reports anything it could not confirm.
         </p>
       </section>
 

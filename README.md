@@ -2,76 +2,81 @@
 
 A self-hosted personal cloud-storage aggregator (working name, subject to owner approval).
 
-**Status: Step 1 foundation** — app shell, health API, SQLite foundation. No cloud
-providers, no uploads, no authentication yet.
+CloudNest stores file **metadata** in a local SQLite database and file **content**
+as chunk objects inside the cloud accounts you connect (Google Drive, Dropbox,
+OneDrive, pCloud; MEGA experimentally). Large files are split into app-managed
+logical chunks, placed across eligible accounts, and reconstructed byte-for-byte
+on download — the full original file is never stored on, or staged on, this host.
+
+**Status:** Steps 1–6 implemented: first-run admin + sessions/CSRF, provider
+account lifecycle with encrypted credentials, chunked upload engine with
+capacity-aware routing, download/reconstruction with per-chunk verification,
+CloudNest share links with expiry/password/limits, safe deletion of
+CloudNest-owned objects, Settings/Diagnostics/Backup, and an optional Cloudflare
+Tunnel. Provider evidence status: see [PROVIDER_STATUS.md](PROVIDER_STATUS.md) —
+**no provider has been live-tested in this environment**; every connector is
+mock-tested, and MEGA is experimental.
+
+The application binds to `127.0.0.1` only. Public access exists solely through
+the optional, explicitly enabled Cloudflare Tunnel.
 
 ## Prerequisites
 
 - Node.js **24 LTS** (`.nvmrc` contains `24`; `engines.node` enforces `24.x`)
 - npm (bundled with Node)
+- Optional: a `cloudflared` binary you installed yourself, only if you want
+  remote access
 
-## Install
-
-```bash
-npm install        # first time (or npm ci for a clean, lockfile-exact install)
-```
-
-## Run (development)
+## Install and run
 
 ```bash
-npm run dev
-# UI:    http://127.0.0.1:5173   (Vite dev server, /api proxied)
-# API:   http://127.0.0.1:8787
-```
-
-## Run (production-like, local)
-
-```bash
+npm ci            # or `npm install` on a first-time checkout
 npm run build
-npm start
-# App:  http://127.0.0.1:8787   (Express serves the built UI + API)
+npm start         # serves the UI + API on http://127.0.0.1:8787
 ```
 
-## Test & typecheck
+Open `http://127.0.0.1:8787` and create your admin password on the first-run
+screen. There is no default password.
+
+Development:
 
 ```bash
-npm test
+npm run dev       # Vite dev server on 5173 with /api proxied to 8787
 npm run typecheck
+npm test          # live provider tests are opt-in and skipped by default
 ```
 
-## Configuration
+The full install guide, backup/restore notes, known limitations and the release
+checklist live in [RELEASE.md](RELEASE.md). Architecture notes are in
+[docs/architecture.md](docs/architecture.md).
 
-Copy `.env.example` to `.env` if you want to change anything. Supported options in
-this step (all safe, non-secret):
+## Configuration (`.env`, all optional and non-secret)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PORT` | `8787` | Local server port (loopback only) |
+| `PORT` | `8787` | Loopback port |
 | `NODE_ENV` | `development` | `development`, `production` or `test` |
-| `DATA_DIR` | OS per-user data dir | Where the SQLite database lives |
+| `DATA_DIR` | OS per-user data dir (`~/.local/share/CloudNest` on Linux) | Where the SQLite database and the credential key live |
+| `APP_BASE_URL` | `http://127.0.0.1:8787` | Canonical origin for OAuth callbacks and share URLs |
 
-- The server binds to **127.0.0.1 only** in this step; there is intentionally no
-  public bind option yet because authentication is not implemented.
-- If `PORT` is already in use, CloudNest prints an actionable error and exits.
-- The SQLite database is created in the per-user OS data directory (on Linux:
-  `~/.local/share/CloudNest/`), never inside the repository. Override with
-  `DATA_DIR=/some/path` in `.env`.
+## Data and durability
 
-## Data & durability
-
-- SQLite runs in **WAL mode** with `foreign_keys=ON`, `synchronous=FULL`,
+- SQLite in **WAL mode** with `foreign_keys=ON`, `synchronous=FULL`,
   `busy_timeout=5000`; verified at startup and in tests.
-- Migrations are transactional and recorded in `schema_migrations`.
-- Metadata only: uploaded file bytes are never stored in SQLite.
-
-## Current limitations (Step 1)
-
-- No login/admin setup, no cloud provider connections, no uploads/downloads,
-  no share links, no public/remote access. These arrive in later steps
-  (see the approved roadmap).
-- Sidebar sections other than Dashboard show honest "Not implemented yet" states.
+- Migrations are transactional, versioned and recorded in `schema_migrations`;
+  an applied migration is never edited, only superseded.
+- Metadata only: file bytes are never stored in SQLite and never staged as a
+  whole file on this host.
+- `<DATA_DIR>/credential-master.key` encrypts provider credentials. **Back it up
+  separately** — a database backup does not include it, and provider accounts
+  cannot be decrypted without it.
 
 ## Supported platform
 
-Developed and tested on Linux x86_64, Node.js 24. `better-sqlite3` ships prebuilt
-binaries for common platforms; uncommon platforms may need C/C++ build tools.
+Developed and verified on Linux x86_64 with Node.js 24. macOS and Windows are
+expected to work but are untested here; `better-sqlite3` ships prebuilt binaries
+for common platforms.
+
+## License
+
+See [LICENSE](LICENSE).

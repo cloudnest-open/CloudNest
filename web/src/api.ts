@@ -137,6 +137,26 @@ export const api = {
   deletionStatus: (jobId: string) => request('GET', `/api/deletions/${jobId}`),
   retryDeletion: (jobId: string) => request('POST', `/api/deletions/${jobId}/retry`),
 
+  // ---- settings, maintenance, tunnel (Step 6 / M12) ----
+  getSettings: () => request('GET', '/api/settings'),
+  saveSettings: (patch: Record<string, unknown>) => request('PATCH', '/api/settings', patch),
+  createBackup: () => request('POST', '/api/maintenance/backup'),
+  listBackups: () => request('GET', '/api/maintenance/backups'),
+  verifyBackup: (databasePath: string) => request('POST', '/api/maintenance/verify', { databasePath }),
+  restoreBackup: (databasePath: string, targetDir: string) =>
+    request('POST', '/api/maintenance/restore', { databasePath, targetDir }),
+  getDiagnostics: () => request('GET', '/api/maintenance/diagnostics'),
+  getTunnel: () => request('GET', '/api/tunnel'),
+  startTunnel: (body: {
+    hostname: string;
+    runtimeToken: string;
+    /** Scoped Cloudflare API token: enables the DNS pre-check; never stored. */
+    cloudflareToken?: string;
+    /** Optional zone hint when the token can see several zones. */
+    zoneId?: string;
+  }) => request('POST', '/api/tunnel/start', body),
+  stopTunnel: () => request('POST', '/api/tunnel/stop'),
+
   /** URL for a browser-native download (Range/resume handled by the browser). */
   downloadUrl: (fileId: string) => `/api/files/${fileId}/download`,
 
