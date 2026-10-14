@@ -798,6 +798,31 @@ input:disabled, select:disabled, textarea:disabled {
   padding: 8px 10px;
 }
 
+/* --- Authorized Redirect URI (Provider Setup §12.2) ---------------------- */
+/* Read-only, monospace, fully wrapped field + aligned Copy URI action. */
+.uri-row { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+
+.uri-field {
+  flex: 1 1 260px;
+  min-width: 0;
+  height: auto;
+  min-height: 58px;
+  padding: 8px 10px;
+  border: 1px solid var(--cn-border);
+  border-radius: 8px;
+  background: var(--cn-surface-muted);
+  color: var(--cn-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+.uri-row .btn-secondary { flex: 0 0 auto; white-space: nowrap; }
+
 .diagnostics-output {
   background: var(--cn-surface-muted);
   border: 1px solid var(--cn-border);

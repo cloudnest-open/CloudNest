@@ -21,8 +21,11 @@ export interface AppConfig {
   appBaseUrl: string;
 }
 
-function parseAppBaseUrl(raw: string | undefined): string {
-  const value = (raw === undefined || raw.trim() === '') ? 'http://127.0.0.1:8787' : raw.trim();
+function parseAppBaseUrl(raw: string | undefined, fallbackOrigin: string): string {
+  // Without an explicit APP_BASE_URL the canonical origin derives from the
+  // actual port, so a second local instance (e.g. a test fixture on :8788)
+  // advertises its own callback origin instead of a hardcoded one.
+  const value = (raw === undefined || raw.trim() === '') ? fallbackOrigin : raw.trim();
   let url: URL;
   try {
     url = new URL(value);
@@ -79,7 +82,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const nodeEnv = parseNodeEnv(env.NODE_ENV);
   const dataDir = resolveDataDir(env.DATA_DIR);
   const dbPath = path.join(dataDir, 'cloudnest.db');
-  const appBaseUrl = parseAppBaseUrl(env.APP_BASE_URL);
+  const appBaseUrl = parseAppBaseUrl(env.APP_BASE_URL, `http://127.0.0.1:${port}`);
   return {
     port,
     nodeEnv,

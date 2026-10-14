@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- CloudNest brand mark: the app's blue cloud on the primary fill. -->
+  <rect width="64" height="64" rx="14" fill="#2563EB"/>
+  <g fill="#FFFFFF">
+    <circle cx="22" cy="37" r="10"/>
+    <circle cx="33.5" cy="30" r="13"/>
+    <circle cx="45" cy="38" r="9"/>
+    <rect x="14" y="39" width="38" height="10" rx="5"/>
+  </g>
+</svg>

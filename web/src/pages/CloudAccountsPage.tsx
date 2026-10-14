@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ProviderInfo, type AccountInfo } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
+import { Dialog } from '../components/ui.js';
 import { ProviderLogo } from '../components/ProviderLogo.js';
 
 /**
  * Cloud Accounts: real database rows only. Unknown quota is shown as unknown,
  * never as zero. MEGA is visibly Experimental. No fake progress or storage.
+ *
+ * Connection behavior (owner task 2026-10-15): every provider's Connect
+ * action lives and stays on this page. OAuth start failures for a missing
+ * application configuration open an explanatory dialog with an explicit
+ * "Configure Provider" choice — the user is never auto-navigated to Settings.
  */
 
 function formatBytes(bytes: number | null): string {
@@ -38,7 +44,18 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   const [megaOpen, setMegaOpen] = useState(false);
   const [megaEmail, setMegaEmail] = useState('');
   const [megaPassword, setMegaPassword] = useState('');
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // The connect picker stays open across navigation so a user who followed the
+  // explicit "Configure Provider" jump into Settings returns to their context.
+  const [pickerOpen, setPickerOpen] = useState(() => {
+    try { return sessionStorage.getItem('cloudnest.connectPickerOpen') === '1'; } catch { return false; }
+  });
+  // Set when an OAuth start fails because this instance lacks the provider's
+  // application configuration; rendered as the explanatory dialog below.
+  const [setupNeeded, setSetupNeeded] = useState<ProviderInfo | null>(null);
+
+  useEffect(() => {
+    try { sessionStorage.setItem('cloudnest.connectPickerOpen', pickerOpen ? '1' : '0'); } catch { /* private mode */ }
+  }, [pickerOpen]);
 
   const reload = useCallback(async () => {
     // FE-04: without this the page showed "Loading…" forever on a network error
@@ -62,14 +79,15 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     void reload();
   }, [reload]);
 
-  async function connect(provider: string) {
+  async function connect(p: ProviderInfo) {
     setError(null);
     setNotice(null);
-    if (provider === 'mega') {
+    if (p.id === 'mega') {
+      // MEGA uses its own credentials form here — never pretend it is OAuth.
       setMegaOpen(true);
       return;
     }
-    const res = await api.oauthStart(provider);
+    const res = await api.oauthStart(p.id);
     if (res.status === 200) {
       const url = (res.data as { authorizationUrl: string }).authorizationUrl;
       window.location.assign(url);
@@ -77,11 +95,12 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     }
     const data = res.data as { error?: string; code?: string };
     if (data.code === 'provider_not_configured') {
-      setError('That provider is not set up yet. Configure it in Settings → Provider Setup.');
-    } else {
-      setError(data.error ?? 'Could not start the connection.');
+      // Stay on Cloud Accounts: explain, and let the user choose to open
+      // Settings. Nothing navigates automatically and nothing was connected.
+      setSetupNeeded(p);
+      return;
     }
-    setPickerOpen(false);
+    setError(data.error ?? 'Could not start the connection.');
   }
 
   async function withBusy(id: string, fn: () => Promise<void>) {
@@ -204,7 +223,6 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
           <div className="provider-grid">
             {providers.map((p) => {
               const s = setupSummary(p);
-              const configured = !p.requiresAppConfig || p.verificationStatus === 'verified' || p.verificationStatus === 'saved';
               return (
                 <div key={p.id} className="provider-card">
                   <div className="provider-card-head">
@@ -215,23 +233,48 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                     {p.experimental && <span className="tag tag-warn">Experimental</span>}
                   </div>
                   <p className={`setup-state setup-${s.tone}`}>Setup: {s.text}</p>
-                  {!configured ? (
-                    <>
-                      <p className="muted">One-time provider setup is required before connecting.</p>
-                      <button type="button" className="btn-secondary" onClick={onGoToSettings}>
-                        Open Provider Setup
-                      </button>
-                    </>
-                  ) : (
-                    <button type="button" className="btn-primary" onClick={() => void connect(p.id)}>
-                      Connect {p.displayName}
-                    </button>
+                  {!p.requiresAppConfig && (
+                    <p className="muted small">Connects with email and password — experimental, not OAuth.</p>
                   )}
+                  {/* The real connection action always lives here. If the
+                      instance lacks the app configuration, Connect explains
+                      in place instead of rerouting to Settings. */}
+                  <button type="button" className="btn-primary btn-block" onClick={() => void connect(p)}>
+                    Connect {p.displayName}
+                  </button>
                 </div>
               );
             })}
           </div>
         </section>
+      )}
+
+      {setupNeeded && (
+        <Dialog
+          title={`${setupNeeded.displayName} needs administrator setup`}
+          description={`Connecting ${setupNeeded.displayName} requires this CloudNest instance's application credentials, which only an administrator can configure. Nothing was connected and no account was changed.`}
+          onClose={() => setSetupNeeded(null)}
+          footer={
+            <>
+              <button type="button" className="btn-secondary" onClick={() => setSetupNeeded(null)}>
+                Back
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => { setSetupNeeded(null); onGoToSettings(); }}
+              >
+                Configure Provider
+              </button>
+            </>
+          }
+        >
+          <p className="small muted">
+            Application-level OAuth setup (Client ID, secret, Authorized Redirect URI) is separate from your
+            personal cloud-account connections. Once it is configured, Connect from this page starts the real
+            authorization flow — no more trips to Settings.
+          </p>
+        </Dialog>
       )}
 
       {megaOpen && (

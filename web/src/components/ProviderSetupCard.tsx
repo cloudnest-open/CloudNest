@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Check } from 'lucide-react';
 import { api, type ProviderInfo } from '../api.js';
 import { ProviderLogo } from './ProviderLogo.js';
 
@@ -6,7 +7,9 @@ import { ProviderLogo } from './ProviderLogo.js';
  * Settings → Provider Setup: one-time app credentials per provider
  * (reference spec §12.2). The heading and card live in SettingsPage; this
  * renders the per-provider rows: identity mark + status pill, then the
- * Client ID → Client secret → callback URI (+ Copy) → note → Save/Cancel form.
+ * Client ID → Client secret → Authorized Redirect URI (read-only, Copy URI)
+ * → note → Save/Cancel form. The compact row keeps only identity, status and
+ * the setup action — the raw URI is never squeezed in beside them.
  */
 export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -17,6 +20,11 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [needsConfirm, setNeedsConfirm] = useState(false);
+  // Per-provider Copy URI feedback: brief "Copied" confirmation or a manual
+  // fallback note — the URI itself is never truncated for copying.
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const copyTimer = useRef<number | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -25,12 +33,19 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
     })();
   }, []);
 
-  async function copy(text: string) {
+  useEffect(() => () => {
+    if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+  }, []);
+
+  async function copyUri(p: ProviderInfo) {
+    setCopyError(null);
     try {
-      await navigator.clipboard.writeText(text);
-      setMessage('Callback URI copied.');
+      await navigator.clipboard.writeText(p.callbackUri ?? '');
+      setCopiedId(p.id);
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopiedId(null), 2500);
     } catch {
-      setMessage('Copy failed; select the URI text and copy it manually.');
+      setCopyError('Copy failed — select the URI text below and copy it manually.');
     }
   }
 
@@ -105,11 +120,23 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
                     <input id="onedrive-authority" type="text" value={authority} onChange={(e) => setAuthority(e.target.value)} />
                   </>
                 )}
-                <label>Exact callback URI to register in the provider console</label>
-                <div className="copy-row">
-                  <code className="callback-uri">{p.callbackUri}</code>
-                  <button type="button" className="btn-secondary" onClick={() => p.callbackUri && void copy(p.callbackUri)}>Copy</button>
+                <label htmlFor={`${p.id}-redirect-uri`}>Authorized Redirect URI</label>
+                <div className="uri-row">
+                  {/* Read-only, fully wrapped, select-all-on-focus: the exact
+                      URI the backend uses, never truncated for copying. */}
+                  <textarea
+                    id={`${p.id}-redirect-uri`}
+                    className="uri-field"
+                    readOnly
+                    rows={2}
+                    value={p.callbackUri ?? ''}
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                  <button type="button" className="btn-secondary" onClick={() => void copyUri(p)}>
+                    {copiedId === p.id ? <><Check size={14} aria-hidden="true" /> Copied</> : 'Copy URI'}
+                  </button>
                 </div>
+                {copyError && <p className="form-error" role="alert">{copyError}</p>}
                 {p.id === 'google_drive' && (
                   <p className="muted small">
                     Google note: an External app in “Testing” status can receive Drive-scope refresh tokens that
@@ -138,12 +165,11 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
               </form>
             ) : (
               <div className="actions">
-                <button type="button" className="btn-secondary" onClick={() => { setOpenId(p.id); setClientId(''); setClientSecret(''); setNeedsConfirm(false); setError(null); setMessage(null); }}>
+                <button type="button" className="btn-secondary" onClick={() => { setOpenId(p.id); setClientId(''); setClientSecret(''); setNeedsConfirm(false); setError(null); setMessage(null); setCopyError(null); }}>
                   {p.verificationStatus === 'not_configured' ? 'Set up' : 'Replace credentials'}
                 </button>
-                {p.callbackUri && (
-                  <span className="muted small">Callback: <code>{p.callbackUri}</code></span>
-                )}
+                {/* Compact row stays lean: identity + status + action only.
+                    The full URI lives in the expanded panel above. */}
               </div>
             )}
           </div>
