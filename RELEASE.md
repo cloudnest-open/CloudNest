@@ -87,8 +87,11 @@ makes the next start show the first-run setup screen again.
    See `PROVIDER_STATUS.md`. Treat every connector as `mock-tested`.
 2. **MEGA is experimental** and is excluded from automatic upload placement
    until a live smoke test proves streaming upload and recovery.
-3. **Browser-native downloads**: pause/resume is provided by your browser, not by
-   CloudNest. The Downloads page therefore offers no in-app pause button.
+3. **Browser-native downloads**: on browsers with the File System Access API
+   (Chrome/Edge), downloads stream straight to the location you pick. On other
+   browsers the native browser download is the fallback — pause/resume is then
+   provided by your browser, not by CloudNest, and the Downloads page offers no
+   in-app pause button.
 4. **Resume after a browser restart** can verify only the chunks that were already
    uploaded. Bytes in chunks that were never sent have no earlier digest to
    compare against — this is stated in the UI and is a V1 design limit.

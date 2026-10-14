@@ -144,8 +144,8 @@ export const api = {
   createBackup: () => request('POST', '/api/maintenance/backup'),
   listBackups: () => request('GET', '/api/maintenance/backups'),
   verifyBackup: (databasePath: string) => request('POST', '/api/maintenance/verify', { databasePath }),
-  restoreBackup: (databasePath: string, targetDir: string) =>
-    request('POST', '/api/maintenance/restore', { databasePath, targetDir }),
+  restoreBackup: (databasePath: string, targetDir: string, confirmOverwrite = false) =>
+    request('POST', '/api/maintenance/restore', { databasePath, targetDir, confirmOverwrite }),
   getDiagnostics: () => request('GET', '/api/maintenance/diagnostics'),
   getTunnel: () => request('GET', '/api/tunnel'),
   startTunnel: (body: {

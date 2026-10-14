@@ -98,6 +98,11 @@ export function DownloadsPage() {
     return () => clearTimeout(timer);
   }, [downloads, load]);
 
+  /** FE-06: true when the browser exposes the File System Access writer. */
+  function supportsFsAccess(): boolean {
+    return typeof (window as { showSaveFilePicker?: unknown }).showSaveFilePicker === 'function';
+  }
+
   async function startDownload(file: FileView) {
     // FE-08: fetch first so a failed download surfaces IN-APP instead of
     // replacing the whole page with a raw JSON error document.
@@ -117,11 +122,61 @@ export function DownloadsPage() {
           : `The download failed (HTTP ${res.status}). Check the file's chunks and provider accounts, then retry.`);
         return;
       }
-      // success: hand the verified stream to the browser as a file
-      const blob = await res.blob();
       const disposition = res.headers.get('content-disposition') ?? '';
       const match = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
       const name = match ? decodeURIComponent(match[1] ?? match[2] ?? '') : file.originalName;
+
+      // FE-06 preferred path: stream straight to disk through the File System
+      // Access API. Bytes are written as they arrive, so even large files
+      // never sit in browser memory. Cancel/user-dismiss falls back to the
+      // native download below.
+      const picker = (window as {
+        showSaveFilePicker?: (opts: {
+          suggestedName?: string;
+          types?: Array<{ description: string; accept: Record<string, string[]> }>;
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: BufferSource | Blob | string) => Promise<void>;
+            close: () => Promise<void>;
+            abort?: (reason?: string) => Promise<void>;
+          }>;
+        }>;
+      }).showSaveFilePicker;
+      if (supportsFsAccess() && picker) {
+        try {
+          const handle = await picker({
+            suggestedName: name,
+            types: [{ description: 'All files', accept: { 'application/octet-stream': ['.bin'] } }],
+          });
+          const writable = await handle.createWritable();
+          if (res.body) {
+            const reader = res.body.getReader();
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              await writable.write(value);
+            }
+          }
+          await writable.close();
+          setNotice(`Saved ${name} to disk.`);
+          setTimeout(() => void load(), 1500);
+          return;
+        } catch (err) {
+          const name2 = (err as { name?: string }).name;
+          if (name2 === 'AbortError') {
+            // the user dismissed the save dialog: nothing to do
+            setNotice('Download cancelled.');
+            return;
+          }
+          // any writer failure falls through to the native fallback below
+          setNotice('Direct-to-disk save failed; using the browser download instead.');
+        }
+      }
+
+      // Native fallback: the browser performs the download and manages
+      // Range/resume itself. In-app progress/resume controls are limited in
+      // this mode (disclosed in the downloads list copy).
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
@@ -130,7 +185,7 @@ export function DownloadsPage() {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      setNotice(`Downloaded ${name}.`);
+      setNotice(`Downloaded ${name} via the browser download. In-app progress and resume are limited in this fallback.`);
       setTimeout(() => void load(), 1500);
     } catch {
       setError('Could not reach the server for the download. Check that CloudNest is running, then retry.');

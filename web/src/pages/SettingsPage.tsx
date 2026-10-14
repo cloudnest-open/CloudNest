@@ -77,6 +77,12 @@ export function SettingsPage() {
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [tunnel, setTunnel] = useState<TunnelInfo | null>(null);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
+  // ST-03: restore flow state — which backup, which target directory, and the
+  // explicit two-step confirmation the destructive action requires.
+  const [restoreSource, setRestoreSource] = useState<string | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState('');
+  const [restoreConfirm, setRestoreConfirm] = useState('');
+  const [restoreOverwrite, setRestoreOverwrite] = useState(false);
   const [keyWarning, setKeyWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -165,6 +171,39 @@ export function SettingsPage() {
       );
     } else {
       setError('Verification failed.');
+    }
+  }
+
+  async function runRestore(): Promise<void> {
+    if (!restoreSource) return;
+    if (restoreConfirm !== 'RESTORE') {
+      setError('Type RESTORE to confirm the restore.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const overwriteConfirmed = restoreOverwrite && restoreConfirm === 'RESTORE';
+      const res = await api.restoreBackup(restoreSource, restoreTarget.trim(), overwriteConfirmed);
+      if (res.status === 200) {
+        const body = res.data as { restoredPath: string; notice: string };
+        setNotice(`${body.notice} Restored database path: ${body.restoredPath}`);
+        setRestoreSource(null);
+        setRestoreTarget('');
+        setRestoreConfirm('');
+      } else {
+        const body = res.data as { code?: string };
+        setError(body.code === 'restore_target_invalid'
+          ? 'The target directory must be an absolute path.'
+          : body.code === 'restore_target_exists'
+            ? 'The target directory already exists. Tick the overwrite confirmation to use it anyway.'
+            : 'The restore failed.');
+      }
+    } catch {
+      setError('Could not reach the server for the restore.');
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -582,6 +621,22 @@ export function SettingsPage() {
                       <td className="actions">
                         <button type="button" className="btn-secondary" onClick={() => void verify(`${b.directory}/cloudnest.db`)}>
                           Verify
+                        </button>{' '}
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          disabled={busy}
+                          onClick={() => {
+                            // ST-03: start the restore flow from this backup
+                            setRestoreSource(`${b.directory}/cloudnest.db`);
+                            setRestoreTarget('');
+                            setRestoreConfirm('');
+                            setRestoreOverwrite(false);
+                            setError(null);
+                            setNotice(null);
+                          }}
+                        >
+                          Restore…
                         </button>
                       </td>
                     </tr>
@@ -589,10 +644,62 @@ export function SettingsPage() {
                 </tbody>
               </table>
             )}
-            <p className="muted small">
-              Restoring writes into a <strong>new directory</strong> and never overwrites the live data directory.
-              A restore does not bring back provider objects, and provider accounts need the credential key.
-            </p>
+            {restoreSource && (
+              <div className="upload-form" style={{ marginTop: 12 }} role="group" aria-label="Restore a backup">
+                <h3>Restore backup</h3>
+                <p className="muted small">Source: <code>{restoreSource}</code></p>
+                <label htmlFor="restore-target">Target directory (absolute path; created fresh)</label>
+                <input
+                  id="restore-target"
+                  type="text"
+                  value={restoreTarget}
+                  onChange={(e) => setRestoreTarget(e.target.value)}
+                  placeholder="/absolute/path/to/restore-into"
+                />
+                <p className="muted small">
+                  Restoring writes into a <strong>new directory</strong> and never overwrites the live data directory.
+                  A restore does not bring back provider objects, and provider accounts need the credential-encryption
+                  key; without it they must be reconnected. Pointing the target at an existing directory requires the
+                  overwrite confirmation below.
+                </p>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={restoreOverwrite}
+                    onChange={(e) => setRestoreOverwrite(e.target.checked)}
+                  />
+                  Allow writing into an existing directory (overwrite its database)
+                </label>
+                <label htmlFor="restore-confirm">Type RESTORE to confirm</label>
+                <input
+                  id="restore-confirm"
+                  type="text"
+                  value={restoreConfirm}
+                  onChange={(e) => setRestoreConfirm(e.target.value)}
+                  autoComplete="off"
+                />
+                <div className="actions">
+                  <button type="button" className="btn-danger" disabled={busy || restoreConfirm !== 'RESTORE' || restoreTarget.trim() === ''} onClick={() => void runRestore()}>
+                    {busy ? 'Working…' : 'Restore now'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={busy}
+                    onClick={() => { setRestoreSource(null); setRestoreTarget(''); setRestoreConfirm(''); }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {!restoreSource && (
+              <p className="muted small">
+                Restoring writes into a <strong>new directory</strong> and never overwrites the live data directory.
+                A restore does not bring back provider objects, and provider accounts need the credential key. Use
+                <strong> Restore…</strong> on a backup row to start.
+              </p>
+            )}
           </section>
         </>
         </div>
