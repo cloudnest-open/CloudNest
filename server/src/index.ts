@@ -27,6 +27,16 @@ if (downloads) {
   if (interrupted > 0) console.log(`[cloudnest] marked ${interrupted} interrupted download(s) as failed`);
 }
 
+// deletions that were interrupted must not be silently abandoned
+const deletions = app.get('deletions') as { resumePending: () => Promise<{ attempted: number; completed: number }> } | undefined;
+if (deletions) {
+  void deletions.resumePending().then((r) => {
+    if (r.attempted > 0) console.log(`[cloudnest] deletion recovery: ${r.completed}/${r.attempted} completed`);
+  }).catch(() => {
+    // pending obligations remain recorded for a later retry
+  });
+}
+
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`[cloudnest] listening on http://127.0.0.1:${config.port}`);
   console.log(`[cloudnest] data directory: ${config.dataDir}`);

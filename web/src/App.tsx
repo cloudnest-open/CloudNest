@@ -7,6 +7,7 @@ import { UploadsPage } from './pages/UploadsPage.js';
 import { FilesPage } from './pages/FilesPage.js';
 import { DashboardSummary } from './components/DashboardSummary.js';
 import { DownloadsPage } from './pages/DownloadsPage.js';
+import { SharedLinksPage } from './pages/SharedLinksPage.js';
 
 const NAV_ITEMS = [
   'Dashboard',
@@ -190,6 +191,8 @@ export default function App() {
             <FilesPage />
           ) : active === 'Downloads' ? (
             <DownloadsPage />
+          ) : active === 'Shared Links' ? (
+            <SharedLinksPage />
           ) : active !== 'Dashboard' ? (
             <section className="card placeholder-card">
               <h1>{active}</h1>

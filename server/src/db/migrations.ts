@@ -535,6 +535,90 @@ const M0008_DOWNLOAD_ENGINE: Migration = {
   },
 };
 
+const M0009_SHARE_LINKS: Migration = {
+  version: 9,
+  name: '0009-share-links',
+  up: (db) => {
+    // Step 2 created share_links with a placeholder state set; the approved
+    // share design needs the canonical vocabulary plus revocation bookkeeping.
+    db.exec(`
+      CREATE TABLE share_links_new (
+        id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        password_hash TEXT,
+        expires_at TEXT,
+        download_limit INTEGER CHECK(download_limit IS NULL OR download_limit > 0),
+        download_count INTEGER NOT NULL DEFAULT 0 CHECK(download_count >= 0),
+        state TEXT NOT NULL CHECK(state IN ('active','revoked','expired','deleted')),
+        revoked_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    db.exec(`
+      INSERT INTO share_links_new (id, token_hash, password_hash, expires_at, download_limit, download_count, state, created_at, updated_at)
+      SELECT id, token_hash, password_hash, expires_at, download_limit, download_count, state, created_at, updated_at FROM share_links;
+    `);
+    db.exec('DROP TABLE share_links;');
+    db.exec('ALTER TABLE share_links_new RENAME TO share_links;');
+    db.exec('CREATE INDEX idx_share_links_token_state ON share_links(token_hash, state);');
+    db.exec('CREATE INDEX idx_share_links_state ON share_links(state, expires_at);');
+
+    // re-create the child table that referenced share_links
+    db.exec(`
+      CREATE TABLE share_link_items_new (
+        share_link_id TEXT NOT NULL REFERENCES share_links(id) ON DELETE CASCADE,
+        file_id TEXT NOT NULL REFERENCES files(id) ON DELETE RESTRICT,
+        PRIMARY KEY (share_link_id, file_id)
+      );
+    `);
+    db.exec('INSERT INTO share_link_items_new SELECT share_link_id, file_id FROM share_link_items;');
+    db.exec('DROP TABLE share_link_items;');
+    db.exec('ALTER TABLE share_link_items_new RENAME TO share_link_items;');
+    db.exec('CREATE INDEX idx_share_link_items_link ON share_link_items(share_link_id);');
+
+    // One download-start consume record per authorized public download.
+    // Only a hash of the temporary token is stored; never the raw token.
+    db.exec(`
+      CREATE TABLE share_download_sessions (
+        id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        share_link_id TEXT NOT NULL REFERENCES share_links(id) ON DELETE CASCADE,
+        file_id TEXT NOT NULL REFERENCES files(id) ON DELETE RESTRICT,
+        state TEXT NOT NULL CHECK(state IN ('active','consumed','expired','revoked')),
+        expires_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_share_sessions_expiry ON share_download_sessions(expires_at);
+      CREATE INDEX idx_share_sessions_link ON share_download_sessions(share_link_id, state);
+      CREATE INDEX idx_share_sessions_file ON share_download_sessions(file_id);
+    `);
+
+    // Deletion bookkeeping: a durable record of what still needs remote cleanup.
+    db.exec(`
+      CREATE TABLE deletion_attempts (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES transfer_jobs(id) ON DELETE RESTRICT,
+        file_id TEXT NOT NULL REFERENCES files(id) ON DELETE RESTRICT,
+        chunk_id TEXT NOT NULL,
+        provider_account_id TEXT NOT NULL REFERENCES provider_accounts(id) ON DELETE RESTRICT,
+        remote_object_id TEXT,
+        state TEXT NOT NULL CHECK(state IN ('pending','deleted','not_found','failed','cleanup_pending')),
+        last_safe_error_code TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_deletion_attempts_job ON deletion_attempts(job_id, state);
+    `);
+
+    const violations = db.pragma('foreign_key_check');
+    if (Array.isArray(violations) ? violations.length > 0 : Boolean(violations)) {
+      throw new Error('foreign_key_check failed after the share-links rebuild');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -544,4 +628,5 @@ export const allMigrations: readonly Migration[] = [
   M0006_UPLOAD_ENGINE,
   M0007_PLACEMENT_STATES,
   M0008_DOWNLOAD_ENGINE,
+  M0009_SHARE_LINKS,
 ];

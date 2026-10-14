@@ -125,6 +125,18 @@ export const api = {
   getDownload: (jobId: string) => request('GET', `/api/downloads/${jobId}`),
   cancelDownload: (jobId: string) => request('POST', `/api/downloads/${jobId}/cancel`),
 
+  // ---- share links + deletion (Step 5 / M11) ----
+  listShareLinks: () => request('GET', '/api/share-links'),
+  createShareLink: (body: { fileIds: string[]; password?: string; expiresAt?: string | null; downloadLimit?: number | null }) =>
+    request('POST', '/api/share-links', body),
+  updateShareLink: (id: string, body: { expiresAt?: string | null; downloadLimit?: number | null }) =>
+    request('PATCH', `/api/share-links/${id}`, body),
+  rotateShareLink: (id: string) => request('POST', `/api/share-links/${id}/rotate`),
+  revokeShareLink: (id: string) => request('POST', `/api/share-links/${id}/revoke`),
+  deleteFile: (fileId: string) => request('DELETE', `/api/files/${fileId}`),
+  deletionStatus: (jobId: string) => request('GET', `/api/deletions/${jobId}`),
+  retryDeletion: (jobId: string) => request('POST', `/api/deletions/${jobId}/retry`),
+
   /** URL for a browser-native download (Range/resume handled by the browser). */
   downloadUrl: (fileId: string) => `/api/files/${fileId}/download`,
 

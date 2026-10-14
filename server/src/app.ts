@@ -21,6 +21,10 @@ import { rawChunkRouter, uploadsRouter } from './routes/uploads.js';
 import { UploadService } from './uploads/upload-service.js';
 import { downloadsRouter } from './routes/downloads.js';
 import { DownloadService } from './downloads/download-service.js';
+import { sharesRouter, publicSharesRouter } from './routes/shares.js';
+import { ShareService } from './shares/share-service.js';
+import { DeletionService } from './deletions/deletion-service.js';
+import { contentDisposition } from './downloads/range.js';
 
 /**
  * Express app factory (Step 2).
@@ -125,6 +129,35 @@ export function createApp(options: {
   const downloads = new DownloadService(options.db, credentialsStore);
   app.use(downloadsRouter({ queries, csrf, downloads }));
   app.set('downloads', downloads);
+
+  // 4d. share links and deletion. Public share routes are mounted separately and
+  //     never inherit the admin gate; they authorize by token + one-time session.
+  const shares = new ShareService(options.db);
+  const deletions = new DeletionService(options.db, credentialsStore, shares);
+  app.use(sharesRouter({ queries, csrf, shares, deletions, appBaseUrl: options.appBaseUrl }));
+  app.use(
+    publicSharesRouter({
+      shares,
+      csrf,
+      downloadFileInfo: (fileId: string) => {
+        const file = downloads.getFile(fileId);
+        if (!file) return null;
+        return {
+          sizeBytes: file.size_bytes,
+          mimeType: file.mime_type,
+          disposition: contentDisposition(file.original_name),
+        };
+      },
+      streamSharedFile: (fileId: string, signal: AbortSignal) => {
+        // one prepared download per request; the shared path reuses the same
+        // verified-chunk streaming code as an admin download
+        const prepared = downloads.prepare(fileId, null, true);
+        return downloads.stream(prepared, signal);
+      },
+    }),
+  );
+  app.set('shares', shares);
+  app.set('deletions', deletions);
 
   // 5. authenticated admin API.
   //    The router is mounted under the /api/admin prefix ONLY. Mounting it at
