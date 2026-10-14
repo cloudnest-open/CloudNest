@@ -46,9 +46,26 @@ npm run typecheck
 npm test          # live provider tests are opt-in and skipped by default
 ```
 
-The full install guide, backup/restore notes, known limitations and the release
-checklist live in [RELEASE.md](RELEASE.md). Architecture notes are in
-[docs/architecture.md](docs/architecture.md).
+Documentation:
+
+- **[docs/provider-setup.md](docs/provider-setup.md)** — per-provider OAuth
+  app registration, exact scopes/redirect URIs, and provider usage limits
+- **[docs/troubleshooting.md](docs/troubleshooting.md)** — error codes and
+  recovery steps for startup, login, uploads, downloads, accounts, backups
+- **[RELEASE.md](RELEASE.md)** — full install guide, backup/restore notes,
+  known limitations, upgrade behaviour, release checklist
+- **[docs/architecture.md](docs/architecture.md)** — architecture notes
+- **[SECURITY.md](SECURITY.md)** — reporting vulnerabilities, threat model
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to contribute
+
+## Security notes
+
+- The server binds to `127.0.0.1` only; remote access is the optional,
+  explicitly enabled Cloudflare Tunnel.
+- Secrets are encrypted at rest; tokens never reach the browser or logs.
+- Share links use 256-bit random tokens stored as hashes; password-protected
+  links require a server-side unlock before any download can start.
+- Read [SECURITY.md](SECURITY.md) before exposing the app beyond loopback.
 
 ## Configuration (`.env`, all optional and non-secret)
 
@@ -79,4 +96,6 @@ for common platforms.
 
 ## License
 
-See [LICENSE](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE). Third-party dependencies are
+permissively licensed (MIT/ISC/BSD/Apache-2.0); see `RELEASE.md` for the note
+on the unofficial `megajs` library used for the experimental MEGA connector.
