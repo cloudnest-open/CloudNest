@@ -8,6 +8,8 @@ import type { Queries } from '../db/queries.js';
 import type { CsrfBundle } from '../auth/csrf.js';
 import { requireAdmin } from '../middleware/require-admin.js';
 import type { SettingsService } from '../settings/settings-service.js';
+import type Database from 'better-sqlite3';
+import { revokeGrantsForLink } from '../shares/unlock-gate.js';
 
 /**
  * Share links and deletion (M11.a–d).
@@ -82,6 +84,8 @@ export function sharesRouter(deps: {
   shares: ShareService;
   deletions: DeletionService;
   appBaseUrl: string;
+  /** Direct metadata connection, used for unlock-grant bookkeeping. */
+  db: Database.Database;
   /** Optional: a caller without a settings service keeps today's defaults. */
   settings?: SettingsService;
 }): Router {
@@ -161,6 +165,7 @@ export function sharesRouter(deps: {
         String(req.params['id']),
         effectiveBaseUrl(deps.appBaseUrl, resolveSettings(req, deps.settings)),
       );
+      revokeGrantsForLink(deps.db, String(req.params['id']));
       res.json({ ok: true, url: rotated.url });
     } catch (err) {
       shareError(res, err);
@@ -171,6 +176,7 @@ export function sharesRouter(deps: {
     res.set('Cache-Control', 'no-store');
     try {
       const revoked = deps.shares.revoke(String(req.params['id']));
+      revokeGrantsForLink(deps.db, String(req.params['id']));
       res.json({ ok: true, revoked });
     } catch (err) {
       shareError(res, err);

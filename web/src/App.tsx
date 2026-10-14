@@ -1,15 +1,21 @@
 import { useEffect, useState } from 'react';
+import {
+  Cloud, House, Folder, CloudUpload, Download, Link, Settings as SettingsIcon,
+  Sun, Moon, LogOut, Search, ChevronDown, UserRound,
+} from 'lucide-react';
 import { api, refreshCsrfToken } from './api.js';
 import { FirstRunPage, LoginPage } from './pages/AuthPages.js';
 import { CloudAccountsPage } from './pages/CloudAccountsPage.js';
 import { UploadsPage } from './pages/UploadsPage.js';
 import { FilesPage } from './pages/FilesPage.js';
-import { DashboardSummary } from './components/DashboardSummary.js';
+import { DashboardPage } from './pages/DashboardPage.js';
 import { DownloadsPage } from './pages/DownloadsPage.js';
 import { SharedLinksPage } from './pages/SharedLinksPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
+import { ToastProvider } from './components/ui.js';
+import { FileActionsProvider } from './components/FileActionsProvider.js';
 import { currentTheme, toggleTheme } from './theme.js';
-import { setConfirmDestructivePreference } from './confirm.js';
+import { setConfirmDestructivePreference, ConfirmHost } from './confirm.js';
 
 const NAV_ITEMS = [
   'Dashboard',
@@ -22,6 +28,32 @@ const NAV_ITEMS = [
 ] as const;
 
 type NavItem = (typeof NAV_ITEMS)[number];
+
+/** One consistent outline icon per navigation entry (design pack §3.1). */
+const NAV_ICONS: Record<NavItem, typeof Cloud> = {
+  Dashboard: House,
+  Files: Folder,
+  Uploads: CloudUpload,
+  Downloads: Download,
+  'Shared Links': Link,
+  'Cloud Accounts': Cloud,
+  Settings: SettingsIcon,
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[i]}`;
+}
+
+interface SearchHit {
+  id: string;
+  originalName: string;
+  sizeBytes: number;
+}
 type AuthState = 'loading' | 'setup' | 'login' | 'ready';
 
 interface Health {
@@ -36,6 +68,12 @@ export default function App() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [theme, setTheme] = useState(currentTheme());
+  // Global search over CloudNest-managed files (real data; never a fake index).
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [fileSearch, setFileSearch] = useState<{ text: string; seq: number }>({ text: '', seq: 0 });
 
   useEffect(() => {
     (async () => {
@@ -110,6 +148,40 @@ export default function App() {
     };
   }, [authState]);
 
+  // Search the CloudNest-managed file index server-side (the same list the
+  // Files page shows). No cross-provider content search is implied, and
+  // nothing is shown before the server answers.
+  useEffect(() => {
+    const text = query.trim();
+    if (authState !== 'ready' || text.length < 2) {
+      setHits([]);
+      setSearchOpen(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.listFiles(8, 0, text)
+        .then((res) => {
+          if (cancelled || res.status !== 200) return;
+          setHits((res.data as { files?: SearchHit[] }).files ?? []);
+          setSearchOpen(true);
+        })
+        .catch(() => undefined);
+    }, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, authState]);
+
+  function openSearchHit(hit: SearchHit): void {
+    setFileSearch((prev) => ({ text: hit.originalName, seq: prev.seq + 1 }));
+    setActive('Files');
+    setQuery('');
+    setHits([]);
+    setSearchOpen(false);
+  }
+
   async function logout() {
     await api.logout();
     await refreshCsrfToken();
@@ -137,24 +209,30 @@ export default function App() {
   }
 
   return (
+    <ToastProvider>
+    <FileActionsProvider>
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">☁</span>
+          <span className="brand-mark" aria-hidden="true"><Cloud size={19} strokeWidth={2} /></span>
           <span className="brand-name">CloudNest</span>
         </div>
         <nav className="nav" aria-label="Main navigation">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item}
-              type="button"
-              className={`nav-item${active === item ? ' active' : ''}`}
-              aria-current={active === item ? 'page' : undefined}
-              onClick={() => setActive(item)}
-            >
-              {item}
-            </button>
-          ))}
+          {NAV_ITEMS.map((item) => {
+            const Icon = NAV_ICONS[item];
+            return (
+              <button
+                key={item}
+                type="button"
+                className={`nav-item${active === item ? ' active' : ''}`}
+                aria-current={active === item ? 'page' : undefined}
+                onClick={() => setActive(item)}
+              >
+                <Icon className="nav-icon" size={20} strokeWidth={1.9} aria-hidden="true" />
+                <span>{item}</span>
+              </button>
+            );
+          })}
         </nav>
         <div className="sidebar-footer">
           <span className={health ? 'status-dot status-ok' : 'status-dot status-down'} aria-hidden="true" />
@@ -165,25 +243,93 @@ export default function App() {
             type="button"
             className="btn-logout"
             aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
             onClick={() => setTheme(toggleTheme())}
           >
-            {theme === 'dark' ? '☀ Light' : '☾ Dark'}
-          </button>
-          <button type="button" className="btn-logout" onClick={logout}>
-            Sign out
+            {theme === 'dark' ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
+            <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
           </button>
         </div>
       </aside>
 
       <div className="main">
         <header className="topbar">
-          <input
-            className="search"
-            type="search"
-            placeholder="Search (available in a later step)"
-            aria-label="Global search"
-            disabled
-          />
+          <div className="search-wrap">
+            <Search className="search-icon" size={16} aria-hidden="true" />
+            <input
+              className="search"
+              type="search"
+              placeholder="Search files and folders..."
+              aria-label="Search files and folders"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => { if (hits.length > 0) setSearchOpen(true); }}
+              onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); setSearchOpen(false); } }}
+            />
+            {searchOpen && (
+              <div className="search-results" role="listbox" aria-label="Search results">
+                {hits.length === 0 ? (
+                  <p className="muted small" style={{ padding: '8px 10px', margin: 0 }}>
+                    No CloudNest-managed files match.
+                  </p>
+                ) : (
+                  hits.map((hit) => (
+                    <button
+                      key={hit.id}
+                      type="button"
+                      className="search-result"
+                      role="option"
+                      aria-selected={false}
+                      onClick={() => openSearchHit(hit)}
+                    >
+                      <Folder size={15} aria-hidden="true" />
+                      <span className="ellipsis">{hit.originalName}</span>
+                      <span className="muted small">{formatBytes(hit.sizeBytes)}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          <div className="account-menu">
+            <button
+              type="button"
+              className="account-chip"
+              aria-haspopup="menu"
+              aria-expanded={accountOpen}
+              onClick={() => setAccountOpen((open) => !open)}
+            >
+              <span className="account-avatar" aria-hidden="true">
+                <UserRound size={16} />
+              </span>
+              <span className="account-text">
+                <strong>admin</strong>
+                <span className="muted">CloudNest administrator</span>
+              </span>
+              <ChevronDown size={15} aria-hidden="true" className="muted" />
+            </button>
+            {accountOpen && (
+              <>
+                <button
+                  type="button"
+                  className="account-scrim"
+                  aria-label="Close account menu"
+                  onClick={() => setAccountOpen(false)}
+                />
+                <div className="account-dropdown" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="account-item"
+                    onClick={() => { setAccountOpen(false); void logout(); }}
+                  >
+                    <LogOut size={15} aria-hidden="true" />
+                    <span>Sign out</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </header>
         <main className="content">
           {notice && (
@@ -198,24 +344,24 @@ export default function App() {
           ) : active === 'Uploads' ? (
             <UploadsPage />
           ) : active === 'Files' ? (
-            <FilesPage />
+            <FilesPage key={fileSearch.seq} initialSearch={fileSearch.text} />
           ) : active === 'Downloads' ? (
             <DownloadsPage />
           ) : active === 'Shared Links' ? (
             <SharedLinksPage />
-          ) : active !== 'Dashboard' ? (
+          ) : active === 'Dashboard' ? (
+            <DashboardPage onNavigate={(page) => setActive(page)} />
+          ) : (
             <section className="card placeholder-card">
               <h1>{active}</h1>
               <p>Not implemented yet. This section will arrive in a later step.</p>
             </section>
-          ) : (
-            <>
-              <h1 className="page-title">Dashboard</h1>
-              <DashboardSummary />
-            </>
           )}
         </main>
       </div>
     </div>
+    <ConfirmHost />
+    </FileActionsProvider>
+    </ToastProvider>
   );
 }

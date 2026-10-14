@@ -128,7 +128,11 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   }
 
   async function disconnect(account: AccountInfo) {
-    if (!(await confirmDestructive(`Disconnect ${account.displayLabel}? Local credentials are removed. No remote files are deleted.`))) return;
+    const ok = await confirmDestructive(
+      `Disconnect ${account.displayLabel}? Local credentials are removed. No remote files are deleted.`,
+      { title: 'Disconnect account', confirmLabel: 'Disconnect' },
+    );
+    if (!ok) return;
     await withBusy(account.id, async () => {
       const res = await api.disconnect(account.id);
       const data = res.data as { warning?: string | null };

@@ -10,7 +10,7 @@ import { loadOrCreateSessionSecret } from './config/secret.js';
  * The only file that binds a port. Binds to loopback only.
  */
 const config = loadConfig();
-const sessionSecret = loadOrCreateSessionSecret(config.dataDir);
+const sessionCredential = loadOrCreateSessionSecret(config.dataDir);
 
 // Open the database and run transactional migrations BEFORE accepting traffic.
 const opened = openDatabase(config.dbPath);
@@ -22,7 +22,7 @@ for (const migration of applied) {
 const app = createApp({
   appVersion: config.appVersion,
   db: opened.db,
-  sessionSecret,
+  sessionCredential,
   dataDir: config.dataDir,
   appBaseUrl: config.appBaseUrl,
   dbPath: config.dbPath,

@@ -619,6 +619,31 @@ const M0009_SHARE_LINKS: Migration = {
   },
 };
 
+const M0010_SHARE_UNLOCK_GRANTS: Migration = {
+  version: 10,
+  name: '0010-share-unlock-grants',
+  up: (db) => {
+    // SH-1 remediation: a password-protected link must gate its downloads on
+    // a successful unlock, not on knowing the public token plus a file id.
+    // A grant is a share-bound, expiring proof-of-unlock. Only its SHA-256
+    // hash is stored, exactly like link and session tokens.
+    db.exec(`
+      CREATE TABLE share_unlock_grants (
+        id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        share_link_id TEXT NOT NULL REFERENCES share_links(id) ON DELETE CASCADE,
+        state TEXT NOT NULL CHECK(state IN ('active','expired','revoked')),
+        expires_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_share_unlock_grants_hash ON share_unlock_grants(token_hash, state);
+      CREATE INDEX idx_share_unlock_grants_link ON share_unlock_grants(share_link_id, state);
+      CREATE INDEX idx_share_unlock_grants_expiry ON share_unlock_grants(expires_at);
+    `);
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -629,4 +654,5 @@ export const allMigrations: readonly Migration[] = [
   M0007_PLACEMENT_STATES,
   M0008_DOWNLOAD_ENGINE,
   M0009_SHARE_LINKS,
+  M0010_SHARE_UNLOCK_GRANTS,
 ];

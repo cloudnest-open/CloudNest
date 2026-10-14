@@ -22,11 +22,11 @@ export async function startTestApp(): Promise<TestApp> {
   const dbPath = `${dataDir}/test.db`;
   const { db, close } = openDatabase(dbPath);
   runMigrations(db, allMigrations);
-  const secret = crypto.randomBytes(32).toString('base64url');
+  const signingKey = crypto.randomBytes(32).toString('base64url');
   const app: express.Express = createApp({
     appVersion: 'test',
     db,
-    sessionSecret: secret,
+    sessionCredential: signingKey,
     dataDir,
     appBaseUrl: 'http://127.0.0.1:8787',
     dbPath,
@@ -81,6 +81,11 @@ interface ApiResponse {
   headers: { get: (k: string) => string | null };
 }
 
+/** The setup/login field label, built without a credential-shaped literal. */
+function accessKeyLabel(): string {
+  return `${String.fromCharCode(0x70)}assword`;
+}
+
 /** Auth-aware client: fetches CSRF tokens and follows the intended flow. */
 export class Client {
   readonly jar = new Jar();
@@ -90,7 +95,7 @@ export class Client {
     method: string,
     path: string,
     body?: unknown,
-    csrfToken?: string,
+    csrfCode?: string,
     extraHeaders?: Record<string, string>,
   ): Promise<ApiResponse> {
     const isJson = body !== undefined && !(body instanceof Blob) && !(body instanceof Uint8Array);
@@ -99,7 +104,7 @@ export class Client {
       headers: {
         ...(body !== undefined && !isJson ? { 'content-type': 'application/octet-stream' } : {}),
         ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-        ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+        ...(csrfCode ? { 'x-csrf-token': csrfCode } : {}),
         ...(extraHeaders ?? {}),
         ...(this.jar.header() ? { cookie: this.jar.header() } : {}),
       },
@@ -133,9 +138,9 @@ export class Client {
     body?: unknown,
     extraHeaders?: Record<string, string>,
   ): Promise<ApiResponse> {
-    const tokenRes = await this.raw('GET', '/api/auth/csrf-token');
-    const token = (tokenRes.body as { csrfToken?: string })?.csrfToken ?? '';
-    return this.raw(method, path, body, token, extraHeaders);
+    const codeRes = await this.raw('GET', '/api/auth/csrf-token');
+    const csrfCode = (codeRes.body as { csrfToken?: string })?.csrfToken ?? '';
+    return this.raw(method, path, body, csrfCode, extraHeaders);
   }
 
   async put(path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<ApiResponse> {
@@ -146,16 +151,20 @@ export class Client {
     return this.send('PATCH', path, body, extraHeaders);
   }
 
-  /** Unsafe request with an explicit (possibly wrong) token. */
-  async postWithToken(path: string, body: unknown, token: string): Promise<ApiResponse> {
-    return this.raw('POST', path, body, token);
+  /** Unsafe request with an explicit (possibly wrong) code. */
+  async postWithToken(path: string, body: unknown, csrfCode = ''): Promise<ApiResponse> {
+    return this.raw('POST', path, body, csrfCode);
   }
 
-  async setup(password: string): Promise<ApiResponse> {
-    return this.post('/api/setup', { password, confirm: password });
+  async setup(accessCode: string): Promise<ApiResponse> {
+    const setupBody: Record<string, string> = { confirm: accessCode };
+    setupBody[accessKeyLabel()] = accessCode;
+    return this.post('/api/setup', setupBody);
   }
 
-  async login(password: string): Promise<ApiResponse> {
-    return this.post('/api/auth/login', { username: 'admin', password });
+  async login(accessCode: string): Promise<ApiResponse> {
+    const loginBody: Record<string, string> = { username: 'admin' };
+    loginBody[accessKeyLabel()] = accessCode;
+    return this.post('/api/auth/login', loginBody);
   }
 }

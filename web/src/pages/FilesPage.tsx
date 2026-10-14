@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Folder, Pencil, RefreshCw, Share2 as ShareIcon, Trash2, Upload } from 'lucide-react';
 import { api } from '../api.js';
-import { confirmDestructive } from '../confirm.js';
+import { useFileActions } from '../components/FileActionsProvider.js';
+import {
+  Badge, EmptyState, ProviderTile, SkeletonRows, TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS,
+} from '../components/ui.js';
 
 /**
- * Files (Step 4 / M9.e, completed in Step 6 / M12).
+ * Files (design pack §8): one row per logical file — never one per chunk.
  *
- * One row per logical file — never one row per chunk. Download, rename, share
- * and delete all work from here; deletion follows the same durable,
- * verified-outcome flow as the Shared Links page.
+ * Every action is real: Share creates a link (one-time URL dialog), Rename
+ * changes metadata only, Delete runs the durable deletion with the exact
+ * destructive-confirmation copy. Nothing else is offered as a button.
  */
 
 interface FileView {
@@ -23,38 +27,15 @@ interface FileView {
   completedAt: string | null;
 }
 
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return 'Unknown';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1024;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i++;
-  }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[i]}`;
-}
-
-const PROVIDER_LABELS: Record<string, string> = {
-  google_drive: 'Google Drive',
-  dropbox: 'Dropbox',
-  onedrive: 'OneDrive',
-  pcloud: 'pCloud',
-  mega: 'MEGA',
-};
-
-export function FilesPage() {
+export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {}) {
+  const actions = useFileActions();
   const [files, setFiles] = useState<FileView[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState<'name' | 'size' | 'created'>('created');
+  const [search, setSearch] = useState(initialSearch);
+  const [sortBy, setSortBy] = useState<'modified' | 'name' | 'size'>('modified');
   const [detail, setDetail] = useState<FileView | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,7 +46,7 @@ export function FilesPage() {
       setTotal(data.total ?? 0);
       setError(null);
     } else {
-      setError('Could not load the file list.');
+      setError('Could not load the file list. Nothing is shown as an empty result while the API is failing.');
     }
     setLoading(false);
   }, []);
@@ -74,233 +55,148 @@ export function FilesPage() {
     void load();
   }, [load]);
 
-  async function onRename(file: FileView): Promise<void> {
-    const next = window.prompt('New file name:', file.originalName);
-    if (!next || next === file.originalName) return;
-    setBusyId(file.id);
-    setError(null);
-    setNotice(null);
-    try {
-      const res = await api.renameFile(file.id, next);
-      if (res.status === 200) {
-        setNotice(`Renamed to ${next}. Only the CloudNest metadata changed; provider objects were not moved.`);
-        await load();
-      } else {
-        setError('The file could not be renamed.');
-      }
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  /**
-   * Create a single-file share link with the saved Sharing defaults. The raw
-   * URL is shown once; the server keeps only a hash of the token.
-   */
-  async function onShare(file: FileView): Promise<void> {
-    setBusyId(file.id);
-    setError(null);
-    setNotice(null);
-    setShareUrl(null);
-    try {
-      const res = await api.createShareLink({ fileIds: [file.id] });
-      if (res.status === 201) {
-        setShareUrl((res.data as { url: string }).url);
-        setNotice('Link created with your saved Sharing defaults. The URL below is shown only once — copy it now.');
-      } else {
-        const body = res.data as { code?: string };
-        setError(
-          body.code === 'share_password_required_by_policy'
-            ? 'Your Sharing settings require a password for new links. Create the link from the Shared Links page, where you can set one.'
-            : `The link could not be created (${body.code ?? 'unknown'}).`,
-        );
-      }
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  /** Durable deletion: revokes shares, deletes only CloudNest-owned objects, reports the real outcome. */
-  async function onDelete(file: FileView): Promise<void> {
-    if (!(await confirmDestructive(
-      `Delete "${file.originalName}"?\n\nThis removes the CloudNest-owned chunk objects from your connected accounts. ` +
-      'Any share links for it are revoked first. Provider objects that cannot be confirmed deleted are reported as pending.',
-    ))) return;
-    setBusyId(file.id);
-    setError(null);
-    setNotice(null);
-    try {
-      const res = await api.deleteFile(file.id);
-      if (res.status === 202) {
-        const jobId = (res.data as { jobId: string }).jobId;
-        // drive it to a terminal state so the owner sees the real outcome
-        const retry = await api.retryDeletion(jobId);
-        const state = retry.status === 200
-          ? (retry.data as { result?: { state?: string } }).result?.state ?? 'unknown'
-          : 'unknown';
-        setNotice(
-          state === 'completed'
-            ? 'Deletion completed: every CloudNest-owned chunk object is confirmed gone.'
-            : 'Deletion is still pending: some objects could not be confirmed deleted. The obligation is recorded and can be retried.',
-        );
-        await load();
-      } else {
-        setError('Could not queue that deletion.');
-      }
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  const visible = files    .filter((f) => (search ? f.originalName.toLowerCase().includes(search.toLowerCase()) : true))
+  const visible = files
+    .filter((f) => (search ? f.originalName.toLowerCase().includes(search.toLowerCase()) : true))
     .sort((a, b) => {
       if (sortBy === 'name') return a.originalName.localeCompare(b.originalName);
       if (sortBy === 'size') return b.sizeBytes - a.sizeBytes;
-      return b.createdAt.localeCompare(a.createdAt);
+      return (b.createdAt ?? '').localeCompare(a.createdAt ?? '');
     });
 
   return (
     <>
       <div className="page-head">
-        <h1 className="page-title">Files</h1>
-        <button type="button" className="btn-secondary" onClick={() => void load()} disabled={loading}>
-          {loading ? 'Refreshing…' : 'Refresh'}
-        </button>
+        <div>
+          <h1 className="page-title">Files</h1>
+          <p className="muted">One row per CloudNest file. Chunk objects inside your providers are never listed as files.</p>
+        </div>
+        <div className="card-tools">
+          <button type="button" className="btn-secondary" onClick={() => void load()} disabled={loading}>
+            <RefreshCw size={15} aria-hidden="true" />
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
-      {notice && <div className="card notice-card" role="status"><p>{notice}</p></div>}
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
 
-      {shareUrl && (
-        <section className="card">
-          <h2>New link URL</h2>
-          <div className="copy-row">
-            <code className="callback-uri">{shareUrl}</code>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
-                void navigator.clipboard.writeText(shareUrl).then(
-                  () => setNotice('URL copied.'),
-                  () => setNotice('Copy failed; select the URL and copy it manually.'),
-                );
-              }}
-            >
-              Copy
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => setShareUrl(null)}>Dismiss</button>
-          </div>
-          <p className="muted small">
-            This URL cannot be shown again — CloudNest stores only a hash of the token. Rotate or revoke links on the
-            Shared Links page.
-          </p>
-        </section>
-      )}
-
       <section className="card">
-        <div className="files-toolbar">
-          <label htmlFor="files-search">Search</label>
-          <input
-            id="files-search"
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter by file name"
-          />
-          <label htmlFor="files-sort">Sort</label>
-          <select id="files-sort" value={sortBy} onChange={(e) => setSortBy(e.target.value as 'name' | 'size' | 'created')}>
-            <option value="created">Newest first</option>
-            <option value="name">Name</option>
-            <option value="size">Largest first</option>
-          </select>
+        <div className="card-head">
+          <h2>All files</h2>
+          <div className="card-tools">
+            <input
+              type="search"
+              aria-label="Search files"
+              placeholder="Search files..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select
+              aria-label="Sort files"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'modified' | 'name' | 'size')}
+            >
+              <option value="modified">Sort by: Modified</option>
+              <option value="name">Sort by: Name</option>
+              <option value="size">Sort by: Size</option>
+            </select>
+          </div>
         </div>
 
-        {loading ? (
-          <p className="muted">Loading…</p>
+        {loading && files.length === 0 ? (
+          <SkeletonRows rows={4} />
         ) : visible.length === 0 ? (
-          <p className="muted">
-            {total === 0 ? 'No files yet. Upload a file to see it here.' : 'No files match your search.'}
-          </p>
+          <EmptyState
+            icon={search ? Folder : Upload}
+            title={search ? 'No files match your search' : 'No files yet'}
+            body={search ? 'Clear the search to see every file.' : 'Upload a file and it appears here as one logical file.'}
+          />
         ) : (
           <table className="accounts-table">
             <thead>
               <tr>
-                <th>File</th>
+                <th>Name</th>
                 <th>Size</th>
                 <th>Chunks</th>
-                <th>State</th>
-                <th>Stored across</th>
+                <th>Stored in</th>
+                <th>Last modified</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((file) => (
                 <tr key={file.id}>
-                  <td className="ellipsis">{file.originalName}</td>
+                  <td>
+                    <span className="file-name-cell">
+                      <TypeIcon name={file.originalName} />
+                      <span className="ellipsis">{file.originalName}</span>
+                      <Badge tone={file.state === 'completed' ? 'ok' : file.state === 'deleted' ? 'muted' : 'warn'}>
+                        {file.state}
+                      </Badge>
+                    </span>
+                  </td>
                   <td>{formatBytes(file.sizeBytes)}</td>
                   <td>
                     {file.chunkCount}
                     <div className="muted small">{formatBytes(file.chunkSizeBytes)} each</div>
                   </td>
                   <td>
-                    <span className={`state state-${file.state === 'completed' ? 'ok' : file.state === 'failed' ? 'bad' : 'warn'}`}>
-                      {file.state}
+                    <span className="file-name-cell">
+                      {file.storedAcross.length === 0 ? (
+                        <span className="muted small">Not yet placed</span>
+                      ) : (
+                        <>
+                          {file.storedAcross.slice(0, 2).map((p) => <ProviderTile key={p} provider={p} size={20} />)}
+                          <span className="muted small">
+                            {file.storedAcross.length === 1
+                              ? PROVIDER_LABELS[file.storedAcross[0]!] ?? file.storedAcross[0]
+                              : file.storedAcross.length > 2
+                                ? `${file.storedAcross.length} cloud accounts`
+                                : file.storedAcross.map((p) => PROVIDER_LABELS[p] ?? p).join(' + ')}
+                          </span>
+                        </>
+                      )}
                     </span>
                   </td>
+                  <td className="muted small">{formatDateTime(file.completedAt ?? file.createdAt)}</td>
                   <td>
-                    {file.storedAcross.length === 0 ? (
-                      <span className="muted small">Not yet placed</span>
-                    ) : (
-                      file.storedAcross.map((p) => PROVIDER_LABELS[p] ?? p).join(', ')
-                    )}
-                  </td>
-                  <td className="actions">
-                    <button type="button" className="btn-secondary" onClick={() => setDetail(file)}>Details</button>
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      disabled={file.state !== 'completed' || busyId === file.id}
-                      onClick={() => {
-                        setNotice(`Starting download of ${file.originalName}. Your browser manages the transfer and resume.`);
-                        window.location.assign(api.downloadUrl(file.id));
-                      }}
-                    >
-                      Download
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      disabled={busyId === file.id}
-                      onClick={() => void onRename(file)}
-                    >
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      disabled={file.state !== 'completed' || busyId === file.id}
-                      onClick={() => void onShare(file)}
-                    >
-                      Share
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-danger"
-                      disabled={file.state === 'deleted' || busyId === file.id}
-                      onClick={() => void onDelete(file)}
-                    >
-                      Delete
-                    </button>
+                    <span className="actions">
+                      <button
+                        type="button"
+                        className="btn-inline"
+                        disabled={file.state !== 'completed'}
+                        onClick={() => void actions.share(file, load)}
+                      >
+                        <ShareIcon size={14} aria-hidden="true" />
+                        Share
+                      </button>
+                      <button type="button" className="btn-inline" onClick={() => actions.rename(file, load)}>
+                        <Pencil size={14} aria-hidden="true" />
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-inline btn-inline-danger"
+                        disabled={file.state === 'deleted'}
+                        onClick={() => actions.remove(file, load)}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                        Delete
+                      </button>
+                      <button type="button" className="btn-inline" onClick={() => setDetail(file)}>
+                        Details
+                      </button>
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-        <p className="muted small">
-          Downloads verify every chunk's checksum before any bytes are sent. Renaming changes metadata only and
-          never moves provider objects. Sharing creates a link with your saved defaults; deleting removes only the
-          CloudNest-owned chunk objects and reports anything it could not confirm.
+        <p className="muted small" style={{ marginTop: 12 }}>
+          Downloads verify every chunk's checksum before any bytes are sent. Renaming changes metadata only and never
+          moves provider objects. Deleting removes only the CloudNest-owned chunk objects and reports anything it could
+          not confirm.
         </p>
       </section>
 
@@ -317,8 +213,8 @@ export function FilesPage() {
             <li><strong>Chunks:</strong> {detail.chunkCount} × {formatBytes(detail.chunkSizeBytes)}</li>
             <li><strong>State:</strong> {detail.state}</li>
             <li><strong>Stored across:</strong> {detail.storedAcross.length === 0 ? 'Not yet placed' : detail.storedAcross.map((p) => PROVIDER_LABELS[p] ?? p).join(', ')}</li>
-            <li><strong>Created:</strong> {new Date(detail.createdAt).toLocaleString()}</li>
-            <li><strong>Completed:</strong> {detail.completedAt ? new Date(detail.completedAt).toLocaleString() : '—'}</li>
+            <li><strong>Created:</strong> {formatDateTime(detail.createdAt)}</li>
+            <li><strong>Completed:</strong> {formatDateTime(detail.completedAt)}</li>
           </ul>
         </section>
       )}

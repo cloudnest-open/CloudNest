@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { makeUploadQueries, type JobRow, type FileRow, type AllocationRow } from '../db/upload-queries.js';
 import { makeProviderQueries } from '../db/provider-queries.js';
 import { planChunks, chunkBounds, sanitizeDisplayName, generateObjectKey, ChunkMathError, type ChunkSizeMiB } from './chunk-math.js';
-import { preflight, allocateChunks, outstandingReservationBytes, type AccountCapacityInput, type RoutingStrategy } from './capacity.js';
+import { preflight, allocateChunks, assessAccountCapacity, outstandingReservationBytes, type AccountCapacityInput, type RoutingStrategy } from './capacity.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
@@ -859,21 +859,101 @@ export class UploadService {
     activeJobs: number;
     recentFiles: number;
     totalFiles: number;
+    accountsDetailed: Array<{
+      id: string; provider: string; displayLabel: string; status: string; quotaStatus: string;
+      quotaTotalBytes: number | null; quotaUsedBytes: number | null;
+      reserveBytes: number; outstandingBytes: number;
+      usableBytes: number | null; lastQuotaCheckAt: string | null;
+    }>;
+    storage: {
+      knownAccounts: number; unknownAccounts: number;
+      totalBytes: number | null; usedBytes: number | null; reservedBytes: number;
+      usableBytes: number | null; lastCheckedAt: string | null;
+    };
+    activeShareLinks: number;
+    recentFileList: Array<ReturnType<UploadService['publicFile']>>;
   } {
-    const accounts = (this.providerQ.listAccounts.all() as Array<{
+    const rows = this.providerQ.listAccounts.all() as Array<{
       id: string; provider: string; display_label: string; status: string; quota_status: string;
-    }>).map((a) => ({
+      quota_total_bytes: number | null; used_bytes: number | null; reserve_bytes: number;
+      last_quota_check_at: string | null;
+    }>;
+    const activeAllocations = this.q.listAllActiveAllocations.all() as Array<{
+      provider_account_id: string; size_bytes: number; state: string;
+    }>;
+    const accountsDetailed = rows.map((a) => {
+      const outstandingBytes = outstandingReservationBytes(activeAllocations, a.id);
+      const quotaKnown =
+        a.status === 'connected' &&
+        a.quota_status === 'current' &&
+        typeof a.quota_total_bytes === 'number' &&
+        typeof a.used_bytes === 'number' &&
+        // an experimental/not-ready provider must never be presented as usable
+        // space, even when its quota is current
+        PROVIDER_UPLOAD_READY.has(a.provider);
+      const assessed = assessAccountCapacity({
+        accountId: a.id,
+        provider: a.provider,
+        displayLabel: a.display_label,
+        status: a.status,
+        quotaStatus: a.quota_status as 'current' | 'stale' | 'unknown',
+        quotaTotalBytes: a.quota_total_bytes,
+        quotaUsedBytes: a.used_bytes,
+        reserveBytes: a.reserve_bytes,
+        outstandingReservationBytes: outstandingBytes,
+      });
+      return {
+        id: a.id,
+        provider: a.provider,
+        displayLabel: a.display_label,
+        status: a.status,
+        quotaStatus: a.quota_status,
+        quotaTotalBytes: a.quota_total_bytes,
+        quotaUsedBytes: a.used_bytes,
+        reserveBytes: a.reserve_bytes,
+        outstandingBytes,
+        // usable is claimed only where the uploader's own preflight can vouch
+        // for it; otherwise null and the UI shows "Unknown", never 0
+        usableBytes: quotaKnown ? assessed.usableBytes : null,
+        lastQuotaCheckAt: a.last_quota_check_at,
+      };
+    });
+    const known = accountsDetailed.filter((a) => a.usableBytes !== null);
+    const sumOf = (pick: (a: (typeof known)[number]) => number | null): number | null =>
+      known.length === 0 ? null : known.reduce((acc, a) => acc + (pick(a) ?? 0), 0);
+    const storage = {
+      knownAccounts: known.length,
+      unknownAccounts: accountsDetailed.length - known.length,
+      totalBytes: sumOf((a) => a.quotaTotalBytes),
+      usedBytes: sumOf((a) => a.quotaUsedBytes),
+      reservedBytes: accountsDetailed.reduce((acc, a) => acc + a.reserveBytes, 0),
+      usableBytes: sumOf((a) => a.usableBytes),
+      lastCheckedAt: known
+        .map((a) => a.lastQuotaCheckAt)
+        .filter((v): v is string => typeof v === 'string')
+        .sort()
+        .pop() ?? null,
+    };
+
+    const accounts = rows.map((a) => ({
       id: a.id, provider: a.provider, displayLabel: a.display_label,
       status: a.status, quotaStatus: a.quota_status,
     }));
     const jobs = this.q.listJobs.all(200) as unknown as JobRow[];
     const activeJobs = jobs.filter((j) => j.state === 'running' || j.state === 'queued' || j.state === 'paused').length;
     const files = this.q.listFiles.all(5, 0) as unknown as FileRow[];
+    const activeShareLinks = (
+      this.db.prepare("SELECT COUNT(*) AS n FROM share_links WHERE state = 'active'").get() as { n: number }
+    ).n;
     return {
       accounts,
       activeJobs,
       recentFiles: files.length,
       totalFiles: this.countFiles(),
+      accountsDetailed,
+      storage,
+      activeShareLinks,
+      recentFileList: files.map((f) => this.publicFile(f.id)),
     };
   }
 

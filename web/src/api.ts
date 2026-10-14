@@ -99,7 +99,8 @@ export const api = {
 
   // ---- uploads (Step 4 / M9) ----
   dashboardSummary: () => request('GET', '/api/dashboard/summary'),
-  listFiles: (limit = 50, offset = 0) => request('GET', `/api/files?limit=${limit}&offset=${offset}`),
+  listFiles: (limit = 50, offset = 0, search = '') =>
+    request('GET', `/api/files?limit=${limit}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ''}`),
   planUpload: (body: { originalName: string; sizeBytes: number; chunkSizeMiB: number; mimeType: string | null }, idempotencyKey: string) =>
     request('POST', '/api/uploads/plan', body, { 'idempotency-key': idempotencyKey }),
   listUploads: () => request('GET', '/api/uploads'),

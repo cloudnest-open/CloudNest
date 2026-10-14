@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
+import { useFileActions } from '../components/FileActionsProvider.js';
+import { Badge, formatBytes, formatDateTime } from '../components/ui.js';
 
 /**
  * Shared Links (Step 5 / M11.e).
@@ -27,19 +29,8 @@ interface FileView {
   state: string;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1024;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i++;
-  }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[i]}`;
-}
-
 export function SharedLinksPage() {
+  const actions = useFileActions();
   const [links, setLinks] = useState<LinkView[]>([]);
   const [files, setFiles] = useState<FileView[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -50,7 +41,6 @@ export function SharedLinksPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [deletion, setDeletion] = useState<{ fileId: string; jobId: string; state: string } | null>(null);
 
   const load = useCallback(async () => {
     const [l, f] = await Promise.all([api.listShareLinks(), api.listFiles(100, 0)]);
@@ -101,7 +91,11 @@ export function SharedLinksPage() {
   }
 
   async function revoke(id: string): Promise<void> {
-    if (!(await confirmDestructive('Revoke this link? Anyone holding the URL will lose access immediately. The files are not deleted.'))) return;
+    const ok = await confirmDestructive(
+      'Revoke this link? Anyone holding the URL will lose access immediately. The files are not deleted.',
+      { title: 'Revoke link', confirmLabel: 'Revoke link' },
+    );
+    if (!ok) return;
     const res = await api.revokeShareLink(id);
     if (res.status === 200) {
       setNotice('Link revoked. The stored files were not deleted.');
@@ -112,7 +106,11 @@ export function SharedLinksPage() {
   }
 
   async function rotate(id: string): Promise<void> {
-    if (!(await confirmDestructive('Rotate this link? The old URL stops working immediately and a new URL is issued once.'))) return;
+    const ok = await confirmDestructive(
+      'Rotate this link? The old URL stops working immediately and a new URL is issued once.',
+      { title: 'Rotate link', confirmLabel: 'Rotate link' },
+    );
+    if (!ok) return;
     const res = await api.rotateShareLink(id);
     if (res.status === 200) {
       setCreatedUrl((res.data as { url: string }).url);
@@ -123,31 +121,12 @@ export function SharedLinksPage() {
     }
   }
 
-  async function removeFile(file: FileView): Promise<void> {
-    if (!(await confirmDestructive(
-      `Delete "${file.originalName}"?\n\nThis removes the CloudNest-owned chunk objects from your connected accounts. ` +
-      'Any share links for it are revoked first. Provider objects that cannot be confirmed deleted are reported as pending.',
-    ))) return;
-    setError(null);
-    const res = await api.deleteFile(file.id);
-    if (res.status === 202) {
-      const jobId = (res.data as { jobId: string }).jobId;
-      setDeletion({ fileId: file.id, jobId, state: 'queued' });
-      // drive it to a terminal state so the owner sees the real outcome
-      const retry = await api.retryDeletion(jobId);
-      if (retry.status === 200) {
-        const state = (retry.data as { result?: { state?: string } }).result?.state ?? 'unknown';
-        setDeletion({ fileId: file.id, jobId, state });
-        setNotice(
-          state === 'completed'
-            ? 'Deletion completed: every CloudNest-owned chunk object is confirmed gone.'
-            : 'Deletion is still pending: some objects could not be confirmed deleted. The obligation is recorded and can be retried.',
-        );
-      }
-      await load();
-    } else {
-      setError('Could not queue that deletion.');
-    }
+  function removeFile(file: FileView): void {
+    // the shared provider owns the exact destructive copy and the durable job
+    actions.remove(
+      { id: file.id, originalName: file.originalName, sizeBytes: file.sizeBytes, state: file.state },
+      load,
+    );
   }
 
   return (
@@ -240,7 +219,7 @@ export function SharedLinksPage() {
             <tbody>
               {links.map((link) => (
                 <tr key={link.id}>
-                  <td><span className={`state state-${link.state === 'active' ? 'ok' : 'muted'}`}>{link.state}</span></td>
+                  <td><Badge tone={link.state === 'active' ? 'ok' : 'muted'}>{link.state}</Badge></td>
                   <td>{link.fileCount}</td>
                   <td>
                     {link.downloadCount}
@@ -248,7 +227,7 @@ export function SharedLinksPage() {
                   </td>
                   <td className="muted small">
                     {link.hasPassword ? 'Password protected' : 'No password'}
-                    {link.expiresAt ? ` · expires ${new Date(link.expiresAt).toLocaleString()}` : ''}
+                    {link.expiresAt ? ` · expires ${formatDateTime(link.expiresAt)}` : ''}
                   </td>
                   <td className="actions">
                     <button type="button" className="btn-secondary" disabled={link.state !== 'active'} onClick={() => void rotate(link.id)}>Rotate</button>
@@ -268,11 +247,6 @@ export function SharedLinksPage() {
           Deletion removes only the chunk objects CloudNest placed, inside its own provider folder. Share links for the
           file are revoked first. Anything that cannot be confirmed deleted stays recorded as pending.
         </p>
-        {deletion && (
-          <p className="muted small">
-            Last deletion: job {deletion.jobId.slice(0, 8)}… — state <strong>{deletion.state}</strong>
-          </p>
-        )}
         {files.length === 0 ? (
           <p className="muted">No files recorded.</p>
         ) : (
@@ -290,7 +264,7 @@ export function SharedLinksPage() {
                 <tr key={file.id}>
                   <td className="ellipsis">{file.originalName}</td>
                   <td>{formatBytes(file.sizeBytes)}</td>
-                  <td><span className={`state state-${file.state === 'completed' ? 'ok' : file.state === 'deleted' ? 'muted' : 'warn'}`}>{file.state}</span></td>
+                  <td><Badge tone={file.state === 'completed' ? 'ok' : file.state === 'deleted' ? 'muted' : 'warn'}>{file.state}</Badge></td>
                   <td className="actions">
                     <button
                       type="button"

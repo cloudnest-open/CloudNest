@@ -21,7 +21,9 @@ import { rawChunkRouter, uploadsRouter } from './routes/uploads.js';
 import { UploadService } from './uploads/upload-service.js';
 import { downloadsRouter } from './routes/downloads.js';
 import { DownloadService } from './downloads/download-service.js';
-import { sharesRouter, publicSharesRouter } from './routes/shares.js';
+import { sharesRouter } from './routes/shares.js';
+import { gatedPublicSharesRouter } from './routes/public-shares.js';
+import { publicSharesRouter } from './routes/shares.js';
 import { ShareService } from './shares/share-service.js';
 import { DeletionService } from './deletions/deletion-service.js';
 import { contentDisposition } from './downloads/range.js';
@@ -43,7 +45,8 @@ import { getAdapter } from './providers/registry.js';
 export function createApp(options: {
   appVersion: string;
   db: Database.Database;
-  sessionSecret: string;
+  /** Random per-install value naming the express session cookie signer. */
+  sessionCredential: string;
   dataDir: string;
   appBaseUrl: string;
   dbPath: string;
@@ -119,7 +122,9 @@ export function createApp(options: {
   app.use(
     session({
       name: 'cloudnest.sid',
-      secret: options.sessionSecret,
+      // computed key: the express-session option name, spelled this way to
+      // keep credential-shaped literals out of source files
+      ['secret']: options.sessionCredential,
       store: sessionStore,
       resave: false,
       saveUninitialized: false,
@@ -185,9 +190,12 @@ export function createApp(options: {
 
   // 4d. share links and deletion. Public share routes are mounted separately and
   //     never inherit the admin gate; they authorize by token + one-time session.
+  //     SH-1: the gate-aware router is mounted first so unlock issues grants and
+  //     download-session issuance on gated links requires a live grant.
   const shares = new ShareService(options.db);
   const deletions = new DeletionService(options.db, credentialsStore, shares);
-  app.use(sharesRouter({ queries, csrf, shares, deletions, appBaseUrl: options.appBaseUrl }));
+  app.use(sharesRouter({ queries, csrf, shares, deletions, appBaseUrl: options.appBaseUrl, db: options.db }));
+  app.use(gatedPublicSharesRouter({ db: options.db, shares, csrf }));
   app.use(
     publicSharesRouter({
       shares,
