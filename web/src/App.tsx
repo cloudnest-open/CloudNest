@@ -4,7 +4,7 @@ import {
   Sun, Moon, LogOut, Search, ChevronDown, Bell,
 } from 'lucide-react';
 import { api, refreshCsrfToken } from './api.js';
-import { FirstRunPage, LoginPage } from './pages/AuthPages.js';
+import { FirstRunPage, LoginPage } from './pages/EntryPage.js';
 import { CloudAccountsPage } from './pages/CloudAccountsPage.js';
 import { UploadsPage } from './pages/UploadsPage.js';
 import { FilesPage } from './pages/FilesPage.js';
@@ -203,16 +203,8 @@ export default function App() {
     return <FirstRunPage onDone={() => setAuthState('ready')} />;
   }
   if (authState === 'login') {
-    return (
-      <>
-        {serverError && (
-          <div className="auth-server-error" role="alert">
-            {serverError}
-          </div>
-        )}
-        <LoginPage onDone={() => setAuthState('ready')} />
-      </>
-    );
+    // The entry page renders the server-unreachable state itself (localized).
+    return <LoginPage onDone={() => setAuthState('ready')} serverError={serverError} />;
   }
   if (authState === 'loading') {
     return <div className="auth-card">Loading…</div>;
