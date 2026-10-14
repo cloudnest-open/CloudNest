@@ -63,7 +63,9 @@ async function withTemporaryStorage<T>(bundle: Extract<ProviderCredentialBundle,
     if (message.includes('EARGS') || message.includes('email or password')) {
       throw new ProviderError('invalid_credentials', 401);
     }
-    if (message.includes('two-factor') || message.includes('2FA') || message.includes('FA')) {
+    // W-04: 'FA' matched almost any failure message ("Failed", ...); match the
+    // real two-factor tokens instead.
+    if (message.includes('two-factor') || message.includes('2fa')) {
       throw new ProviderError('invalid_credentials', 401);
     }
     if (err instanceof ProviderError) throw err;

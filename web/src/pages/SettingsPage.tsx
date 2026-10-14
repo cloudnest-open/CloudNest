@@ -91,19 +91,24 @@ export function SettingsPage() {
   const [theme, setTheme] = useState<Theme>(currentTheme());
 
   const load = useCallback(async () => {
-    const [s, b] = await Promise.all([api.getSettings(), api.listBackups()]);
-    if (s.status === 200) {
-      const data = s.data as { settings: Settings; system: SystemInfo; tunnel: TunnelInfo };
-      setSettings(data.settings);
-      setSystem(data.system);
-      setTunnel(data.tunnel);
-    } else {
-      setError('Could not load settings.');
-    }
-    if (b.status === 200) {
-      const data = b.data as { backups: BackupInfo[]; key: { warning: string | null } };
-      setBackups(data.backups ?? []);
-      setKeyWarning(data.key?.warning ?? null);
+    // FE-04: a network failure must not leave the Settings page on "Loading…"
+    try {
+      const [s, b] = await Promise.all([api.getSettings(), api.listBackups()]);
+      if (s.status === 200) {
+        const data = s.data as { settings: Settings; system: SystemInfo; tunnel: TunnelInfo };
+        setSettings(data.settings);
+        setSystem(data.system);
+        setTunnel(data.tunnel);
+      } else {
+        setError('Could not load settings.');
+      }
+      if (b.status === 200) {
+        const data = b.data as { backups: BackupInfo[]; key: { warning: string | null } };
+        setBackups(data.backups ?? []);
+        setKeyWarning(data.key?.warning ?? null);
+      }
+    } catch {
+      setError('Could not reach the server. Check that CloudNest is running, then retry.');
     }
   }, []);
 

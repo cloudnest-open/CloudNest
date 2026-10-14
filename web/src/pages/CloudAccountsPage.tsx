@@ -40,10 +40,21 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const reload = useCallback(async () => {
-    const [p, a] = await Promise.all([api.providers(), api.accounts()]);
-    if (p.status === 200) setProviders((p.data as { providers: ProviderInfo[] }).providers);
-    if (a.status === 200) setAccounts((a.data as { accounts: AccountInfo[] }).accounts);
-    setLoading(false);
+    // FE-04: without this the page showed "Loading…" forever on a network error
+    try {
+      const [p, a] = await Promise.all([api.providers(), api.accounts()]);
+      if (p.status === 200) setProviders((p.data as { providers: ProviderInfo[] }).providers);
+      if (a.status === 200) setAccounts((a.data as { accounts: AccountInfo[] }).accounts);
+      if (p.status !== 200 && a.status !== 200) {
+        setError('Could not load cloud accounts. The server did not answer with real data.');
+      } else {
+        setError(null);
+      }
+    } catch {
+      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

@@ -43,9 +43,19 @@ export function SharedLinksPage() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [l, f] = await Promise.all([api.listShareLinks(), api.listFiles(100, 0)]);
-    if (l.status === 200) setLinks((l.data as { links: LinkView[] }).links ?? []);
-    if (f.status === 200) setFiles((f.data as { files: FileView[] }).files ?? []);
+    // FE-04: surface a real error instead of leaving the page half-empty
+    try {
+      const [l, f] = await Promise.all([api.listShareLinks(), api.listFiles(100, 0)]);
+      if (l.status === 200) setLinks((l.data as { links: LinkView[] }).links ?? []);
+      if (f.status === 200) setFiles((f.data as { files: FileView[] }).files ?? []);
+      if (l.status !== 200 && f.status !== 200) {
+        setError('Could not load share links. The server did not answer with real data.');
+      } else {
+        setError(null);
+      }
+    } catch {
+      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+    }
   }, []);
 
   useEffect(() => {

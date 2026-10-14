@@ -66,7 +66,9 @@ export function safeSegment(value: string): string {
 export function mapMegaError(err: unknown): ProviderError {
   if (err instanceof ProviderError) return err;
   const message = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase();
-  if (message.includes('wrong password') || message.includes('eargs') || message.includes('bad email') || message.includes('invalid')) {
+  // W-04: a bare 'invalid' matched unrelated failures ("invalid range", ...);
+  // keep the credential-specific megajs strings only.
+  if (message.includes('wrong password') || message.includes('eargs') || message.includes('bad email') || message.includes('invalid email or password')) {
     return new ProviderError('invalid_credentials', 401);
   }
   if (message.includes('two-factor') || message.includes('2fa') || message.includes('second factor') || message.includes('verification code')) {

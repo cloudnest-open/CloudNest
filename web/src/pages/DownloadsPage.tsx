@@ -68,10 +68,21 @@ export function DownloadsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [d, f] = await Promise.all([api.listDownloads(50, 0), api.listFiles(100, 0)]);
-    if (d.status === 200) setDownloads((d.data as { downloads: DownloadView[] }).downloads ?? []);
-    if (f.status === 200) setFiles((f.data as { files: FileView[] }).files ?? []);
-    setLoading(false);
+    // FE-04: a failed load must explain itself and offer a retry path
+    try {
+      const [d, f] = await Promise.all([api.listDownloads(50, 0), api.listFiles(100, 0)]);
+      if (d.status === 200) setDownloads((d.data as { downloads: DownloadView[] }).downloads ?? []);
+      if (f.status === 200) setFiles((f.data as { files: FileView[] }).files ?? []);
+      if (d.status !== 200 && f.status !== 200) {
+        setError('Could not load the download list. The server did not answer with real data.');
+      } else {
+        setError(null);
+      }
+    } catch {
+      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

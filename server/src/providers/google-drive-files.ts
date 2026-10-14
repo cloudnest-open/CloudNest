@@ -201,7 +201,27 @@ async function uploadObjectStreamImpl(
     };
   } catch (err) {
     if (err instanceof ProviderError) throw err;
-    if ((err as Error).name === 'AbortError') throw new ProviderError('upload_aborted', 499);
+    if ((err as Error).name === 'AbortError') {
+      // W-01: an interrupted resumable session may have persisted part of the
+      // body. Query the acknowledged range once so the retry can resume from
+      // the true offset instead of restarting the chunk at zero. A failed
+      // probe never masks the abort itself.
+      try {
+        const probe = await fetch(sessionUri, { method: 'PUT', headers: { 'content-range': `bytes */${sizeBytes}` } });
+        if (probe.status === 308) {
+          const end = probe.headers.get('range');
+          const match = end ? /bytes=0-(\d+)$/.exec(end) : null;
+          if (match) {
+            const acked = Number(match[1]) + 1;
+            const details = new Error(`upload_aborted at ${acked} acknowledged bytes`);
+            throw Object.assign(details, { safeCode: 'upload_aborted', httpStatus: 499, acknowledgedBytes: acked });
+          }
+        }
+      } catch (probeErr) {
+        if ((probeErr as { safeCode?: string }).safeCode === 'upload_aborted') throw probeErr;
+      }
+      throw new ProviderError('upload_aborted', 499);
+    }
     throw new ProviderError('provider_unavailable', 502);
   } finally {
     signal?.removeEventListener('abort', onAbort);

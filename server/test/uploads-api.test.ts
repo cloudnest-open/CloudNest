@@ -275,3 +275,23 @@ test('cancelling a job reports cleanup state honestly rather than claiming succe
     await app.close();
   }
 });
+
+test('FE-05/ST-01: the served workerLimit mirrors the admin setting', async () => {
+  const { app, client } = await authed();
+  try {
+    const before = await client.get('/api/uploads');
+    assert.equal(before.status, 200);
+    const initial = (before.body as { workerLimit: number }).workerLimit;
+    assert.ok(initial >= 1 && initial <= 8, 'a sane default limit is served');
+
+    const saved = await client.patch('/api/settings', { 'upload.workerLimit': 2 });
+    assert.equal(saved.status, 200);
+
+    const after = await client.get('/api/uploads');
+    assert.equal(after.status, 200);
+    const served = (after.body as { workerLimit: number }).workerLimit;
+    assert.equal(served, 2, 'the uploads list serves the admin-configured bound the client must respect');
+  } finally {
+    await app.close();
+  }
+});

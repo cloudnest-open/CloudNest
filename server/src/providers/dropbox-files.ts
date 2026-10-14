@@ -16,6 +16,9 @@ import { ProviderError, type ProviderCredentialBundle, type DecryptedProviderApp
 
 /** App-folder style root inside the Dropbox app's own space. */
 export const DROPBOX_ROOT_PATH = '/CloudNest Data — do not rename delete';
+/** Dropbox single-request uploads accept at most 150 MB; V1 chunks are <= 64 MiB. */
+export const SINGLE_REQUEST_MAX_BYTES = 64 * 1024 * 1024;
+
 const UPLOAD_URL = 'https://content.dropboxapi.com/2/files/upload';
 const API_URL = 'https://api.dropboxapi.com/2';
 
@@ -168,6 +171,11 @@ async function uploadObjectStreamImpl(
   const fresh = await ensureFresh(bundle, appConfig);
   const { rootId, objectKey, name, readable, sizeBytes, signal } = params;
   if (sizeBytes <= 0) throw new ProviderError('provider_unavailable', 400);
+  // W-02: the single-request endpoint tops out well below the planned chunk
+  // ceiling; refuse with an honest code instead of a generic 502 from a 413.
+  if (sizeBytes > SINGLE_REQUEST_MAX_BYTES) {
+    throw new ProviderError('provider_unavailable', 413, 'chunk exceeds the V1 single-request upload ceiling');
+  }
 
   const path = `${rootId.replace(/\/$/, '')}/${safeSegment(objectKey)}`;
   const controller = new AbortController();

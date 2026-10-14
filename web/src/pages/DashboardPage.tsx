@@ -90,14 +90,20 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await api.dashboardSummary();
-    if (res.status === 200) {
-      setSummary(res.data as Summary);
-      setError(null);
-    } else {
-      setError('Could not load the dashboard. The server did not answer with real data.');
+    // FE-04: network failures become a visible, recoverable error state
+    try {
+      const res = await api.dashboardSummary();
+      if (res.status === 200) {
+        setSummary(res.data as Summary);
+        setError(null);
+      } else {
+        setError('Could not load the dashboard. The server did not answer with real data.');
+      }
+    } catch {
+      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {

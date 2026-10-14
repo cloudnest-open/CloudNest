@@ -39,16 +39,23 @@ export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await api.listFiles(100, 0);
-    if (res.status === 200) {
-      const data = res.data as { files: FileView[]; total: number };
-      setFiles(data.files ?? []);
-      setTotal(data.total ?? 0);
-      setError(null);
-    } else {
-      setError('Could not load the file list. Nothing is shown as an empty result while the API is failing.');
+    // FE-04: a rejected fetch must surface a recoverable error, never a
+    // permanent skeleton with no explanation.
+    try {
+      const res = await api.listFiles(100, 0);
+      if (res.status === 200) {
+        const data = res.data as { files: FileView[]; total: number };
+        setFiles(data.files ?? []);
+        setTotal(data.total ?? 0);
+        setError(null);
+      } else {
+        setError('Could not load the file list. Nothing is shown as an empty result while the API is failing.');
+      }
+    } catch {
+      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {

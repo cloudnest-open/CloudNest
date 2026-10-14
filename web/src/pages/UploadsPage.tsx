@@ -16,8 +16,12 @@ import { api } from '../api.js';
 
 const CHUNK_SIZES = [8, 16, 32, 64] as const;
 const DEFAULT_CHUNK_MIB = 64;
-/** Global in-flight chunk requests; the server ceiling is 8. */
-const MAX_GLOBAL_WORKERS = 4;
+/**
+ * Fallback global in-flight chunk requests. FE-05/ST-01: the real bound is the
+ * admin's `upload.workerLimit` setting, served with every uploads list and
+ * clamped client-side; this constant only covers a request that failed.
+ */
+const DEFAULT_GLOBAL_WORKERS = 4;
 /** At most two chunks in flight per provider account. */
 const MAX_PER_ACCOUNT_WORKERS = 2;
 const OBJECT_COUNT_WARN_THRESHOLD = 1000;
@@ -95,6 +99,8 @@ export function UploadsPage() {
   const [jobId, setJobId] = useState<string | null>(null);
   /** FE-01: the job picked from Recent uploads for a restart resume. */
   const [resumeTarget, setResumeTarget] = useState<JobView | null>(null);
+  /** FE-05: the effective concurrent-chunk limit served by the server. */
+  const [workerLimit, setWorkerLimit] = useState<number>(DEFAULT_GLOBAL_WORKERS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
@@ -106,9 +112,24 @@ export function UploadsPage() {
   const runningRef = useRef(false);
 
   const loadSummary = useCallback(async () => {
-    const [summary, list] = await Promise.all([api.dashboardSummary(), api.listUploads()]);
-    if (summary.status === 200) setDashboard(summary.data as DashboardSummary);
-    if (list.status === 200) setJobs(((list.data as { jobs: JobView[] }).jobs) ?? []);
+    // FE-04: an unreachable server is reported, not hidden behind stale zeros
+    try {
+      const [summary, list] = await Promise.all([api.dashboardSummary(), api.listUploads()]);
+      if (summary.status === 200) setDashboard(summary.data as DashboardSummary);
+      if (list.status === 200) {
+        const data = list.data as { jobs: JobView[]; workerLimit?: number };
+        setJobs(data.jobs ?? []);
+        // the admin's configured bound wins over any client default
+        if (typeof data.workerLimit === 'number' && data.workerLimit >= 1) {
+          setWorkerLimit(Math.min(Math.floor(data.workerLimit), 8));
+        }
+      }
+      if (summary.status !== 200 && list.status !== 200) {
+        setError('Could not load upload status. The server did not answer with real data.');
+      }
+    } catch {
+      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+    }
   }, []);
 
   useEffect(() => {
@@ -237,7 +258,7 @@ export function UploadsPage() {
       };
 
       let cursor = 0;
-      const workerCount = Math.min(MAX_GLOBAL_WORKERS, Math.max(1, indices.length));
+      const workerCount = Math.min(workerLimit, Math.max(1, indices.length));
       const workers = Array.from({ length: workerCount }, async () => {
         while (cursor < indices.length) {
           if (abortRef.current?.signal.aborted) return;
@@ -500,7 +521,7 @@ export function UploadsPage() {
         <section className="card">
           <h2>Ready to upload</h2>
           <p className="muted">
-            {plannedChunks.length} chunk(s) reserved. Upload is bounded to {MAX_GLOBAL_WORKERS} chunks at once
+            {plannedChunks.length} chunk(s) reserved. Upload is bounded to {workerLimit} chunks at once
             (at most {MAX_PER_ACCOUNT_WORKERS} per account).
           </p>
           <div className="actions">
