@@ -13,6 +13,8 @@ export const appDe: AppStrings = {
     close: 'Schließen',
     refresh: 'Aktualisieren',
     refreshing: 'Wird aktualisiert…',
+    previousPage: 'Vorherige Seite',
+    nextPage: 'Nächste Seite',
     remove: 'Entfernen',
     dismiss: 'Schließen',
     copy: 'Kopieren',

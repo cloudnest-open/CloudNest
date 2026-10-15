@@ -13,6 +13,8 @@ export const appZhCn: AppStrings = {
     close: '关闭',
     refresh: '刷新',
     refreshing: '正在刷新…',
+    previousPage: '上一页',
+    nextPage: '下一页',
     remove: '移除',
     dismiss: '关闭',
     copy: '复制',

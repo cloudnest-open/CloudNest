@@ -28,6 +28,8 @@ export const appEn = {
     close: 'Close',
     refresh: 'Refresh',
     refreshing: 'Refreshing…',
+    previousPage: 'Previous page',
+    nextPage: 'Next page',
     remove: 'Remove',
     dismiss: 'Dismiss',
     copy: 'Copy',

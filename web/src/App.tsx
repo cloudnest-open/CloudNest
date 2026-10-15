@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Cloud, House, Folder, CloudUpload, Download, Link, Settings as SettingsIcon,
-  Sun, Moon, LogOut, Search, ChevronDown, Bell,
+  Sun, Moon, LogOut, Search, ChevronDown, Bell, Menu, X,
 } from 'lucide-react';
 import { api, refreshCsrfToken } from './api.js';
 import { FirstRunPage, LoginPage } from './pages/EntryPage.js';
@@ -70,6 +70,7 @@ export default function App() {
   const { t, tf } = useI18n();
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [active, setActive] = useState<NavItem>('Dashboard');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -221,8 +222,33 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true"><Cloud size={19} strokeWidth={2} /></span>
           <span className="brand-name">CloudNest</span>
+          <button
+            type="button"
+            className="mobile-nav-toggle"
+            aria-label={mobileNavOpen ? t.common.close : t.nav.aria}
+            aria-expanded={mobileNavOpen}
+            aria-controls="primary-navigation"
+            onClick={() => setMobileNavOpen((open) => !open)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && mobileNavOpen) {
+                setMobileNavOpen(false);
+              }
+            }}
+          >
+            {mobileNavOpen ? <X size={19} aria-hidden="true" /> : <Menu size={19} aria-hidden="true" />}
+          </button>
         </div>
-        <nav className="nav" aria-label={t.nav.aria}>
+        <nav
+          id="primary-navigation"
+          className={`nav${mobileNavOpen ? ' is-open' : ''}`}
+          aria-label={t.nav.aria}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && mobileNavOpen) {
+              setMobileNavOpen(false);
+              document.querySelector<HTMLButtonElement>('.mobile-nav-toggle')?.focus();
+            }
+          }}
+        >
           {NAV_ITEMS.map((item) => {
             const Icon = NAV_ICONS[item];
             return (
@@ -231,7 +257,13 @@ export default function App() {
                 type="button"
                 className={`nav-item${active === item ? ' active' : ''}`}
                 aria-current={active === item ? 'page' : undefined}
-                onClick={() => setActive(item)}
+                onClick={() => {
+                  setActive(item);
+                  setMobileNavOpen(false);
+                  if (window.matchMedia('(max-width: 767px)').matches) {
+                    document.querySelector<HTMLButtonElement>('.mobile-nav-toggle')?.focus();
+                  }
+                }}
               >
                 <Icon className="nav-icon" size={20} strokeWidth={1.9} aria-hidden="true" />
                 <span>{navLabel(item)}</span>
@@ -425,7 +457,12 @@ export default function App() {
           ) : active === 'Uploads' ? (
             <UploadsPage />
           ) : active === 'Files' ? (
-            <FilesPage key={fileSearch.seq} initialSearch={fileSearch.text} onGoToCloudAccounts={() => setActive('Cloud Accounts')} />
+            <FilesPage
+              key={fileSearch.seq}
+              initialSearch={fileSearch.text}
+              onGoToCloudAccounts={() => setActive('Cloud Accounts')}
+              onGoToUploads={() => setActive('Uploads')}
+            />
           ) : active === 'Downloads' ? (
             <DownloadsPage />
           ) : active === 'Shared Links' ? (

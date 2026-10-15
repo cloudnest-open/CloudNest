@@ -13,6 +13,8 @@ export const appJa: AppStrings = {
     close: '閉じる',
     refresh: '更新',
     refreshing: '更新中…',
+    previousPage: '前のページ',
+    nextPage: '次のページ',
     remove: '解除',
     dismiss: '閉じる',
     copy: 'コピー',

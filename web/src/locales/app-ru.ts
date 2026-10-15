@@ -13,6 +13,8 @@ export const appRu: AppStrings = {
     close: 'Закрыть',
     refresh: 'Обновить',
     refreshing: 'Обновление…',
+    previousPage: 'Предыдущая страница',
+    nextPage: 'Следующая страница',
     remove: 'Убрать',
     dismiss: 'Закрыть',
     copy: 'Копировать',

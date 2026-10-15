@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Cloud, Database, FileText, Link as LinkIcon, Plus, Upload, RefreshCw, Activity,
 } from 'lucide-react';
@@ -7,7 +7,7 @@ import { FileTable, type FileTableRow } from '../components/FileTable.js';
 import { ProviderLogo } from '../components/ProviderLogo.js';
 import {
   Badge, EmptyState, ProgressBar, SkeletonRows, pageList,
-  formatBytes, formatDateTime, fileTypeName, fileTypeDisplay, PROVIDER_LABELS,
+  formatBytes, formatDateTime, PROVIDER_LABELS,
 } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
 
@@ -31,6 +31,8 @@ interface AccountDetail {
   displayLabel: string;
   status: string;
   quotaStatus: string;
+  quotaUnlimited: boolean;
+  quotaScopeKey: string | null;
   quotaTotalBytes: number | null;
   quotaUsedBytes: number | null;
   reserveBytes: number;
@@ -64,6 +66,66 @@ interface Summary {
   }>;
 }
 
+interface DisplayStorage {
+  totalBytes: number | null;
+  usedBytes: number | null;
+  reservedBytes: number;
+  usableBytes: number | null;
+  lastCheckedAt: string | null;
+}
+
+/** Collapse owner-confirmed quota pools to one conservative observation. */
+function buildDisplayStorage(accounts: AccountDetail[], lastCheckedAt: string | null): DisplayStorage {
+  const known = accounts.filter((account) =>
+    account.status === 'connected' && account.quotaStatus === 'current' && account.usableBytes !== null &&
+    account.quotaTotalBytes !== null && account.quotaUsedBytes !== null
+  );
+  const rows: Array<{ total: number; used: number; reserve: number; usable: number }> = known
+    .filter((account) => account.quotaScopeKey === null)
+    .map((account) => ({
+      total: account.quotaTotalBytes!,
+      used: account.quotaUsedBytes!,
+      reserve: account.reserveBytes,
+      usable: account.usableBytes!,
+    }));
+
+  const scopes = new Map<string, AccountDetail[]>();
+  for (const account of accounts) {
+    if (!account.quotaScopeKey) continue;
+    const key = `${account.provider}:${account.quotaScopeKey}`;
+    scopes.set(key, [...(scopes.get(key) ?? []), account]);
+  }
+  for (const members of scopes.values()) {
+    const observations = members.filter((account) => known.includes(account));
+    if (observations.length === 0) continue;
+    const observation = observations.reduce((leastFree, account) =>
+      account.quotaTotalBytes! - account.quotaUsedBytes! < leastFree.quotaTotalBytes! - leastFree.quotaUsedBytes!
+        ? account
+        : leastFree
+    );
+    const free = Math.max(0, observation.quotaTotalBytes! - observation.quotaUsedBytes!);
+    const reserve = Math.max(...members.map((account) => account.reserveBytes));
+    const outstanding = members.reduce((sum, account) => sum + account.outstandingBytes, 0);
+    rows.push({
+      total: observation.quotaTotalBytes!,
+      used: observation.quotaUsedBytes!,
+      reserve,
+      usable: Math.max(0, free - reserve - outstanding),
+    });
+  }
+
+  const sum = (pick: (row: (typeof rows)[number]) => number): number | null =>
+    rows.length === 0 ? null : rows.reduce((total, row) => total + pick(row), 0);
+  const checks = known.map((account) => account.lastQuotaCheckAt).filter((value): value is string => value !== null).sort();
+  return {
+    totalBytes: sum((row) => row.total),
+    usedBytes: sum((row) => row.used),
+    reservedBytes: sum((row) => row.reserve) ?? 0,
+    usableBytes: sum((row) => row.usable),
+    lastCheckedAt: checks.at(-1) ?? lastCheckedAt,
+  };
+}
+
 /** Reference 01's five provider slots, always present, in this exact order. */
 const PROVIDER_ORDER = ['google_drive', 'dropbox', 'pcloud', 'mega', 'onedrive'] as const;
 
@@ -74,6 +136,7 @@ interface ProviderSlot {
   statusKey: 'connected' | 'error' | 'needsAttention' | 'notConnected' | 'quotaStale';
   usedBytes: number | null;
   totalBytes: number | null;
+  unlimited: boolean;
   experimental: boolean;
   action: 'connect' | 'manage';
 }
@@ -87,6 +150,7 @@ function buildProviderSlots(accounts: AccountDetail[]): ProviderSlot[] {
         provider, label,
         status: 'muted', statusKey: 'notConnected',
         usedBytes: null, totalBytes: null,
+        unlimited: false,
         experimental: provider === 'mega',
         action: 'connect',
       } as ProviderSlot;
@@ -100,16 +164,33 @@ function buildProviderSlots(accounts: AccountDetail[]): ProviderSlot[] {
     else if (needsReauth) { status = 'warn'; statusKey = 'needsAttention'; }
     else if (allDisconnected) { status = 'muted'; statusKey = 'notConnected'; }
     else if (list.some((a) => a.quotaStatus !== 'current')) { status = 'warn'; statusKey = 'quotaStale'; }
-    // Aggregate the provider's accounts only when every quota figure is known;
-    // partial data must never be presented as a complete quota.
-    const fullyKnown = list.every(
-      (a) => typeof a.quotaTotalBytes === 'number' && typeof a.quotaUsedBytes === 'number',
+    // Only show a provider total when every account has a fresh, numeric quota.
+    // Owner-confirmed shared scopes count once; the least-free fresh observation
+    // is used when members report slightly different values.
+    const unlimited = list.some((a) => a.status === 'connected' && a.quotaStatus === 'current' && a.quotaUnlimited);
+    const fullyKnown = !unlimited && list.every((a) =>
+      a.status === 'connected' && a.quotaStatus === 'current' &&
+      typeof a.quotaTotalBytes === 'number' && typeof a.quotaUsedBytes === 'number'
     );
-    const usedBytes = fullyKnown ? list.reduce((sum, a) => sum + (a.quotaUsedBytes ?? 0), 0) : null;
-    const totalBytes = fullyKnown ? list.reduce((sum, a) => sum + (a.quotaTotalBytes ?? 0), 0) : null;
+    const uniqueQuotas = new Map<string, AccountDetail>();
+    if (fullyKnown) {
+      for (const account of list) {
+        const key = account.quotaScopeKey ? `scope:${account.quotaScopeKey}` : `account:${account.id}`;
+        const current = uniqueQuotas.get(key);
+        const free = (account.quotaTotalBytes ?? 0) - (account.quotaUsedBytes ?? 0);
+        const currentFree = current
+          ? (current.quotaTotalBytes ?? 0) - (current.quotaUsedBytes ?? 0)
+          : Number.POSITIVE_INFINITY;
+        if (!current || free < currentFree) uniqueQuotas.set(key, account);
+      }
+    }
+    const quotaRows = [...uniqueQuotas.values()];
+    const usedBytes = fullyKnown ? quotaRows.reduce((sum, a) => sum + (a.quotaUsedBytes ?? 0), 0) : null;
+    const totalBytes = fullyKnown ? quotaRows.reduce((sum, a) => sum + (a.quotaTotalBytes ?? 0), 0) : null;
     return {
       provider, label, status, statusKey,
       usedBytes, totalBytes,
+      unlimited,
       experimental: provider === 'mega',
       action: allDisconnected ? 'connect' : 'manage',
     };
@@ -138,10 +219,10 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
   const [files, setFiles] = useState<RecentFile[]>([]);
   const [filesTotal, setFilesTotal] = useState(0);
   const [filesLoading, setFilesLoading] = useState(true);
+  const [filesError, setFilesError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [fileSearch, setFileSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState('all');
-  const [sortBy, setSortBy] = useState<'modified' | 'name' | 'size'>('modified');
+  const [appliedFileSearch, setAppliedFileSearch] = useState('');
 
   const loadSummary = useCallback(async () => {
     setLoading(true);
@@ -164,23 +245,25 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
 
   const loadFiles = useCallback(async () => {
     setFilesLoading(true);
+    setFilesError(null);
+    setFiles([]);
+    setFilesTotal(0);
     try {
-      const res = await api.listFiles(RECENT_PAGE_SIZE, page * RECENT_PAGE_SIZE, fileSearch.trim());
+      const res = await api.listFiles(RECENT_PAGE_SIZE, page * RECENT_PAGE_SIZE, appliedFileSearch);
       if (res.status === 200) {
         const data = res.data as { files: RecentFile[]; total: number };
         setFiles(data.files ?? []);
         setFilesTotal(data.total ?? 0);
       } else {
-        setFiles([]);
-        setFilesTotal(0);
+        setFilesError(t.files.errorLoad);
       }
     } catch {
-      setFiles([]);
-      setFilesTotal(0);
+      setFilesError(t.common.errorNetwork);
     } finally {
       setFilesLoading(false);
     }
-  }, [page, fileSearch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads follow page/search changes
+  }, [page, appliedFileSearch]);
 
   useEffect(() => {
     void loadSummary();
@@ -190,35 +273,33 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
     void loadFiles();
   }, [loadFiles]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(0);
+      setAppliedFileSearch(fileSearch.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [fileSearch]);
+
   const reloadAll = useCallback(() => {
     void loadSummary();
     void loadFiles();
   }, [loadSummary, loadFiles]);
 
-  const searchTimer = useRef<number | null>(null);
   function onSearchChange(value: string): void {
     setFileSearch(value);
-    setPage(0);
-    if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
-    searchTimer.current = window.setTimeout(() => void loadFiles(), 250);
   }
 
-  const storage = summary?.storage;
   const accounts = summary?.accountsDetailed ?? [];
-  const healthy = accounts.filter((a) => a.status === 'connected' && a.quotaStatus === 'current').length;
-  const attention = accounts.length - healthy;
+  const storage = summary ? buildDisplayStorage(accounts, summary.storage.lastCheckedAt) : undefined;
+  const storageUnlimited = accounts.some((account) =>
+    account.provider !== 'mega' && account.status === 'connected' && account.quotaStatus === 'current' && account.quotaUnlimited
+  );
+  const connected = accounts.filter((a) => a.status === 'connected').length;
+  const attention = accounts.filter((a) => a.status !== 'connected' || a.quotaStatus !== 'current').length;
   const slots = buildProviderSlots(accounts);
 
-  const typeOptions = Array.from(new Set(files.map((f) => fileTypeName(f.originalName)))).sort();
-  const visible = files
-    .filter((f) => (typeFilter === 'all' ? true : fileTypeName(f.originalName) === typeFilter))
-    .sort((a, b) => {
-      if (sortBy === 'name') return a.originalName.localeCompare(b.originalName);
-      if (sortBy === 'size') return b.sizeBytes - a.sizeBytes;
-      return ((b.completedAt ?? b.createdAt) ?? '').localeCompare((a.completedAt ?? a.createdAt) ?? '');
-    });
-
-  const fileRows: FileTableRow[] = visible.map((f) => ({
+  const fileRows: FileTableRow[] = files.map((f) => ({
     id: f.id,
     originalName: f.originalName,
     sizeBytes: f.sizeBytes,
@@ -229,7 +310,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
 
   const totalPages = Math.max(1, Math.ceil(filesTotal / RECENT_PAGE_SIZE));
 
-  const storageKnown = Boolean(storage) && storage!.usableBytes !== null && storage!.totalBytes !== null;
+  const storageKnown = !storageUnlimited && Boolean(storage) && storage!.usableBytes !== null && storage!.totalBytes !== null;
   const usedPct = storageKnown && (storage!.totalBytes ?? 0) > 0
     ? Math.min(100, Math.round(((storage!.usedBytes ?? 0) / storage!.totalBytes!) * 100))
     : 0;
@@ -257,7 +338,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
               <span className="metric-icon" aria-hidden="true"><Cloud size={20} /></span>
               <div className="metric-text">
                 <span className="metric-label">{t.dashboard.metric.accounts}</span>
-                <span className="metric-value">{accounts.length === 0 ? '—' : `${healthy} / ${accounts.length}`}</span>
+                <span className="metric-value">{accounts.length === 0 ? '—' : `${connected} / ${accounts.length}`}</span>
                 {accounts.length === 0 ? (
                   <span className="small muted">{t.dashboard.metric.accountsNone}</span>
                 ) : attention === 0 ? (
@@ -272,7 +353,13 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
               <span className="metric-icon" aria-hidden="true"><Database size={20} /></span>
               <div className="metric-text">
                 <span className="metric-label">{t.dashboard.metric.storage}</span>
-                <span className="metric-value">{storageKnown ? formatBytes(storage!.usableBytes) : t.common.unknown}</span>
+                <span className="metric-value">
+                  {storageUnlimited
+                    ? t.accounts.sharedPool.unlimitedLabel
+                    : storageKnown
+                      ? formatBytes(storage!.usableBytes)
+                      : t.common.unknown}
+                </span>
                 {storageKnown ? (
                   <>
                     <span className="metric-row">
@@ -332,9 +419,11 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                     <p className="small muted">
                       {known
                         ? tf(t.dashboard.slot.usedOf, { used: formatBytes(slot.usedBytes), total: formatBytes(slot.totalBytes) })
-                        : slot.action === 'connect'
-                          ? t.dashboard.slot.notConnectedYet
-                          : t.dashboard.slot.capacityUnknown}
+                        : slot.unlimited
+                          ? t.accounts.sharedPool.unlimitedLabel
+                          : slot.action === 'connect'
+                            ? t.dashboard.slot.notConnectedYet
+                            : t.dashboard.slot.capacityUnknown}
                     </p>
                     {known && (
                       <ProgressBar
@@ -374,40 +463,31 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                   value={fileSearch}
                   onChange={(e) => onSearchChange(e.target.value)}
                 />
-                <select
-                  aria-label={t.dashboard.recent.filterLabel}
-                  value={typeFilter}
-                  onChange={(e) => setTypeFilter(e.target.value)}
-                >
-                  <option value="all">{t.dashboard.recent.filterAll}</option>
-                  {typeOptions.map((key) => <option key={key} value={key}>{fileTypeDisplay(key)}</option>)}
-                </select>
-                <select
-                  aria-label={t.dashboard.recent.sortLabel}
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as 'modified' | 'name' | 'size')}
-                >
-                  <option value="modified">{t.dashboard.recent.sortModified}</option>
-                  <option value="name">{t.dashboard.recent.sortName}</option>
-                  <option value="size">{t.dashboard.recent.sortSize}</option>
-                </select>
                 <button type="button" className="btn-secondary" onClick={() => onNavigate('Files')}>
                   {t.dashboard.recent.viewAll}
                 </button>
               </div>
             </div>
 
-            {filesLoading && files.length === 0 ? (
+            {filesError ? (
+              <div className="error-card" role="alert">
+                <p>{filesError}</p>
+                <button type="button" className="btn-secondary" onClick={() => void loadFiles()} disabled={filesLoading}>
+                  <RefreshCw size={15} aria-hidden="true" />
+                  {filesLoading ? t.common.refreshing : t.common.refresh}
+                </button>
+              </div>
+            ) : filesLoading && files.length === 0 ? (
               <SkeletonRows rows={4} />
-            ) : visible.length === 0 ? (
+            ) : fileRows.length === 0 ? (
               <EmptyState
                 icon={Upload}
-                title={fileSearch || typeFilter !== 'all' ? t.dashboard.recent.emptyFilteredTitle : t.dashboard.recent.emptyTitle}
-                body={fileSearch || typeFilter !== 'all'
+                title={appliedFileSearch ? t.dashboard.recent.emptyFilteredTitle : t.dashboard.recent.emptyTitle}
+                body={appliedFileSearch
                   ? t.dashboard.recent.emptyFilteredBody
                   : t.dashboard.recent.emptyBody}
               >
-                {!fileSearch && typeFilter === 'all' && (
+                {!appliedFileSearch && (
                   <button type="button" className="btn-primary" onClick={() => onNavigate('Uploads')}>
                     <Upload size={15} aria-hidden="true" />
                     {t.dashboard.recent.uploadCta}
@@ -418,27 +498,22 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
               <FileTable
                 rows={fileRows}
                 reload={reloadAll}
-                resetKey={`${page}|${typeFilter}|${fileSearch}`}
+                resetKey={`${page}|${appliedFileSearch}`}
                 footer={
                   <div className="files-footer">
                     <span className="muted small">
-                      {typeFilter === 'all'
-                        ? tf(t.common.showingRange, {
-                            from: page * RECENT_PAGE_SIZE + 1,
-                            to: page * RECENT_PAGE_SIZE + visible.length,
-                            total: filesTotal,
-                          })
-                        : plural(t.dashboard.recent.filteredCount, visible.length, {
-                            total: filesTotal,
-                            type: fileTypeDisplay(typeFilter),
-                          })}
+                      {tf(t.common.showingRange, {
+                        from: page * RECENT_PAGE_SIZE + 1,
+                        to: page * RECENT_PAGE_SIZE + fileRows.length,
+                        total: filesTotal,
+                      })}
                     </span>
                     <nav className="pagination" aria-label={t.dashboard.recent.paginationAria}>
                       <button
                         type="button"
                         className="page-btn"
                         disabled={page === 0 || filesLoading}
-                        aria-label="‹"
+                        aria-label={t.common.previousPage}
                         onClick={() => setPage((p) => Math.max(0, p - 1))}
                       >
                         ‹
@@ -462,7 +537,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                         type="button"
                         className="page-btn"
                         disabled={page + 1 >= totalPages || filesLoading}
-                        aria-label="›"
+                        aria-label={t.common.nextPage}
                         onClick={() => setPage((p) => p + 1)}
                       >
                         ›
@@ -506,8 +581,8 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
               </div>
             ) : (
               <p className="muted small">
-                {t.dashboard.storage.unknown}
-                {storage?.lastCheckedAt ? ` ${tf(t.dashboard.storage.lastChecked, { when: formatDateTime(storage.lastCheckedAt) })}` : ''}
+                {storageUnlimited ? t.accounts.sharedPool.unlimitedLabel : t.dashboard.storage.unknown}
+                {!storageUnlimited && storage?.lastCheckedAt ? ` ${tf(t.dashboard.storage.lastChecked, { when: formatDateTime(storage.lastCheckedAt) })}` : ''}
               </p>
             )}
           </section>

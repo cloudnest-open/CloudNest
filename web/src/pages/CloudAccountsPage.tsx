@@ -102,7 +102,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       const [p, a] = await Promise.all([api.providers(), api.accounts()]);
       if (p.status === 200) setProviders((p.data as { providers: ProviderInfo[] }).providers);
       if (a.status === 200) setAccounts((a.data as { accounts: AccountInfo[] }).accounts);
-      if (p.status !== 200 && a.status !== 200) {
+      if (p.status !== 200 || a.status !== 200) {
         setError(t.accounts.errorLoad);
       } else {
         setError(null);
@@ -442,11 +442,19 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                       {a.quota.lastErrorCode && <div className="muted small">{a.quota.lastErrorCode}</div>}
                     </td>
                     <td className="actions">
-                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void refreshOne(a.id)}>{t.accounts.list.refreshQuota}</button>
-                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void rename(a)}>{t.accounts.list.rename}</button>
-                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void reconnect(a)}>{t.accounts.list.reconnect}</button>
-                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => openScopeEditor(a)}>{t.accounts.sharedPool.manage}</button>
-                      <button type="button" className="btn-danger" disabled={busyId === a.id} onClick={() => void disconnect(a)}>{t.accounts.list.disconnect}</button>
+                      {a.status === 'connected' ? (
+                        <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void refreshOne(a.id)}>{t.accounts.list.refreshQuota}</button>
+                      ) : (
+                        <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void reconnect(a)}>{t.accounts.list.reconnect}</button>
+                      )}
+                      <details className="row-action-disclosure">
+                        <summary className="row-action-summary btn-secondary">{t.accounts.list.actions}</summary>
+                        <span className="row-action-items">
+                          <button type="button" className="btn-inline" disabled={busyId === a.id} onClick={() => void rename(a)}>{t.accounts.list.rename}</button>
+                          <button type="button" className="btn-inline" disabled={busyId === a.id} onClick={() => openScopeEditor(a)}>{t.accounts.sharedPool.manage}</button>
+                          <button type="button" className="btn-inline btn-inline-danger" disabled={busyId === a.id} onClick={() => void disconnect(a)}>{t.accounts.list.disconnect}</button>
+                        </span>
+                      </details>
                     </td>
                   </tr>
                 );

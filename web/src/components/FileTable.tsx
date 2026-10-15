@@ -166,12 +166,6 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
               <td className="muted small">{formatDateTime(file.modifiedAt)}</td>
               <td>
                 <span className="actions">
-                  {onDetails && (
-                    <button type="button" className="btn-inline" onClick={() => onDetails(file)}>
-                      <Info size={14} aria-hidden="true" />
-                      {t.table.details}
-                    </button>
-                  )}
                   <button
                     type="button"
                     className="btn-inline"
@@ -181,19 +175,30 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                     <ShareIcon size={14} aria-hidden="true" />
                     {t.table.share}
                   </button>
-                  <button type="button" className="btn-inline" onClick={() => actions.rename(file, reload)}>
-                    <Pencil size={14} aria-hidden="true" />
-                    {t.table.rename}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-inline btn-inline-danger"
-                    disabled={file.state === 'deleted'}
-                    onClick={() => actions.remove(file, reload)}
-                  >
-                    <Trash2 size={14} aria-hidden="true" />
-                    {t.table.delete}
-                  </button>
+                  <details className="row-action-disclosure">
+                    <summary className="row-action-summary btn-secondary">{t.table.actions}</summary>
+                    <span className="row-action-items">
+                      {onDetails && (
+                        <button type="button" className="btn-inline" onClick={() => onDetails(file)}>
+                          <Info size={14} aria-hidden="true" />
+                          {t.table.details}
+                        </button>
+                      )}
+                      <button type="button" className="btn-inline" onClick={() => actions.rename(file, reload)}>
+                        <Pencil size={14} aria-hidden="true" />
+                        {t.table.rename}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-inline btn-inline-danger"
+                        disabled={file.state === 'deleted'}
+                        onClick={() => actions.remove(file, reload)}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                        {t.table.delete}
+                      </button>
+                    </span>
+                  </details>
                 </span>
               </td>
             </tr>

@@ -19,11 +19,13 @@ import { LOCALES, LOCALE_NAMES, type Locale } from '../i18n.js';
  */
 
 type SectionKey =
-  | 'general' | 'upload' | 'downloads' | 'sharing' | 'domain' | 'security' | 'system' | 'diagnostics';
+  | 'general' | 'upload' | 'downloads' | 'sharing' | 'domain' | 'security' | 'system' | 'diagnostics' | 'providerSetup';
 
 const SECTION_KEYS: SectionKey[] = [
-  'general', 'upload', 'downloads', 'sharing', 'domain', 'security', 'system', 'diagnostics',
+  'general', 'upload', 'downloads', 'sharing', 'domain', 'security', 'system', 'diagnostics', 'providerSetup',
 ];
+
+type NumericDrafts = { workers: string; downloadConcurrency: string; expiryDays: string; downloadLimit: string };
 
 interface Settings {
   'upload.chunkSizeMiB': number;
@@ -64,6 +66,7 @@ interface BackupInfo {
 export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: () => void } = {}) {
   const { t, tf, locale, setLocale } = useI18n();
   const [section, setSection] = useState<SectionKey>('general');
+  const [focusProviderSetup, setFocusProviderSetup] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [tunnel, setTunnel] = useState<TunnelInfo | null>(null);
@@ -78,6 +81,8 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'saving' | 'saved' | null>(null);
+  const [numericDrafts, setNumericDrafts] = useState<NumericDrafts>({ workers: '', downloadConcurrency: '', expiryDays: '', downloadLimit: '' });
   const [diagnostics, setDiagnostics] = useState<string>('');
   const [tunnelHost, setTunnelHost] = useState('');
   const [tunnelToken, setTunnelToken] = useState('');
@@ -113,19 +118,41 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
     void load();
   }, [load]);
 
-  // Arriving via “Configure Provider” from Cloud Accounts: bring the dedicated
-  // Provider Setup section into view (it lives below the settings tabs).
+  useEffect(() => {
+    if (!settings) return;
+    setNumericDrafts({
+      workers: String(settings['upload.workerLimit']),
+      downloadConcurrency: String(settings['download.concurrency']),
+      expiryDays: settings['share.defaultExpiryDays'] === null ? '' : String(settings['share.defaultExpiryDays']),
+      downloadLimit: settings['share.defaultDownloadLimit'] === null ? '' : String(settings['share.defaultDownloadLimit']),
+    });
+  }, [settings]);
+
+  // Arriving via “Configure Provider” from Cloud Accounts opens the dedicated
+  // Provider Setup section and places keyboard focus in the form.
   useEffect(() => {
     let pending: string | null = null;
     try { pending = sessionStorage.getItem('cloudnest.pendingConnect'); } catch { /* private mode */ }
     if (!pending) return;
-    window.setTimeout(() => document.getElementById('provider-setup')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 80);
+    setFocusProviderSetup(true);
+    setSection('providerSetup');
   }, []);
+
+  useEffect(() => {
+    if (!focusProviderSetup || section !== 'providerSetup' || !settings) return;
+    window.setTimeout(() => {
+      const panel = document.getElementById('provider-setup');
+      panel?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      panel?.querySelector<HTMLElement>('input, button, select')?.focus();
+      setFocusProviderSetup(false);
+    }, 100);
+  }, [focusProviderSetup, section, settings]);
 
   async function save(patch: Record<string, unknown>): Promise<void> {
     setBusy(true);
     setError(null);
     setNotice(null);
+    setSaveStatus('saving');
     try {
       const res = await api.saveSettings(patch);
       if (res.status === 200) {
@@ -135,14 +162,33 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
         if (typeof patch['security.confirmDestructive'] === 'boolean') {
           setConfirmDestructivePreference(patch['security.confirmDestructive']);
         }
-        setNotice(t.settings.saved);
+        setSaveStatus('saved');
       } else {
         const body = res.data as { message?: string; code?: string };
         setError(body.message ?? (body.code ? tf(t.settings.saveFailed, { code: body.code }) : t.settings.saveRejected));
+        setSaveStatus(null);
       }
+    } catch {
+      setError(t.common.errorNetwork);
+      setSaveStatus(null);
     } finally {
       setBusy(false);
     }
+  }
+
+  function commitNumber<K extends keyof Settings>(
+    inputId: string,
+    key: K,
+    value: string,
+  ): void {
+    const input = document.getElementById(inputId) as HTMLInputElement | null;
+    if (!input?.checkValidity()) {
+      input?.reportValidity();
+      return;
+    }
+    const next = value.trim() === '' ? null : Number(value);
+    if (next !== null && !Number.isFinite(next)) return;
+    void save({ [key]: next });
   }
 
   async function makeBackup(): Promise<void> {
@@ -235,7 +281,14 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
 
   return (
     <>
-      <h1 className="page-title">{t.settings.title}</h1>
+      <div className="settings-heading">
+        <h1 className="page-title">{t.settings.title}</h1>
+        {saveStatus && (
+          <span className="settings-save-status small muted" role="status">
+            {saveStatus === 'saving' ? t.common.working : t.settings.saved}
+          </span>
+        )}
+      </div>
       {notice && <div className="card notice-card" role="status"><p>{notice}</p></div>}
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
 
@@ -267,7 +320,7 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
               }
             }}
           >
-            {t.settings.tab[key]}
+            {key === 'providerSetup' ? t.settings.providerSetup.title : t.settings.tab[key]}
           </button>
         ))}
       </div>
@@ -333,8 +386,10 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
               type="number"
               min={1}
               max={8}
-              value={settings['upload.workerLimit']}
-              onChange={(e) => void save({ 'upload.workerLimit': Number(e.target.value) })}
+              required
+              value={numericDrafts.workers}
+              onChange={(e) => setNumericDrafts((drafts) => ({ ...drafts, workers: e.target.value }))}
+              onBlur={(e) => commitNumber('workers', 'upload.workerLimit', e.currentTarget.value)}
               disabled={busy}
             />
           </div>
@@ -372,8 +427,10 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
               type="number"
               min={1}
               max={8}
-              value={settings['download.concurrency']}
-              onChange={(e) => void save({ 'download.concurrency': Number(e.target.value) })}
+              required
+              value={numericDrafts.downloadConcurrency}
+              onChange={(e) => setNumericDrafts((drafts) => ({ ...drafts, downloadConcurrency: e.target.value }))}
+              onBlur={(e) => commitNumber('dl-concurrency', 'download.concurrency', e.currentTarget.value)}
               disabled={busy}
             />
           </div>
@@ -392,8 +449,9 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
               id="expiry"
               type="number"
               min={1}
-              value={settings['share.defaultExpiryDays'] ?? ''}
-              onChange={(e) => void save({ 'share.defaultExpiryDays': e.target.value === '' ? null : Number(e.target.value) })}
+              value={numericDrafts.expiryDays}
+              onChange={(e) => setNumericDrafts((drafts) => ({ ...drafts, expiryDays: e.target.value }))}
+              onBlur={(e) => commitNumber('expiry', 'share.defaultExpiryDays', e.currentTarget.value)}
               disabled={busy}
             />
             <label htmlFor="dl-limit">{t.settings.sharing.limit}</label>
@@ -401,8 +459,9 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
               id="dl-limit"
               type="number"
               min={1}
-              value={settings['share.defaultDownloadLimit'] ?? ''}
-              onChange={(e) => void save({ 'share.defaultDownloadLimit': e.target.value === '' ? null : Number(e.target.value) })}
+              value={numericDrafts.downloadLimit}
+              onChange={(e) => setNumericDrafts((drafts) => ({ ...drafts, downloadLimit: e.target.value }))}
+              onBlur={(e) => commitNumber('dl-limit', 'share.defaultDownloadLimit', e.currentTarget.value)}
               disabled={busy}
             />
           </div>
@@ -689,10 +748,14 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
         </div>
       )}
 
-      <section className="card" id="provider-setup">
-        <h2>{t.settings.providerSetup.title}</h2>
-        <ProviderSetupCard onChanged={() => void load()} onGoToCloudAccounts={onGoToCloudAccounts} />
-      </section>
+      {section === 'providerSetup' && (
+        <div role="tabpanel" id="settings-panel-providerSetup" aria-labelledby="settings-tab-providerSetup">
+          <section className="card" id="provider-setup">
+            <h2>{t.settings.providerSetup.title}</h2>
+            <ProviderSetupCard onChanged={() => void load()} onGoToCloudAccounts={onGoToCloudAccounts} />
+          </section>
+        </div>
+      )}
     </>
   );
 }

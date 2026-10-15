@@ -13,6 +13,8 @@ export const appPtBr: AppStrings = {
     close: 'Fechar',
     refresh: 'Atualizar',
     refreshing: 'Atualizando…',
+    previousPage: 'Página anterior',
+    nextPage: 'Próxima página',
     remove: 'Remover',
     dismiss: 'Dispensar',
     copy: 'Copiar',

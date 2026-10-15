@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Folder, RefreshCw, Upload } from 'lucide-react';
 import { api } from '../api.js';
 import { FileTable, type FileTableRow } from '../components/FileTable.js';
-import { EmptyState, SkeletonRows, formatBytes, formatDateTime, fileTypeName, fileTypeDisplay, pageList } from '../components/ui.js';
+import { EmptyState, SkeletonRows, formatBytes, formatDateTime, pageList } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
 
 /**
@@ -31,28 +31,28 @@ interface FileView {
 
 const PAGE_SIZE = 100;
 
-export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initialSearch?: string; onGoToCloudAccounts?: () => void } = {}) {
+export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploads }: { initialSearch?: string; onGoToCloudAccounts?: () => void; onGoToUploads?: () => void } = {}) {
   const { t, tf } = useI18n();
   const [files, setFiles] = useState<FileView[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState(initialSearch);
-  const [sortBy, setSortBy] = useState<'modified' | 'name' | 'size'>('modified');
+  const [appliedSearch, setAppliedSearch] = useState(initialSearch.trim());
   const [detail, setDetail] = useState<FileView | null>(null);
-  // "All types" filter over the loaded rows; the value is the locale-
-  // independent type key, the label is localized.
-  const [typeFilter, setTypeFilter] = useState('all');
   // FE-13: server-driven pagination so the library is not silently capped at
   // the first 100 rows.
   const [page, setPage] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
+    setFiles([]);
+    setTotal(0);
     // FE-04: a rejected fetch must surface a recoverable error, never a
     // permanent skeleton with no explanation.
     try {
-      const res = await api.listFiles(PAGE_SIZE, page * PAGE_SIZE, search.trim());
+      const res = await api.listFiles(PAGE_SIZE, page * PAGE_SIZE, appliedSearch);
       if (res.status === 200) {
         const data = res.data as { files: FileView[]; total: number };
         setFiles(data.files ?? []);
@@ -67,33 +67,27 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
-  }, [page, search]);
+  }, [page, appliedSearch]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // FE-13: the search box now drives the SERVER-side search; going back to an
-  // empty query shows the whole library again. Page resets on a new search.
-  const searchTimer = useRef<number | null>(null);
+  // Search is global in the API; debounce it so typing doesn't issue a request
+  // per keystroke or briefly show results for an older query.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(0);
+      setAppliedSearch(search.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
   function onSearchChange(value: string): void {
     setSearch(value);
-    setPage(0);
-    setTypeFilter('all');
-    if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
-    searchTimer.current = window.setTimeout(() => void load(), 250);
   }
 
-  const typeOptions = Array.from(new Set(files.map((f) => fileTypeName(f.originalName)))).sort();
-  const visible = files
-    .filter((f) => (typeFilter === 'all' ? true : fileTypeName(f.originalName) === typeFilter))
-    .sort((a, b) => {
-      if (sortBy === 'name') return a.originalName.localeCompare(b.originalName);
-      if (sortBy === 'size') return b.sizeBytes - a.sizeBytes;
-      return (b.createdAt ?? '').localeCompare(a.createdAt ?? '');
-    });
-
-  const rows: FileTableRow[] = visible.map((f) => ({
+  const rows: FileTableRow[] = files.map((f) => ({
     id: f.id,
     originalName: f.originalName,
     sizeBytes: f.sizeBytes,
@@ -119,14 +113,18 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
           <p className="muted">{t.files.subtitle}</p>
         </div>
         <div className="card-tools">
+          {onGoToUploads && (
+            <button type="button" className="btn-primary" onClick={onGoToUploads}>
+              <Upload size={15} aria-hidden="true" />
+              {t.dashboard.recent.uploadCta}
+            </button>
+          )}
           <button type="button" className="btn-secondary" onClick={() => void load()} disabled={loading}>
             <RefreshCw size={15} aria-hidden="true" />
             {loading ? t.common.refreshing : t.common.refresh}
           </button>
         </div>
       </div>
-
-      {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
 
       <section className="card">
         <div className="card-head">
@@ -139,39 +137,37 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
             />
-            <select
-              aria-label={t.files.filterLabel}
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-            >
-              <option value="all">{t.files.filterAll}</option>
-              {typeOptions.map((key) => <option key={key} value={key}>{fileTypeDisplay(key)}</option>)}
-            </select>
-            <select
-              aria-label={t.files.sortLabel}
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'modified' | 'name' | 'size')}
-            >
-              <option value="modified">{t.files.sortModified}</option>
-              <option value="name">{t.files.sortName}</option>
-              <option value="size">{t.files.sortSize}</option>
-            </select>
           </div>
         </div>
 
-        {loading && files.length === 0 ? (
+        {error ? (
+          <div className="error-card" role="alert">
+            <p>{error}</p>
+            <button type="button" className="btn-secondary" disabled={loading} onClick={() => void load()}>
+              <RefreshCw size={15} aria-hidden="true" />
+              {loading ? t.common.refreshing : t.common.refresh}
+            </button>
+          </div>
+        ) : loading && files.length === 0 ? (
           <SkeletonRows rows={4} />
-        ) : visible.length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState
             icon={search ? Folder : Upload}
             title={search ? t.files.emptySearchTitle : t.files.emptyTitle}
             body={search ? t.files.emptySearchBody : t.files.emptyBody}
-          />
+          >
+            {!search && onGoToUploads && (
+              <button type="button" className="btn-primary" onClick={onGoToUploads}>
+                <Upload size={15} aria-hidden="true" />
+                {t.dashboard.recent.uploadCta}
+              </button>
+            )}
+          </EmptyState>
         ) : (
           <FileTable
             rows={rows}
             reload={load}
-            resetKey={`${page}|${typeFilter}`}
+            resetKey={`${page}|${appliedSearch}`}
             onDetails={(row) => {
               const found = files.find((f) => f.id === row.id);
               if (found) setDetail(found);
@@ -181,7 +177,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
                 <span className="muted small">
                   {tf(t.common.showingRange, {
                     from: page * PAGE_SIZE + 1,
-                    to: page * PAGE_SIZE + visible.length,
+                    to: page * PAGE_SIZE + rows.length,
                     total,
                   })}
                 </span>
@@ -190,7 +186,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
                     type="button"
                     className="page-btn"
                     disabled={page === 0}
-                    aria-label="‹"
+                    aria-label={t.common.previousPage}
                     onClick={() => goTo(page - 1)}
                   >
                     ‹
@@ -214,7 +210,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
                     type="button"
                     className="page-btn"
                     disabled={page + 1 >= totalPages}
-                    aria-label="›"
+                    aria-label={t.common.nextPage}
                     onClick={() => goTo(page + 1)}
                   >
                     ›
