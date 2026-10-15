@@ -206,8 +206,12 @@ async function uploadObjectStreamImpl(
   const folderId = parseRootId(rootId);
   const filename = safeSegment(objectKey);
   const boundary = `----CloudNest${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
-  // every required parameter precedes the file part, as pCloud documents
+  // every required parameter precedes the file part, as pCloud documents;
+  // the token travels as a form field (never the URL) and authenticates the
+  // upload like every other pCloud call — without it the provider answers
+  // result:1000 and every chunk would fail as needs_reauth
   const fields: Record<string, string> = {
+    access_token: bundle.accessToken,
     folderid: String(folderId),
     filename,
     nopartial: '1',

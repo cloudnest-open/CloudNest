@@ -140,6 +140,32 @@ test('upload streams a multipart body with nopartial=1 and parameters before the
   assert.ok(call.bodySize > payload.length, 'multipart framing wraps the streamed bytes');
 });
 
+test('upload authenticates: an auth-less multipart body never reaches success', async () => {
+  // the provider refuses uploadfile calls without the token (result:1000);
+  // the request must therefore carry it, or this test fails
+  installMock((call) => {
+    if (!call.bodyText.includes('name="access_token"')) {
+      return { status: 200, body: { result: 1000, error: 'Log in failed' } };
+    }
+    return { status: 200, body: { result: 0, metadata: [{ fileid: 9002, name: 'key-auth', size: 3 }] } };
+  });
+  const payload = Buffer.from('abc');
+  const ref = await uploadObjectStreamImpl(
+    bundle,
+    { rootId: '123', objectKey: 'key-auth', name: 'key-auth', readable: Readable.from(payload), sizeBytes: payload.length },
+  );
+  assert.equal(ref.remoteObjectId, '9002', 'the upload succeeded, so the request carried the token');
+
+  const call = calls[0]!;
+  const tokenIndex = call.bodyText.indexOf('name="access_token"');
+  const fileIndex = call.bodyText.indexOf('filename=');
+  assert.ok(tokenIndex >= 0, 'access_token rides in the multipart fields');
+  assert.ok(call.bodyText.includes('test-token-not-real'), 'the stored token value is sent');
+  assert.ok(tokenIndex < fileIndex, 'the token precedes the file part, as pCloud documents');
+  // the token never leaks into the request URL
+  assert.ok(!call.url.includes('access_token'), 'the token travels in the body, not the query string');
+});
+
 test('upload verifies the returned size and rejects a mismatch (no silent corruption)', async () => {
   installMock(() => ({ status: 200, body: { result: 0, metadata: [{ fileid: 5, name: 'key-1', size: 999 }] } }));
   await assert.rejects(
