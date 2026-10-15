@@ -200,7 +200,7 @@ export function createApp(options: {
   //     may compress or transform the response: Content-Length, Range and ETag
   //     must describe the exact reconstructed file bytes.
   const downloads = new DownloadService(options.db, credentialsStore, settings);
-  app.use(downloadsRouter({ queries, csrf, downloads }));
+  app.use(downloadsRouter({ queries, csrf, downloads, storageHealth: (fileId) => uploads.storageHealthForFile(fileId) }));
   app.set('downloads', downloads);
 
   // 4d. share links and deletion. Public share routes are mounted separately and

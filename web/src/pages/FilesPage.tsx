@@ -21,13 +21,15 @@ interface FileView {
   chunkSizeBytes: number;
   state: string;
   storedAcross: string[];
+  /** Task §5.B: which storage accounts currently make this file not fully usable. */
+  storageHealth?: { status: 'ok' | 'account_unavailable'; unavailable: Array<{ accountId: string; label: string; accountStatus: string }> };
   createdAt: string;
   completedAt: string | null;
 }
 
 const PAGE_SIZE = 100;
 
-export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {}) {
+export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initialSearch?: string; onGoToCloudAccounts?: () => void } = {}) {
   const [files, setFiles] = useState<FileView[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -93,6 +95,8 @@ export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {
     state: f.state,
     storedAcross: f.storedAcross,
     modifiedAt: f.completedAt ?? f.createdAt,
+    needsReconnect: f.storageHealth?.status === 'account_unavailable',
+    unavailableLabels: (f.storageHealth?.unavailable ?? []).map((u) => u.label),
   }));
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -163,6 +167,10 @@ export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {
             rows={rows}
             reload={load}
             resetKey={`${page}|${typeFilter}`}
+            onDetails={(row) => {
+              const found = files.find((f) => f.id === row.id);
+              if (found) setDetail(found);
+            }}
             footer={
               <div className="files-footer">
                 <span className="muted small">
@@ -228,6 +236,22 @@ export function FilesPage({ initialSearch = '' }: { initialSearch?: string } = {
             <li><strong>Chunks:</strong> {detail.chunkCount} × {formatBytes(detail.chunkSizeBytes)}</li>
             <li><strong>State:</strong> {detail.state}</li>
             <li><strong>Stored across:</strong> {detail.storedAcross.length === 0 ? 'Not yet placed' : detail.storedAcross.join(', ')}</li>
+            <li>
+              <strong>Availability:</strong>{' '}
+              {detail.storageHealth?.status === 'account_unavailable' ? (
+                <>
+                  Reconnect required — offline accounts: {detail.storageHealth.unavailable.map((u) => u.label).join(', ')}. The
+                  file is not corrupted; its chunks are intact.
+                  {onGoToCloudAccounts && (
+                    <button type="button" className="btn-inline" style={{ marginLeft: 8 }} onClick={onGoToCloudAccounts}>
+                      Go to Cloud Accounts
+                    </button>
+                  )}
+                </>
+              ) : (
+                'All storage accounts holding this file are connected.'
+              )}
+            </li>
             <li><strong>Created:</strong> {formatDateTime(detail.createdAt)}</li>
             <li><strong>Completed:</strong> {formatDateTime(detail.completedAt)}</li>
           </ul>

@@ -75,7 +75,15 @@ export function providerAccountsRouter(deps: {
   const refreshLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many refresh attempts. Try again later.' } });
 
   router.get('/api/provider-accounts', adminOnly, (_req, res) => {
-    res.json({ accounts: accounts.list().map(toPublic) });
+    // Disconnect-warning data (task §5.A): how many live files reference each
+    // account. One grouped query for the whole list — never per-row.
+    const usage = accounts.trackedUsage();
+    res.json({
+      accounts: accounts.list().map((row) => ({
+        ...toPublic(row),
+        usage: usage.get(row.id) ?? { trackedFiles: 0, trackedChunks: 0 },
+      })),
+    });
   });
 
   async function refreshOne(row: ProviderAccountRow) {

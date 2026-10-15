@@ -172,4 +172,27 @@ export class ProviderAccountService {
   get(id: string): ProviderAccountRow | undefined {
     return this.queries.getAccount.get(id) as ProviderAccountRow | undefined;
   }
+
+  /**
+   * One grouped query: how many live logical files and chunk placements point
+   * at each account. This is the disconnect-warning data — an account that
+   * holds placements can take files with it until it is reconnected. Zero
+   * means nothing currently depends on the account.
+   */
+  trackedUsage(): Map<string, { trackedFiles: number; trackedChunks: number }> {
+    const rows = this.db.prepare(
+      `SELECT p.provider_account_id AS accountId,
+              COUNT(DISTINCT c.file_id) AS trackedFiles,
+              COUNT(*) AS trackedChunks
+       FROM chunk_placements p
+       JOIN file_chunks c ON c.id = p.chunk_id
+       WHERE p.is_active = 1
+       GROUP BY p.provider_account_id`,
+    ).all() as Array<{ accountId: string; trackedFiles: number; trackedChunks: number }>;
+    const map = new Map<string, { trackedFiles: number; trackedChunks: number }>();
+    for (const row of rows) {
+      map.set(row.accountId, { trackedFiles: row.trackedFiles, trackedChunks: row.trackedChunks });
+    }
+    return map;
+  }
 }

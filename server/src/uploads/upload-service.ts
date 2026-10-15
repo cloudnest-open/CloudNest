@@ -60,6 +60,26 @@ export interface PlanRequest {
   routingStrategy?: RoutingStrategy;
 }
 
+/**
+ * Task §5.B — account-aware file availability. A file whose chunk placements
+ * reference a disconnected/errored/needs-reauth account is NOT fully usable
+ * right now; the affected accounts are named so the UI can offer a reconnect
+ * path. This is derived from live rows on every read, never a stale flag, and
+ * it never marks a file corrupted merely because an account is offline.
+ */
+export interface FileStorageHealth {
+  status: 'ok' | 'account_unavailable';
+  unavailable: Array<{ accountId: string; label: string; accountStatus: string }>;
+}
+
+function storageHealthOf(unavailable: Map<string, { accountId: string; label: string; accountStatus: string }>): FileStorageHealth {
+  return {
+    status: unavailable.size > 0 ? 'account_unavailable' : 'ok',
+    unavailable: [...unavailable.values()],
+  };
+}
+
+
 export interface PlanResult {
   jobId: string;
   fileId: string;
@@ -878,34 +898,98 @@ export class UploadService {
   publicFile(fileId: string): {
     id: string; originalName: string; sizeBytes: number; mimeType: string | null;
     chunkCount: number; chunkSizeBytes: number; state: string; storedAcross: string[];
+    storageHealth: FileStorageHealth;
     createdAt: string; completedAt: string | null;
   } | null {
-    const file = this.q.getFile.get(fileId) as FileRow | undefined;
-    if (!file) return null;
-    const chunks = this.q.listChunks.all(file.id) as Array<{ id: string }>;
-    const storedAcross: string[] = [];
-    for (const chunk of chunks) {
-      const placements = this.q.placementsForChunk.all(chunk.id) as Array<{
-        provider_account_id: string; is_active: number;
-      }>;
-      for (const p of placements) {
-        if (p.is_active !== 1) continue;
-        const account = this.providerQ.getAccount.get(p.provider_account_id) as { provider: string } | undefined;
-        if (account && !storedAcross.includes(account.provider)) storedAcross.push(account.provider);
+    return this.publicFiles([fileId]).get(fileId) ?? null;
+  }
+
+  /**
+   * Batched publicFile shapes for a page of files. The original per-file loop
+   * issued queries per chunk × placement × account (measured: the dominant
+   * files-list cost, super-linear in practice); this resolves the whole page
+   * with TWO queries total and groups the rows in memory.
+   */
+  publicFiles(fileIds: string[]): Map<string, {
+    id: string; originalName: string; sizeBytes: number; mimeType: string | null;
+    chunkCount: number; chunkSizeBytes: number; state: string; storedAcross: string[];
+    storageHealth: FileStorageHealth;
+    createdAt: string; completedAt: string | null;
+  }> {
+    const out = new Map<string, {
+      id: string; originalName: string; sizeBytes: number; mimeType: string | null;
+      chunkCount: number; chunkSizeBytes: number; state: string; storedAcross: string[];
+      storageHealth: FileStorageHealth;
+      createdAt: string; completedAt: string | null;
+    }>();
+    if (fileIds.length === 0) return out;
+    // Pages are ≤100 ids, comfortably inside SQLite's variable limit.
+    const placeholders = fileIds.map(() => '?').join(',');
+    const fileRows = this.db.prepare(
+      `SELECT * FROM files WHERE id IN (${placeholders})`,
+    ).all(...fileIds) as unknown as FileRow[];
+    const placementRows = this.db.prepare(
+      `SELECT c.file_id AS fileId, p.is_active AS isActive,
+              a.id AS accountId, a.provider AS provider, a.status AS accountStatus, a.display_label AS label
+       FROM chunk_placements p
+       JOIN file_chunks c ON c.id = p.chunk_id
+       JOIN provider_accounts a ON a.id = p.provider_account_id
+       WHERE c.file_id IN (${placeholders})`,
+    ).all(...fileIds) as Array<{
+      fileId: string; isActive: number; accountId: string; provider: string; accountStatus: string; label: string;
+    }>;
+
+    const perFile = new Map<string, { storedAcross: string[]; unavailable: Map<string, { accountId: string; label: string; accountStatus: string }> }>();
+    for (const row of placementRows) {
+      let entry = perFile.get(row.fileId);
+      if (!entry) {
+        entry = { storedAcross: [], unavailable: new Map() };
+        perFile.set(row.fileId, entry);
+      }
+      if (row.isActive !== 1) continue;
+      if (!entry.storedAcross.includes(row.provider)) entry.storedAcross.push(row.provider);
+      if (row.accountStatus !== 'connected') {
+        entry.unavailable.set(row.accountId, { accountId: row.accountId, label: row.label, accountStatus: row.accountStatus });
       }
     }
-    return {
-      id: file.id,
-      originalName: file.original_name,
-      sizeBytes: file.size_bytes,
-      mimeType: file.mime_type,
-      chunkCount: file.chunk_count,
-      chunkSizeBytes: file.chunk_size_bytes,
-      state: file.state,
-      storedAcross,
-      createdAt: file.created_at,
-      completedAt: file.completed_at,
-    };
+
+    for (const file of fileRows) {
+      const entry = perFile.get(file.id) ?? { storedAcross: [], unavailable: new Map<string, { accountId: string; label: string; accountStatus: string }>() };
+      out.set(file.id, {
+        id: file.id,
+        originalName: file.original_name,
+        sizeBytes: file.size_bytes,
+        mimeType: file.mime_type,
+        chunkCount: file.chunk_count,
+        chunkSizeBytes: file.chunk_size_bytes,
+        state: file.state,
+        storedAcross: entry.storedAcross,
+        storageHealth: storageHealthOf(entry.unavailable),
+        createdAt: file.created_at,
+        completedAt: file.completed_at,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Account-aware availability for ONE file (task §5.B): whether every account
+   * holding its active placements is currently connected. Used by the file
+   * details route; the list route gets the same data through publicFile.
+   */
+  storageHealthForFile(fileId: string): FileStorageHealth {
+    const unavailable = new Map<string, { accountId: string; label: string; accountStatus: string }>();
+    const rows = this.db.prepare(
+      `SELECT a.id, a.display_label, a.status
+       FROM chunk_placements p
+       JOIN file_chunks c ON c.id = p.chunk_id
+       JOIN provider_accounts a ON a.id = p.provider_account_id
+       WHERE p.is_active = 1 AND c.file_id = ? AND a.status <> 'connected'`,
+    ).all(fileId) as Array<{ id: string; display_label: string; status: string }>;
+    for (const row of rows) {
+      unavailable.set(row.id, { accountId: row.id, label: row.display_label, accountStatus: row.status });
+    }
+    return storageHealthOf(unavailable);
   }
 
   /** Live dashboard summary: real rows only, unknown quota stays unknown. */
@@ -1008,7 +1092,11 @@ export class UploadService {
       accountsDetailed,
       storage,
       activeShareLinks,
-      recentFileList: files.map((f) => this.publicFile(f.id)),
+      recentFileList: (() => {
+        // keep listFiles order: the batch Map is keyed, not ordered
+        const recent = this.publicFiles(files.map((f) => f.id));
+        return files.map((f) => recent.get(f.id)!);
+      })(),
     };
   }
 

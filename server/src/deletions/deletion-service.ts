@@ -167,6 +167,12 @@ export class DeletionService {
     const txn = this.db.transaction(() => {
       if (clean) {
         // every remote object is confirmed gone: retire the chunk map and the file
+        // placements first — they FK-reference file_chunks (ON DELETE RESTRICT),
+        // so they must not outlive the chunks they point at. The audit trail
+        // stays in deletion_attempts, which holds its own copy of every field.
+        this.db.prepare(
+          'DELETE FROM chunk_placements WHERE chunk_id IN (SELECT id FROM file_chunks WHERE file_id = ?)',
+        ).run(fileId);
         this.db.prepare('DELETE FROM file_chunks WHERE file_id = ?').run(fileId);
         this.db.prepare("UPDATE files SET state = 'deleted' WHERE id = ?").run(fileId);
         this.db.prepare(

@@ -159,10 +159,13 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   }
 
   async function disconnect(account: AccountInfo) {
-    const ok = await confirmDestructive(
-      `Disconnect ${account.displayLabel}? Local credentials are removed. No remote files are deleted.`,
-      { title: 'Disconnect account', confirmLabel: 'Disconnect' },
-    );
+    // Task §5.A: an account that holds chunk placements takes those files with
+    // it until reconnection — warn with the real count before confirming.
+    const tracked = account.usage?.trackedFiles ?? 0;
+    const message = tracked > 0
+      ? `Disconnect ${account.displayLabel}? ${tracked} file${tracked === 1 ? ' stores' : 's store'} chunks on this account and may be unavailable until it is reconnected. Local credentials are removed. No remote files are deleted.`
+      : `Disconnect ${account.displayLabel}? Local credentials are removed. No remote files are deleted.`;
+    const ok = await confirmDestructive(message, { title: 'Disconnect account', confirmLabel: 'Disconnect' });
     if (!ok) return;
     await withBusy(account.id, async () => {
       const res = await api.disconnect(account.id);

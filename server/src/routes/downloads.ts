@@ -53,6 +53,8 @@ export function downloadsRouter(deps: {
   queries: Queries;
   csrf: CsrfBundle;
   downloads: DownloadService;
+  /** Task §5.B: account-aware availability for the file details response. */
+  storageHealth: (fileId: string) => import('../uploads/upload-service.js').FileStorageHealth;
 }): Router {
   const router = Router();
   const adminOnly = requireAdmin(deps.queries);
@@ -173,6 +175,8 @@ export function downloadsRouter(deps: {
         state: file.state,
         manifestHash: file.manifest_hash,
         chunksPresent: chunks.length,
+        // task §5.B: which accounts currently make this file not fully usable
+        storageHealth: deps.storageHealth(file.id),
       },
     });
   });

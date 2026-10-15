@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
+import { Info, Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
 import { useFileActions } from './FileActionsProvider.js';
-import { TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS, typeLabel } from './ui.js';
+import { Badge, TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS, typeLabel } from './ui.js';
 import { ProviderLogo } from './ProviderLogo.js';
 
 /**
@@ -18,6 +18,10 @@ export interface FileTableRow {
   state: string;
   storedAcross: string[];
   modifiedAt: string | null;
+  /** Task §5.B: an account holding this file's chunks is not connected. */
+  needsReconnect?: boolean;
+  /** Labels of the affected accounts, for the honest tooltip. */
+  unavailableLabels?: string[];
 }
 
 interface FileTableProps {
@@ -27,9 +31,11 @@ interface FileTableProps {
   footer?: React.ReactNode;
   /** Changing this clears the selection (search, filter, page changes). */
   resetKey?: string;
+  /** When provided, each row gets a Details action opening the caller's panel. */
+  onDetails?: (row: FileTableRow) => void;
 }
 
-export function FileTable({ rows, reload, footer, resetKey }: FileTableProps) {
+export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTableProps) {
   const actions = useFileActions();
   const [selected, setSelected] = useState<string[]>([]);
 
@@ -123,6 +129,13 @@ export function FileTable({ rows, reload, footer, resetKey }: FileTableProps) {
                 <span className="file-name-cell">
                   <TypeIcon name={file.originalName} />
                   <span className="ellipsis">{file.originalName}</span>
+                  {file.needsReconnect && (
+                    <span
+                      title={`Account needed for this file is offline: ${(file.unavailableLabels ?? []).join(', ')}. Reconnect it in Cloud Accounts to download this file. The file is not corrupted.`}
+                    >
+                      <Badge tone="warn">Reconnect required</Badge>
+                    </span>
+                  )}
                 </span>
               </td>
               <td>{typeLabel(file.originalName)}</td>
@@ -148,6 +161,12 @@ export function FileTable({ rows, reload, footer, resetKey }: FileTableProps) {
               <td className="muted small">{formatDateTime(file.modifiedAt)}</td>
               <td>
                 <span className="actions">
+                  {onDetails && (
+                    <button type="button" className="btn-inline" onClick={() => onDetails(file)}>
+                      <Info size={14} aria-hidden="true" />
+                      Details
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn-inline"

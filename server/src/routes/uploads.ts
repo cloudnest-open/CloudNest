@@ -266,8 +266,11 @@ export function uploadsRouter(deps: {
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 50) || 50));
     const search = typeof req.query['search'] === 'string' ? req.query['search'].toLowerCase() : '';
     // FE-02: filtering happens in SQL before limit/offset, so a search sees
-    // the entire library; `total` reflects the same filter.
-    const files = deps.uploads.searchFiles(search, limit, offset).map((f) => deps.uploads.publicFile(f.id));
+    // the entire library; `total` reflects the same filter. The page is
+    // resolved with one batched placement query (no per-file N+1).
+    const rows = deps.uploads.searchFiles(search, limit, offset);
+    const shaped = deps.uploads.publicFiles(rows.map((f) => f.id));
+    const files = rows.map((f) => shaped.get(f.id)!);
     res.json({ files, total: deps.uploads.countSearchedFiles(search) });
   });
 

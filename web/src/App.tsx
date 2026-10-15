@@ -419,7 +419,7 @@ export default function App() {
           ) : active === 'Uploads' ? (
             <UploadsPage />
           ) : active === 'Files' ? (
-            <FilesPage key={fileSearch.seq} initialSearch={fileSearch.text} />
+            <FilesPage key={fileSearch.seq} initialSearch={fileSearch.text} onGoToCloudAccounts={() => setActive('Cloud Accounts')} />
           ) : active === 'Downloads' ? (
             <DownloadsPage />
           ) : active === 'Shared Links' ? (

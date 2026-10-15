@@ -69,6 +69,8 @@ export interface AccountInfo {
   lastErrorCode: string | null;
   lastErrorAt: string | null;
   hasCredentials: boolean;
+  /** Files/chunks that reference this account's active placements (disconnect-warning data). */
+  usage: { trackedFiles: number; trackedChunks: number };
   createdAt: string;
   updatedAt: string;
 }
