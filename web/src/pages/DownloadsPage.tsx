@@ -184,6 +184,7 @@ export function DownloadsPage() {
   }
 
   const downloadable = files.filter((f) => f.state === 'completed');
+  const fileNames = new Map(files.map((file) => [file.id, file.originalName]));
 
   return (
     <>
@@ -202,7 +203,13 @@ export function DownloadsPage() {
         {downloadable.length === 0 ? (
           <p className="muted">{t.downloads.noneAvailable}</p>
         ) : (
-          <table className="accounts-table">
+          <div className="table-scroll-container">
+          <table className="accounts-table download-table download-available-table">
+            <colgroup>
+              <col className="download-name-col" />
+              <col className="download-size-col" />
+              <col className="download-action-col" />
+            </colgroup>
             <thead>
               <tr>
                 <th>{t.downloads.file}</th>
@@ -213,7 +220,7 @@ export function DownloadsPage() {
             <tbody>
               {downloadable.map((file) => (
                 <tr key={file.id}>
-                  <td className="ellipsis">{file.originalName}</td>
+                  <td className="download-file-name-cell" title={file.originalName}>{file.originalName}</td>
                   <td>{formatBytes(file.sizeBytes)}</td>
                   <td className="actions">
                     <button type="button" className="btn-primary" onClick={() => startDownload(file)}>{t.downloads.download}</button>
@@ -222,6 +229,7 @@ export function DownloadsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
         <p className="muted small">{t.downloads.footnote}</p>
       </section>
@@ -233,10 +241,18 @@ export function DownloadsPage() {
         ) : downloads.length === 0 ? (
           <p className="muted">{t.downloads.none}</p>
         ) : (
-          <table className="accounts-table">
+          <div className="table-scroll-container">
+          <table className="accounts-table download-table download-transfers-table">
+            <colgroup>
+              <col className="transfer-name-col" />
+              <col className="transfer-progress-col" />
+              <col className="transfer-state-col" />
+              <col className="transfer-updated-col" />
+              <col className="transfer-actions-col" />
+            </colgroup>
             <thead>
               <tr>
-                <th>{t.downloads.range}</th>
+                <th>{t.downloads.file}</th>
                 <th>{t.downloads.progress}</th>
                 <th>{t.downloads.state}</th>
                 <th>{t.downloads.updated}</th>
@@ -250,12 +266,17 @@ export function DownloadsPage() {
                   : 0;
                 return (
                   <tr key={d.jobId}>
-                    <td className="muted small">
-                      {d.rangeStart === null || d.rangeEnd === null
+                    <td>
+                      <span className="download-file-name" title={d.fileId ? fileNames.get(d.fileId) ?? t.common.unknown : t.common.unknown}>
+                        {d.fileId ? fileNames.get(d.fileId) ?? t.common.unknown : t.common.unknown}
+                      </span>
+                      <span className="download-range-meta muted small">
+                        {d.rangeStart === null || d.rangeEnd === null
                         ? t.downloads.fullFile
                         : tf(t.downloads.bytesRange, { start: d.rangeStart, end: d.rangeEnd })}
+                      </span>
                     </td>
-                    <td>
+                    <td className="download-progress-cell">
                       {formatBytes(d.bytesCompleted)} / {formatBytes(d.requestedBytes ?? 0)}
                       <div className="muted small">{tf(t.downloads.chunksOf, { done: d.chunksCompleted, total: d.chunksTotal, pct: percent })}</div>
                     </td>
@@ -280,6 +301,7 @@ export function DownloadsPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </>

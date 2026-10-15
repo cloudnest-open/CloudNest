@@ -748,10 +748,37 @@ input:disabled, select:disabled, textarea:disabled {
   align-items: center;
   gap: 10px;
   min-height: 44px;
+  min-width: 0;
   cursor: pointer;
 }
 .share-file-picker label:has(input:disabled) { cursor: not-allowed; opacity: .72; }
-.share-file-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.share-file-picker label > input { flex: 0 0 auto; }
+.share-file-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-file-picker label > .muted,
+.share-file-picker label > .state,
+.share-file-picker label > .tag { flex: 0 0 auto; white-space: nowrap; }
+
+.share-rules-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0 14px;
+}
+.share-rule-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.share-rule-field label { font-size: 13px; font-weight: 500; }
+.share-created-url {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--cn-border);
+  border-radius: 10px;
+  background: var(--cn-surface-muted);
+  scroll-margin-block: 20px;
+}
+.share-created-url h3 { margin: 0 0 10px; font-size: 15px; }
+.share-created-url .copy-row { align-items: stretch; }
+.share-created-url .callback-uri { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.share-created-url .copy-row .btn-secondary { flex: 0 0 auto; }
+.share-created-url p { margin: 8px 0 0; }
 
 /* Selected rows (row checkboxes) read at a glance, as in the reference. */
 .accounts-table tbody tr:has(input[type='checkbox']:checked) { background: var(--cn-primary-soft); }
@@ -824,6 +851,78 @@ input:disabled, select:disabled, textarea:disabled {
   width: fit-content;
   max-width: 100%;
 }
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+  margin-top: 16px;
+}
+.settings-nav { min-width: 0; }
+.settings-tabs {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: none;
+  gap: 2px;
+  padding: 6px;
+  margin: 0;
+}
+.settings-tab {
+  width: 100%;
+  height: auto;
+  min-height: 38px;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.35;
+}
+.settings-content { min-width: 0; }
+.settings-mobile-select { display: none; }
+
+.table-scroll-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll-container .accounts-table {
+  display: table;
+  width: 100%;
+  overflow: visible;
+  table-layout: fixed;
+}
+.uploads-jobs-table { min-width: 900px; }
+.uploads-jobs-table th:nth-child(1), .uploads-jobs-table td:nth-child(1) { width: 29%; }
+.uploads-jobs-table th:nth-child(2), .uploads-jobs-table td:nth-child(2) { width: 11%; }
+.uploads-jobs-table th:nth-child(3), .uploads-jobs-table td:nth-child(3) { width: 13%; }
+.uploads-jobs-table th:nth-child(4), .uploads-jobs-table td:nth-child(4) { width: 13%; }
+.uploads-jobs-table th:nth-child(5), .uploads-jobs-table td:nth-child(5) { width: 19%; }
+.uploads-jobs-table th:nth-child(6), .uploads-jobs-table td:nth-child(6) { width: 15%; }
+.uploads-jobs-table td { overflow: hidden; }
+.uploads-job-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-job-actions { flex-wrap: nowrap; }
+.upload-job-actions .btn-secondary { white-space: nowrap; }
+.download-available-table { min-width: 560px; }
+.download-available-table .download-size-col { width: 120px; }
+.download-available-table .download-action-col { width: 150px; }
+.download-transfers-table { min-width: 880px; }
+.download-transfers-table .transfer-name-col { width: 25%; }
+.download-transfers-table .transfer-progress-col { width: 25%; }
+.download-transfers-table .transfer-state-col { width: 17%; }
+.download-transfers-table .transfer-updated-col { width: 18%; }
+.download-transfers-table .transfer-actions-col { width: 15%; }
+.download-file-name-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.download-file-name,
+.download-range-meta { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.download-progress-cell { min-width: 0; }
+
+.upload-composer .upload-form { max-width: 640px; }
+.upload-composer .dropzone { max-width: none; }
+.upload-composer .dropzone-hint { max-width: 100%; overflow-wrap: anywhere; }
+.upload-chunk-note { margin: 1px 0 0; }
+.upload-progress-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.upload-progress-summary strong { font-size: 14px; font-variant-numeric: tabular-nums; }
 
 .settings-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; }
 .settings-heading .page-title { margin-bottom: 0; }
@@ -1419,6 +1518,12 @@ input:disabled, select:disabled, textarea:disabled {
   .page-title { font-size: 22px; line-height: 30px; }
   .provider-grid { grid-template-columns: 1fr; }
   .row-action-items { max-width: calc(100vw - 64px); }
+  .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .settings-tabs { display: none; }
+  .settings-mobile-select { display: block; }
+  .settings-mobile-select select { margin: 0; }
+  .share-rules-form { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .share-created-url { padding: 12px; }
 }
 
 /* --- 5.4 Motion: short and functional; honour reduced motion ------------- */

@@ -347,7 +347,8 @@ export const appFr: AppStrings = {
     dropzone: 'Glissez-déposez un fichier ici',
     dropzoneOr: 'ou cliquez pour choisir un fichier sur votre appareil',
     keepHint: 'Le fichier reste sur cet appareil ; seuls ses segments sont envoyés.',
-    chunkSize: 'Taille des segments',
+    maxChunkSize: 'Taille maximale du segment',
+    maxChunkNote: 'Définit la taille maximale de chaque segment. Le dernier peut être plus petit.',
     planPreview: {
       objects: 'Segments logiques / objets distants estimés :',
       shortFinal: '(le dernier segment est plus petit)',
@@ -366,7 +367,7 @@ export const appFr: AppStrings = {
     uploading: 'Envoi en cours…',
     current: 'Envoi en cours',
     progressDetail: '{name} — {done} / {total} segments · {bytes} sur {size}',
-    progressFromServer: '{pct} % (progression rapportée par le serveur)',
+    progressFromServer: 'Progression confirmée par le serveur',
     recent: 'Envois récents',
     none: 'Pas encore d’envois.',
     file: 'Fichier',
@@ -393,8 +394,7 @@ export const appFr: AppStrings = {
     applySuggestion: 'Utiliser des blocs de {mib} Mio',
     manifestFailed: 'Le plan d’envoi n’a pas pu être lu depuis le serveur.',
     chunkFailed: 'Un segment n’a pas pu être envoyé.',
-    resumeHint:
-      'Choisissez ci-dessous l’envoi interrompu, sélectionnez le fichier d’origine, puis utilisez Reprendre.',
+    resumeHint: 'Sélectionnez le fichier d’origine de cet envoi. Sa taille et les segments terminés seront vérifiés avant la reprise.',
     resumeInfoFailed: 'Les informations de reprise de cet envoi n’ont pas pu être lues.',
     resumeReportVerified: {
       one: '{count} segment envoyé précédemment vérifié',
@@ -775,7 +775,7 @@ export const appFr: AppStrings = {
       context: 'Vous avez choisi de configurer {provider} pour qu’un compte puisse être connecté.',
       continueConnecting: 'Continuer à connecter {provider}',
       backToCloudAccounts: 'Retour aux Comptes cloud',
-      experimentalNoConfig: 'Expérimental (sans configuration d’app)',
+      noAppSetupNeeded: 'Aucune configuration d’application requise',
       notConfigured: 'Non configuré',
       savedNotVerified: 'Enregistré — pas encore vérifié',
       verified: 'Vérifié',

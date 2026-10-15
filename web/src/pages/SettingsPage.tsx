@@ -292,7 +292,17 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
       {notice && <div className="card notice-card" role="status"><p>{notice}</p></div>}
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
 
-      <div className="tabs" role="tablist" aria-label={t.settings.tabsAria}>
+      <div className="settings-layout">
+      <div className="settings-nav">
+      <label className="settings-mobile-select">
+        <span className="sr-only">{t.settings.tabsAria}</span>
+        <select value={section} onChange={(e) => setSection(e.target.value as SectionKey)}>
+          {SECTION_KEYS.map((key) => (
+            <option key={key} value={key}>{key === 'providerSetup' ? t.settings.providerSetup.title : t.settings.tab[key]}</option>
+          ))}
+        </select>
+      </label>
+      <div className="tabs settings-tabs" role="tablist" aria-orientation="vertical" aria-label={t.settings.tabsAria}>
         {SECTION_KEYS.map((key) => (
           <button
             key={key}
@@ -300,17 +310,16 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
             type="button"
             role="tab"
             aria-selected={section === key}
-            aria-controls={`settings-panel-${key}`}
+            aria-controls={section === key ? `settings-panel-${key}` : undefined}
             tabIndex={section === key ? 0 : -1}
-            className={`tab${section === key ? ' active' : ''}`}
+            className={`tab settings-tab${section === key ? ' active' : ''}`}
             onClick={() => setSection(key)}
             onKeyDown={(e) => {
-              // FE-12: WAI-ARIA tabs keyboard interaction — Left/Right move
-              // selection and focus together, Home/End jump to the ends.
+              // Vertical tabs move with Up/Down; Home/End jump to the ends.
               const idx = SECTION_KEYS.findIndex((x) => x === key);
               let next: number | null = null;
-              if (e.key === 'ArrowRight') next = (idx + 1) % SECTION_KEYS.length;
-              else if (e.key === 'ArrowLeft') next = (idx - 1 + SECTION_KEYS.length) % SECTION_KEYS.length;
+              if (e.key === 'ArrowDown') next = (idx + 1) % SECTION_KEYS.length;
+              else if (e.key === 'ArrowUp') next = (idx - 1 + SECTION_KEYS.length) % SECTION_KEYS.length;
               else if (e.key === 'Home') next = 0;
               else if (e.key === 'End') next = SECTION_KEYS.length - 1;
               if (next !== null) {
@@ -324,6 +333,8 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
           </button>
         ))}
       </div>
+      </div>
+      <div className="settings-content">
 
       {section === 'general' && (
         <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general">
@@ -756,6 +767,8 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
           </section>
         </div>
       )}
+      </div>
+      </div>
     </>
   );
 }

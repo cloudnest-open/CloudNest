@@ -347,7 +347,8 @@ export const appDe: AppStrings = {
     dropzone: 'Datei hierher ziehen',
     dropzoneOr: 'oder klicken, um eine Datei vom Gerät zu wählen',
     keepHint: 'Die Datei bleibt auf diesem Gerät; nur ihre Chunks werden gesendet.',
-    chunkSize: 'Chunk-Größe',
+    maxChunkSize: 'Maximale Chunk-Größe',
+    maxChunkNote: 'Legt die maximale Größe jedes Upload-Teils fest. Das letzte Teil kann kleiner sein.',
     planPreview: {
       objects: 'Geschätzte logische Chunks / Remote-Objekte:',
       shortFinal: '(der letzte Chunk ist kleiner)',
@@ -366,7 +367,7 @@ export const appDe: AppStrings = {
     uploading: 'Wird hochgeladen…',
     current: 'Aktueller Upload',
     progressDetail: '{name} — {done} / {total} Chunks · {bytes} von {size}',
-    progressFromServer: '{pct}% (vom Server gemeldeter Fortschritt)',
+    progressFromServer: 'Vom Server bestätigter Fortschritt',
     recent: 'Letzte Uploads',
     none: 'Noch keine Uploads.',
     file: 'Datei',
@@ -393,8 +394,7 @@ export const appDe: AppStrings = {
     applySuggestion: 'Stattdessen {mib}-MiB-Blöcke verwenden',
     manifestFailed: 'Der Upload-Plan konnte nicht vom Server gelesen werden.',
     chunkFailed: 'Ein Chunk konnte nicht hochgeladen werden.',
-    resumeHint:
-      'Wähle unten den unterbrochenen Upload aus, wähle die Originaldatei und nutze „Fortsetzen“.',
+    resumeHint: 'Wähle die Originaldatei für diesen Upload. Vor dem Fortsetzen werden Dateigröße und abgeschlossene Chunks überprüft.',
     resumeInfoFailed: 'Die Fortsetzungsinformationen für diesen Upload konnten nicht gelesen werden.',
     resumeReportVerified: {
       one: '{count} zuvor hochgeladenen Chunk verifiziert',
@@ -774,7 +774,7 @@ export const appDe: AppStrings = {
       context: 'Du hast entschieden, {provider} zu konfigurieren, damit ein Konto verbunden werden kann.',
       continueConnecting: '{provider} weiterhin verbinden',
       backToCloudAccounts: 'Zurück zu den Cloud-Konten',
-      experimentalNoConfig: 'Experimentell (keine App-Konfiguration)',
+      noAppSetupNeeded: 'Keine App-Einrichtung erforderlich',
       notConfigured: 'Nicht konfiguriert',
       savedNotVerified: 'Gespeichert — noch nicht verifiziert',
       verified: 'Verifiziert',

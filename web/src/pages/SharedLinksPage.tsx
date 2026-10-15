@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
 import { Badge, formatBytes, formatDateTime, pageList, SkeletonRows } from '../components/ui.js';
@@ -30,7 +30,7 @@ interface FileView {
   state: string;
 }
 
-const FILE_PAGE_SIZE = 20;
+const FILE_PAGE_SIZE = 10;
 
 export function SharedLinksPage() {
   const { t, tf, plural } = useI18n();
@@ -49,6 +49,8 @@ export function SharedLinksPage() {
   const [expiresAt, setExpiresAt] = useState('');
   const [downloadLimit, setDownloadLimit] = useState('');
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
+  const [createdUrlContext, setCreatedUrlContext] = useState<'create' | 'rotate' | null>(null);
+  const createdUrlRef = useRef<HTMLElement>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -115,8 +117,32 @@ export function SharedLinksPage() {
 
   const totalPages = Math.max(1, Math.ceil(filesTotal / FILE_PAGE_SIZE));
 
+  useEffect(() => {
+    if (!createdUrl || !createdUrlContext) return;
+    const frame = window.requestAnimationFrame(() => {
+      const panel = createdUrlRef.current;
+      if (!panel) return;
+      panel.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+        block: 'nearest',
+      });
+      panel.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [createdUrl, createdUrlContext]);
+
   function toggle(fileId: string): void {
     setSelected((prev) => (prev.includes(fileId) ? prev.filter((id) => id !== fileId) : [...prev, fileId]));
+  }
+
+  async function copyUrl(url: string): Promise<void> {
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(url);
+      setNotice(t.shares.urlCopied);
+    } catch {
+      setNotice(t.shares.copyFailed);
+    }
   }
 
   async function create(): Promise<void> {
@@ -128,6 +154,7 @@ export function SharedLinksPage() {
     setError(null);
     setNotice(null);
     setCreatedUrl(null);
+    setCreatedUrlContext(null);
     try {
       const res = await api.createShareLink({
         fileIds: selected,
@@ -137,7 +164,7 @@ export function SharedLinksPage() {
       });
       if (res.status === 201) {
         setCreatedUrl((res.data as { url: string }).url);
-        setNotice(t.shares.create.success);
+        setCreatedUrlContext('create');
         setPassword('');
         setSelected([]);
         setExpiresAt('');
@@ -184,11 +211,14 @@ export function SharedLinksPage() {
     if (!ok) return;
     setLinkBusyId(id);
     setError(null);
+    setNotice(null);
+    setCreatedUrl(null);
+    setCreatedUrlContext(null);
     try {
       const res = await api.rotateShareLink(id);
       if (res.status === 200) {
         setCreatedUrl((res.data as { url: string }).url);
-        setNotice(t.shares.rotate.success);
+        setCreatedUrlContext('rotate');
         await loadLinks();
       } else {
         setError(t.shares.rotate.failed);
@@ -216,28 +246,6 @@ export function SharedLinksPage() {
 
       {notice && <div className="card notice-card" role="status"><p>{notice}</p></div>}
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
-
-      {createdUrl && (
-        <section className="card">
-          <h2>{t.shares.newUrl}</h2>
-          <div className="copy-row">
-            <code className="callback-uri">{createdUrl}</code>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => {
-                void navigator.clipboard.writeText(createdUrl).then(
-                  () => setNotice(t.shares.urlCopied),
-                  () => setNotice(t.shares.copyFailed),
-                );
-              }}
-            >
-              {t.common.copy}
-            </button>
-          </div>
-          <p className="muted small">{t.shares.shownOnce}</p>
-        </section>
-      )}
 
       <section className="card">
         <div className="card-head">
@@ -276,7 +284,7 @@ export function SharedLinksPage() {
                         aria-label={tf(t.table.selectOneAria, { name: file.originalName })}
                         onChange={() => toggle(file.id)}
                       />
-                      <span className="share-file-name">{file.originalName}</span>
+                      <span className="share-file-name" title={file.originalName}>{file.originalName}</span>
                       <span className="muted small">{formatBytes(file.sizeBytes)}</span>
                       {!canShare && <Badge tone={file.state === 'deleted' ? 'muted' : 'warn'}>{stateLabel}</Badge>}
                     </label>
@@ -324,19 +332,35 @@ export function SharedLinksPage() {
           </>
         )}
 
-        <div className="upload-form share-rules-form">
-          <label htmlFor="share-password">{t.shares.create.password}</label>
-          <input id="share-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <label htmlFor="share-expiry">{t.shares.create.expiry}</label>
-          <input id="share-expiry" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
-          <label htmlFor="share-limit">{t.shares.create.limit}</label>
-          <input id="share-limit" type="number" min={1} value={downloadLimit} onChange={(e) => setDownloadLimit(e.target.value)} />
+        <div className="share-rules-form">
+          <div className="share-rule-field">
+            <label htmlFor="share-password">{t.shares.create.password}</label>
+            <input id="share-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </div>
+          <div className="share-rule-field">
+            <label htmlFor="share-expiry">{t.shares.create.expiry}</label>
+            <input id="share-expiry" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+          </div>
+          <div className="share-rule-field">
+            <label htmlFor="share-limit">{t.shares.create.limit}</label>
+            <input id="share-limit" type="number" min={1} value={downloadLimit} onChange={(e) => setDownloadLimit(e.target.value)} />
+          </div>
         </div>
         <div className="actions">
           <button type="button" className="btn-primary" disabled={busy || selected.length === 0} onClick={() => void create()}>
             {busy ? t.shares.create.creating : t.shares.create.submit}
           </button>
         </div>
+        {createdUrl && createdUrlContext === 'create' && (
+          <section ref={createdUrlRef} className="share-created-url" tabIndex={-1} aria-labelledby="share-created-url-title">
+            <h3 id="share-created-url-title">{t.shares.newUrl}</h3>
+            <div className="copy-row">
+              <code className="callback-uri">{createdUrl}</code>
+              <button type="button" className="btn-secondary" onClick={() => void copyUrl(createdUrl)}>{t.common.copy}</button>
+            </div>
+            <p className="muted small">{t.shares.shownOnce}</p>
+          </section>
+        )}
       </section>
 
       <section className="card">
@@ -379,6 +403,16 @@ export function SharedLinksPage() {
               ))}
             </tbody>
           </table>
+        )}
+        {createdUrl && createdUrlContext === 'rotate' && (
+          <section ref={createdUrlRef} className="share-created-url" tabIndex={-1} aria-labelledby="share-rotated-url-title">
+            <h3 id="share-rotated-url-title">{t.shares.newUrl}</h3>
+            <div className="copy-row">
+              <code className="callback-uri">{createdUrl}</code>
+              <button type="button" className="btn-secondary" onClick={() => void copyUrl(createdUrl)}>{t.common.copy}</button>
+            </div>
+            <p className="muted small">{t.shares.shownOnce}</p>
+          </section>
         )}
         <p className="muted small">{t.shares.footnote}</p>
       </section>

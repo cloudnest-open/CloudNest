@@ -113,8 +113,8 @@ export function ProviderSetupCard({ onChanged, onGoToCloudAccounts }: { onChange
     setError(data.error ?? ps.saveFailed);
   }
 
-  const statusPill = (p: ProviderInfo): { text: string; tone: 'ok' | 'bad' | 'warn' } => {
-    if (!p.requiresAppConfig) return { text: ps.experimentalNoConfig, tone: 'warn' };
+  const statusPill = (p: ProviderInfo): { text: string; tone: 'ok' | 'bad' | 'warn' | 'muted' } => {
+    if (!p.requiresAppConfig) return { text: ps.noAppSetupNeeded, tone: 'muted' };
     if (p.verificationStatus === 'not_configured') return { text: ps.notConfigured, tone: 'warn' };
     if (p.verificationStatus === 'saved') return { text: ps.savedNotVerified, tone: 'warn' };
     if (p.verificationStatus === 'verified') return { text: ps.verified, tone: 'ok' };
