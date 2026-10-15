@@ -7,7 +7,7 @@ async function request(
   path: string,
   body?: unknown,
   extraHeaders?: Record<string, string>,
-): Promise<{ status: number; data: unknown }> {
+): Promise<{ status: number; data: unknown; retryAfterMs?: number | null }> {
   // A Blob body is sent raw (chunk upload); anything else is JSON.
   const isBlob = body instanceof Blob;
   const res = await fetch(path, {
@@ -21,13 +21,17 @@ async function request(
     body: body === undefined ? undefined : isBlob ? body : JSON.stringify(body),
     credentials: 'same-origin',
   });
+  // §9 backoff: the server may tell the client exactly how long to wait
+  // (per-account contention answers with Retry-After).
+  const retryAfter = res.headers.get('retry-after');
+  const retrySeconds = retryAfter !== null && /^\d+$/.test(retryAfter.trim()) ? Number(retryAfter.trim()) : null;
   let data: unknown = null;
   try {
     data = await res.json();
   } catch {
     data = null;
   }
-  return { status: res.status, data };
+  return { status: res.status, data, retryAfterMs: retrySeconds !== null ? retrySeconds * 1000 : null };
 }
 
 /** Always fetch a token before the first unsafe request and after auth changes. */
@@ -66,6 +70,8 @@ export interface AccountInfo {
   };
   reserveBytes: number;
   reservedInflightBytes: number;
+  /** Owner-confirmed shared-pool key (§6.2); null = independent quota scope. */
+  quotaScopeKey: string | null;
   lastErrorCode: string | null;
   lastErrorAt: string | null;
   hasCredentials: boolean;
@@ -97,6 +103,9 @@ export const api = {
   updateAccount: (id: string, body: { displayLabel?: string; reserveBytes?: number }) =>
     request('PATCH', `/api/provider-accounts/${id}`, body),
   reconnect: (id: string) => request('POST', `/api/provider-accounts/${id}/reconnect`),
+  /** §6.2 owner-confirmed shared-pool grouping: explicit accountIds, or clear. */
+  setQuotaScope: (provider: string, accountIds: string[] | null) =>
+    request('POST', '/api/provider-accounts/quota-scope', accountIds ? { provider, accountIds } : { provider, clear: true }),
   disconnect: (id: string) => request('POST', `/api/provider-accounts/${id}/disconnect`),
 
   // ---- uploads (Step 4 / M9) ----
@@ -118,7 +127,7 @@ export const api = {
    * One raw logical chunk as the request body — never multipart, never JSON.
    * The server streams and hashes these exact bytes.
    */
-  uploadChunkRaw: (jobId: string, chunkIndex: number, body: Blob): Promise<{ status: number; data: unknown }> =>
+  uploadChunkRaw: (jobId: string, chunkIndex: number, body: Blob) =>
     request('PUT', `/api/uploads/${jobId}/chunks/${chunkIndex}`, body),
 
   // ---- downloads + rename (Step 5 / M10) ----
@@ -143,8 +152,7 @@ export const api = {
   // ---- settings, maintenance, tunnel (Step 6 / M12) ----
   getSettings: () => request('GET', '/api/settings'),
   saveSettings: (patch: Record<string, unknown>) => request('PATCH', '/api/settings', patch),
-  createBackup: () => request('POST', '/api/maintenance/backup'),
-  listBackups: () => request('GET', '/api/maintenance/backups'),
+  createBackup: () => request('POST', '/api/maintenance/backup'),  listBackups: () => request('GET', '/api/maintenance/backups'),
   verifyBackup: (databasePath: string) => request('POST', '/api/maintenance/verify', { databasePath }),
   restoreBackup: (databasePath: string, targetDir: string, confirmOverwrite = false) =>
     request('POST', '/api/maintenance/restore', { databasePath, targetDir, confirmOverwrite }),

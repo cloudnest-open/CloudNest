@@ -387,6 +387,8 @@ export const appDe: AppStrings = {
     selectOriginal: 'Wähle die Originaldatei aus, bevor du diesen Upload fortsetzt.',
     jobGone: 'Dieser Upload-Auftrag existiert nicht mehr.',
     planFailed: 'Der Upload konnte nicht geplant werden.',
+    capacityShortfall: 'Der geprüfte nutzbare Gesamtspeicher reicht um {bytes} nicht aus.',
+    applySuggestion: 'Stattdessen {mib}-MiB-Blöcke verwenden',
     manifestFailed: 'Der Upload-Plan konnte nicht vom Server gelesen werden.',
     chunkFailed: 'Ein Chunk konnte nicht hochgeladen werden.',
     resumeHint:
@@ -525,6 +527,16 @@ export const appDe: AppStrings = {
     connectAccount: '+ Konto verbinden',
     errorLoad: 'Die Cloud-Konten konnten nicht geladen werden. Der Server hat keine echten Daten geliefert.',
     startFailed: 'Die Verbindung konnte nicht gestartet werden.',
+    sharedPool: {
+      badge: 'Geteilter Speicher',
+      manage: 'Kontingent-Pool…',
+      title: 'Geteilter Kontingent-Pool',
+      description: 'Gruppieren Sie Konten, die einen gemeinsamen Anbieter-Speicher teilen (z. B. einen Organisations-Pool). Deren Kapazität wird dann einmal pro Pool gezählt statt einmal pro Konto. Gruppieren Sie nur Konten, die nachweislich geteilten Speicher haben – CloudNest rät nie.',
+      current: 'Diese Konten sind gruppiert: Kapazität wird einmal pro gemeinsamem Pool reserviert.',
+      save: 'Gruppierung speichern',
+      clear: 'Unabhängig schalten',
+      unlimitedLabel: 'Unbegrenzt (vom Anbieter gemeldet)',
+    },
     picker: {
       title: 'Anbieter wählen',
       setup: 'Einrichtung: {status}',
@@ -895,6 +907,7 @@ export const appDe: AppStrings = {
         'Der CloudNest-Ordner für dieses Konto fehlt; versuche eine Kontingent-Aktualisierung oder Neuverbindung.',
       upload_aborted: 'Der Upload wurde abgebrochen.',
       job_paused: 'Dieser Auftrag ist angehalten.',
+      account_busy: 'Dieses Konto hat bereits die maximale Anzahl gleichzeitiger Block-Uploads. CloudNest wiederholt den Versuch automatisch.',
       job_not_found: 'Dieser Upload-Auftrag existiert nicht mehr.',
       fallback: 'Der Upload meldete einen Fehler.',
     },

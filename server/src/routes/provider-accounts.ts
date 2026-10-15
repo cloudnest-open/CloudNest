@@ -33,10 +33,14 @@ function toPublic(row: ProviderAccountRow) {
       usedBytes: used,
       availableBytes,
       status: row.quota_status,
+      /** Provider-documented unlimited quota — shown as "Unlimited", never 0 B. */
+      unlimited: row.quota_unlimited === 1,
       lastCheckedAt: row.last_quota_check_at,
       lastErrorCode: row.last_quota_error_code,
       lastErrorAt: row.last_quota_error_at,
     },
+    /** Owner-confirmed shared-pool key (§6.2); null = independent quota. */
+    quotaScopeKey: row.quota_scope,
     reserveBytes: row.reserve_bytes,
     reservedInflightBytes: row.reserved_inflight_bytes,
     lastErrorCode: row.last_error_code,
@@ -149,6 +153,37 @@ export function providerAccountsRouter(deps: {
       accounts.updateReserve(row.id, body.reserveBytes);
     }
     res.json({ account: toPublic(accounts.get(row.id) as ProviderAccountRow) });
+  });
+
+  // §6.2: shared-quota grouping is ALWAYS an explicit owner confirmation — the
+  // server never infers a shared pool from emails, domains, or identical
+  // numbers. Grouping is per provider and replaces that provider's previous
+  // grouping wholesale; `clear` restores independent quotas.
+  router.post('/api/provider-accounts/quota-scope', adminOnly, csrf.doubleCsrfProtection, (req, res) => {
+    const body = (req.body ?? {}) as { provider?: unknown; accountIds?: unknown; clear?: unknown };
+    if (typeof body.provider !== 'string' || body.provider === '') {
+      res.status(400).json({ error: 'provider is required', code: 'invalid_request' });
+      return;
+    }
+    try {
+      const updated = body.clear === true
+        ? accounts.setQuotaScope(body.provider, null)
+        : Array.isArray(body.accountIds) && body.accountIds.every((id) => typeof id === 'string')
+          ? accounts.setQuotaScope(body.provider, body.accountIds as string[])
+          : null;
+      if (!updated) {
+        res.status(400).json({ error: 'accountIds must be a list of account ids, or clear must be true', code: 'invalid_request' });
+        return;
+      }
+      queries.recordAudit('provider_quota_scope_set', true, body.provider, { count: updated.filter((r) => r.quota_scope !== null).length });
+      res.json({ accounts: updated.map(toPublic) });
+    } catch (err) {
+      if (err instanceof ProviderError) {
+        res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode });
+        return;
+      }
+      throw err;
+    }
   });
 
   router.post('/api/provider-accounts/:id/reconnect', adminOnly, csrf.doubleCsrfProtection, refreshLimiter, (req, res) => {

@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { makeUploadQueries, type JobRow, type FileRow, type AllocationRow } from '../db/upload-queries.js';
 import { makeProviderQueries } from '../db/provider-queries.js';
 import { planChunks, chunkBounds, sanitizeDisplayName, generateObjectKey, ChunkMathError, type ChunkSizeMiB } from './chunk-math.js';
-import { preflight, allocateChunks, assessAccountCapacity, outstandingReservationBytes, type AccountCapacityInput, type RoutingStrategy } from './capacity.js';
+import { preflight, allocateChunks, assessAccountCapacity, outstandingReservationBytes, suggestSmallerChunkSizeMiB, UNLIMITED_USABLE_BYTES, type AccountCapacityInput, type AccountCapacity, type RoutingStrategy } from './capacity.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
@@ -24,7 +24,35 @@ export class UploadError extends Error {
   }
 }
 
+/** Detail payload for a refused plan: truthful, admin-facing, JSON-safe. */
+export interface CapacityInsufficientDetail {
+  /** null = the pool contains a provider-confirmed unlimited quota. */
+  totalUsableBytes: number | null;
+  shortfallBytes: number;
+  /** Why each considered account cannot take work right now (safe codes only). */
+  accounts: Array<{ label: string; reasonCode: string | null; usableBytes: number | null }>;
+  /** Largest supported smaller chunk size that would place the whole file. */
+  suggestedChunkSizeMiB: number | null;
+}
+
+/**
+ * A plan that cannot reserve every chunk. §7.1(5)/§7.1(7): the client gets the
+ * shortfall and, on pure placement fragmentation, the largest feasible smaller
+ * chunk size as a one-click suggestion — never a silent settings change and
+ * never a bare "capacity_insufficient" with no reason.
+ */
+export class CapacityInsufficientError extends UploadError {
+  readonly detail: CapacityInsufficientDetail;
+  constructor(detail: CapacityInsufficientDetail) {
+    super('capacity_insufficient', 409);
+    this.detail = detail;
+  }
+}
+
 const PROVIDER_UPLOAD_READY = new Set(['google_drive', 'dropbox', 'onedrive', 'pcloud']);
+
+/** §9: approved Step-4 per-account cap for chunks in flight (global cap is client-side). */
+export const MAX_PER_ACCOUNT_INFLIGHT = 2;
 
 /**
  * Provider checksum algorithms that are the SAME function as our own SHA-256,
@@ -118,7 +146,8 @@ export class UploadService {
   private capacityInputs(): AccountCapacityInput[] {
     const accounts = this.providerQ.listAccounts.all() as Array<{
       id: string; provider: string; display_label: string; status: string;
-      quota_status: string; quota_total_bytes: number | null; used_bytes: number | null; reserve_bytes: number;
+      quota_status: string; quota_total_bytes: number | null; used_bytes: number | null;
+      quota_unlimited: 0 | 1; quota_scope: string | null; reserve_bytes: number;
     }>;
     const active = this.q.listAllActiveAllocations.all() as Array<{ provider_account_id: string; size_bytes: number; state: string }>;
     return accounts
@@ -131,6 +160,8 @@ export class UploadService {
         quotaStatus: a.quota_status as 'current' | 'stale' | 'unknown',
         quotaTotalBytes: a.quota_total_bytes,
         quotaUsedBytes: a.used_bytes,
+        quotaUnlimited: a.quota_unlimited === 1,
+        quotaScopeKey: a.quota_scope,
         reserveBytes: a.reserve_bytes,
         outstandingReservationBytes: outstandingReservationBytes(active, a.id),
       }));
@@ -182,21 +213,32 @@ export class UploadService {
     }
 
     const capacity = preflight(this.capacityInputs(), plan.fileSizeBytes);
-    if (!capacity.canProceed) {
-      throw new UploadError('capacity_insufficient', 409);
-    }
-
     const chunkDescriptors: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number }> = [];
     for (let i = 0; i < plan.chunkCount; i++) {
       const b = chunkBounds(plan, i);
       chunkDescriptors.push({ chunkIndex: b.chunkIndex, offsetBytes: b.offsetBytes, sizeBytes: b.sizeBytes });
     }
-    const assignments = allocateChunks(
-      chunkDescriptors,
-      capacity.assessment.eligible,
-      req.routingStrategy ?? 'capacity-aware',
-    );
-    if (!assignments) throw new UploadError('capacity_insufficient', 409);
+    const assignments = capacity.canProceed
+      ? allocateChunks(chunkDescriptors, capacity.assessment.eligible, req.routingStrategy ?? 'capacity-aware')
+      : null;
+    if (!capacity.canProceed || !assignments) {
+      // §7.1(5): suggest the largest supported smaller chunk size ONLY when the
+      // total pool is sufficient but this chunk size cannot be placed (pure
+      // fragmentation). A real shortfall is not helped by smaller chunks.
+      const suggested = capacity.canProceed && !assignments
+        ? suggestSmallerChunkSizeMiB(plan.fileSizeBytes, req.chunkSizeMiB, this.capacityInputs(), req.routingStrategy ?? 'capacity-aware')
+        : null;
+      throw new CapacityInsufficientError({
+        totalUsableBytes: capacity.totalUsableBytes === UNLIMITED_USABLE_BYTES ? null : capacity.totalUsableBytes,
+        shortfallBytes: capacity.shortfallBytes,
+        accounts: capacity.assessment.accounts.map((a: AccountCapacity) => ({
+          label: a.displayLabel,
+          reasonCode: a.reasonCode,
+          usableBytes: a.usableBytes === UNLIMITED_USABLE_BYTES ? null : a.usableBytes,
+        })),
+        suggestedChunkSizeMiB: suggested,
+      });
+    }
 
     // one transaction: file + job + every allocation, or nothing at all
     const now = new Date().toISOString();
@@ -344,6 +386,20 @@ export class UploadService {
     });
   }
 
+  /**
+   * §9 per-account concurrency bound: at most two of one account's chunks may
+   * be in flight at once (the approved Step-4 plan's per-account cap). The
+   * check happens BEFORE the attempt row exists, so a 429 here is pure
+   * contention — it creates no attempt, releases nothing, and the client must
+   * simply back off and retry the same chunk later.
+   */
+  private assertAccountCanAccept(accountId: string, allocationId: string): void {
+    const row = this.q.countUploadingForAccount.get(accountId, allocationId) as { n: number };
+    if (row.n >= MAX_PER_ACCOUNT_INFLIGHT) {
+      throw new UploadError('account_busy', 429);
+    }
+  }
+
   private recomputeReservedInflight(jobId: string): void {
     const allocs = this.q.listAllAllocationsForJob.all(jobId) as Array<{ provider_account_id: string; size_bytes: number; state: string }>;
     const perAccount = new Map<string, number>();
@@ -394,6 +450,14 @@ export class UploadService {
 
     const now = new Date().toISOString();
     const attempt = this.q.getAttemptByObjectKey.get(input.objectKey) as { id: string } | undefined;
+    // §6.1 reconciliation evidence: the provider-observed usage at commit time.
+    // A later CURRENT observation must show usage grown by at least the chunk
+    // size before this reservation may release. Unknown quota at commit stores
+    // NULL, which keeps the reservation forever (conservative).
+    const accountAtCommit = this.providerQ.getAccount.get(input.accountId) as
+      | { used_bytes: number | null }
+      | undefined;
+    const usedAtCommit = accountAtCommit?.used_bytes ?? null;
     const txn = this.db.transaction(() => {
       if (attempt) {
         this.q.markAttemptUploadedUncommitted.run({
@@ -427,6 +491,7 @@ export class UploadService {
       });
       if (attempt) this.q.markAttemptCommitted.run(now, attempt.id);
       this.q.markAllocationUploadedPendingQuota.run(now, allocation.id);
+      this.q.setAllocationCommitBaseline.run(usedAtCommit, allocation.id);
     });
     txn();
 
@@ -516,12 +581,28 @@ export class UploadService {
     this.q.bumpJobRetry.run({ id: input.jobId, updated_at: now });
   }
 
+  /**
+   * §7.3: a provider "insufficient storage" rejection proves the quota
+   * observation is stale. The account's quota is marked stale immediately so
+   * no NEW chunk is planned onto it until a fresh observation arrives.
+   */
+  markQuotaStale(accountId: string, safeCode: string): void {
+    const now = new Date().toISOString();
+    this.db.prepare(
+      `UPDATE provider_accounts SET quota_status = 'stale', last_quota_error_code = ?,
+        last_quota_error_at = ?, updated_at = ? WHERE id = ?`,
+    ).run(safeCode, now, now, accountId);
+  }
+
   /** Create the attempt row before any bytes are sent (crash recovery anchor). */
   beginAttempt(input: { jobId: string; chunkIndex: number; accountId: string }): { attemptId: string; objectKey: string } {
     const job = this.q.getJob.get(input.jobId) as JobRow | undefined;
     if (!job?.file_id) throw new UploadError('job_not_found', 404);
     const allocation = this.q.getAllocation.get(input.jobId, input.chunkIndex) as AllocationRow | undefined;
     if (!allocation) throw new UploadError('invalid_upload_metadata', 400);
+    // contention gate BEFORE any durable state changes: a 429 here leaves no
+    // attempt row and no state transition to undo
+    this.assertAccountCanAccept(input.accountId, allocation.id);
     const attemptId = this.q.newId();
     const objectKey = generateObjectKey(job.file_id, input.chunkIndex, attemptId);
     const now = new Date().toISOString();
@@ -688,8 +769,14 @@ export class UploadService {
     await adapter.deleteAppObject(bundle, remoteRoot?.remote_root_id ?? '', remoteObjectId, appConfig);
   }
 
-  /** Startup recovery: running jobs become safely paused; reconcile reservations. */
-  recoverOnStartup(): { recovered: number; reservationsRecomputed: number } {
+  /**
+   * Startup recovery: running jobs become safely paused; reconcile reservations
+   * and in-flight attempts. §10: after a restart, an attempt that was mid-flight
+   * must not linger as "uploading" forever — without a known remote object it
+   * becomes a plain failure; with one, it may hold a live remote object and
+   * becomes a durable cleanup obligation that retryPendingCleanups closes.
+   */
+  recoverOnStartup(): { recovered: number; reservationsRecomputed: number; attemptsReconciled: number } {
     const running = this.q.runningJobs.all() as unknown as JobRow[];
     const now = new Date().toISOString();
     const txn = this.db.transaction(() => {
@@ -700,9 +787,29 @@ export class UploadService {
       }
     });
     txn();
+    const inFlight = this.db.prepare(
+      "SELECT id, remote_object_id FROM upload_attempts WHERE state IN ('uploading','uploaded_uncommitted')",
+    ).all() as Array<{ id: string; remote_object_id: string | null }>;
+    const reconcile = this.db.transaction(() => {
+      for (const attempt of inFlight) {
+        if (attempt.remote_object_id) {
+          // a remote object may exist that CloudNest never confirmed: the
+          // obligation is recorded before anything else so a crash cannot
+          // forget it (same rule as UL-3)
+          this.q.markAttemptCleanupPending.run({
+            id: attempt.id, safe_error_code: 'recovered_after_restart', updated_at: now,
+          });
+        } else {
+          this.q.markAttemptFailed.run({
+            id: attempt.id, safe_error_code: 'recovered_after_restart', bytes_received: 0, updated_at: now,
+          });
+        }
+      }
+    });
+    reconcile();
     this.recomputeAllReservations();
     const accounts = this.providerQ.listAccounts.all() as Array<{ id: string }>;
-    return { recovered: running.length, reservationsRecomputed: accounts.length };
+    return { recovered: running.length, reservationsRecomputed: accounts.length, attemptsReconciled: inFlight.length };
   }
 
   /**
@@ -1001,6 +1108,7 @@ export class UploadService {
     accountsDetailed: Array<{
       id: string; provider: string; displayLabel: string; status: string; quotaStatus: string;
       quotaTotalBytes: number | null; quotaUsedBytes: number | null;
+      quotaUnlimited: boolean; quotaScopeKey: string | null;
       reserveBytes: number; outstandingBytes: number;
       usableBytes: number | null; lastQuotaCheckAt: string | null;
     }>;
@@ -1014,7 +1122,8 @@ export class UploadService {
   } {
     const rows = this.providerQ.listAccounts.all() as Array<{
       id: string; provider: string; display_label: string; status: string; quota_status: string;
-      quota_total_bytes: number | null; used_bytes: number | null; reserve_bytes: number;
+      quota_total_bytes: number | null; used_bytes: number | null;
+      quota_unlimited: 0 | 1; quota_scope: string | null; reserve_bytes: number;
       last_quota_check_at: string | null;
     }>;
     const activeAllocations = this.q.listAllActiveAllocations.all() as Array<{
@@ -1025,8 +1134,6 @@ export class UploadService {
       const quotaKnown =
         a.status === 'connected' &&
         a.quota_status === 'current' &&
-        typeof a.quota_total_bytes === 'number' &&
-        typeof a.used_bytes === 'number' &&
         // an experimental/not-ready provider must never be presented as usable
         // space, even when its quota is current
         PROVIDER_UPLOAD_READY.has(a.provider);
@@ -1038,6 +1145,8 @@ export class UploadService {
         quotaStatus: a.quota_status as 'current' | 'stale' | 'unknown',
         quotaTotalBytes: a.quota_total_bytes,
         quotaUsedBytes: a.used_bytes,
+        quotaUnlimited: a.quota_unlimited === 1,
+        quotaScopeKey: a.quota_scope,
         reserveBytes: a.reserve_bytes,
         outstandingReservationBytes: outstandingBytes,
       });
@@ -1049,11 +1158,15 @@ export class UploadService {
         quotaStatus: a.quota_status,
         quotaTotalBytes: a.quota_total_bytes,
         quotaUsedBytes: a.used_bytes,
+        quotaUnlimited: a.quota_unlimited === 1,
+        quotaScopeKey: a.quota_scope,
         reserveBytes: a.reserve_bytes,
         outstandingBytes,
         // usable is claimed only where the uploader's own preflight can vouch
-        // for it; otherwise null and the UI shows "Unknown", never 0
-        usableBytes: quotaKnown ? assessed.usableBytes : null,
+        // for it; otherwise null and the UI shows "Unknown", never 0. An
+        // unlimited quota is real evidence but never a numeric value: the UI
+        // labels it "Unlimited" instead of summing an invented total.
+        usableBytes: quotaKnown && a.quota_unlimited !== 1 ? assessed.usableBytes : null,
         lastQuotaCheckAt: a.last_quota_check_at,
       };
     });

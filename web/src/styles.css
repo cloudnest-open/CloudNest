@@ -2154,3 +2154,8 @@ input:disabled, select:disabled, textarea:disabled {
   .entry-feature-icon { width: 46px; height: 46px; }
   .entry-feature-icon svg { width: 20px; height: 20px; }
 }
+
+/* §6.2 shared-quota pool editor (Cloud Accounts) */
+.scope-member-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
+.scope-member { display: flex; align-items: center; gap: 8px; }
+.scope-member input[type='checkbox'] { width: 20px; height: 20px; }

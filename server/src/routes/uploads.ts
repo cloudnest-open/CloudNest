@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { UploadService, PlanRequest } from '../uploads/upload-service.js';
-import { UploadError, compareProviderChecksum } from '../uploads/upload-service.js';
+import { UploadError, CapacityInsufficientError, compareProviderChecksum } from '../uploads/upload-service.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import { assertAllowedChunkSizeMiB, DEFAULT_CHUNK_SIZE_MIB, mibToBytes, ChunkMathError } from '../uploads/chunk-math.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
@@ -21,7 +21,20 @@ import { ProviderError } from '../providers/types.js';
 
 const MAX_CHUNK_BYTES = mibToBytes(64);
 
+/**
+ * §10: adapter errors that leave the remote outcome UNKNOWN — the upload may
+ * or may not have been accepted. For these, the handler probes the provider
+ * with the attempt's app-generated key before recording the failure.
+ */
+const AMBIGUOUS_UPLOAD_CODES = new Set(['provider_unavailable', 'upload_aborted']);
+
 function uploadErrorResponse(res: Response, err: unknown): void {
+  if (err instanceof CapacityInsufficientError) {
+    // §7.1(7): a refused plan explains itself — shortfall, per-account safe
+    // reasons, and (on pure fragmentation) the largest feasible smaller chunk.
+    res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode, ...err.detail });
+    return;
+  }
   if (err instanceof UploadError) {
     res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode });
     return;
@@ -53,6 +66,28 @@ export function rawChunkRouter(deps: {
     message: { error: 'provider_rate_limited' },
   });
 
+  /**
+   * §10: after an ambiguous adapter error, ask the provider whether the
+   * attempt's object exists anyway (lookup by the CloudNest-generated key).
+   * Returns the remote id when found, else null. Never guesses success: a
+   * found object becomes a durable cleanup obligation, not a completed chunk.
+   */
+  async function probeAmbiguousObject(providerId: string, accountId: string, rootId: string | null, objectKey: string): Promise<string | null> {
+    if (!rootId) return null;
+    try {
+      const adapter = getAdapter(providerId);
+      if (!adapter?.findAppObjectByKey) return null;
+      const bundle = deps.uploads.loadBundleFor(accountId);
+      const appConfig = providerId === 'mega' || providerId === 'pcloud'
+        ? undefined
+        : deps.store.getConfig(providerId)?.config ?? undefined;
+      const found = await adapter.findAppObjectByKey(bundle, rootId, objectKey, appConfig);
+      return found?.remoteObjectId ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   router.put(
     '/api/uploads/:jobId/chunks/:chunkIndex',
     adminOnly,
@@ -80,6 +115,12 @@ export function rawChunkRouter(deps: {
           return;
         }
       }
+      // durable-state tracking that must survive into the catch block
+      let objectKey: string | null = null;
+      let uploadedAccountId: string | null = null;
+      let uploadedProviderId = '';
+      let rootIdForProbe: string | null = null;
+      let failureRecorded = false;
       try {
         const job = deps.uploads.getJob(jobId);
         if (!job) throw new UploadError('job_not_found', 404);
@@ -94,15 +135,19 @@ export function rawChunkRouter(deps: {
         const accountRow = deps.uploads.getAccountForUpload(allocation.provider_account_id);
         if (!accountRow) throw new UploadError('account_needs_reauth', 409);
 
-        const { attemptId, objectKey } = deps.uploads.beginAttempt({
+        const { attemptId, objectKey: key } = deps.uploads.beginAttempt({
           jobId, chunkIndex, accountId: allocation.provider_account_id,
         });
+        objectKey = key;
+        uploadedAccountId = allocation.provider_account_id;
+        uploadedProviderId = accountRow.provider;
 
         const adapter = getAdapter(accountRow.provider);
         if (!adapter?.uploadObjectStream || !adapter.capabilities.upload) {
           throw new UploadError('provider_unavailable', 502);
         }
         const rootId = await deps.uploads.ensureOrCreateRoot(accountRow.id);
+        rootIdForProbe = rootId;
         const bundle = deps.uploads.loadBundleFor(accountRow.id);
         const appConfig = accountRow.provider === 'mega' || accountRow.provider === 'pcloud'
           ? undefined
@@ -128,6 +173,7 @@ export function rawChunkRouter(deps: {
             jobId, chunkIndex, accountId: allocation.provider_account_id, objectKey,
             safeCode: 'chunk_size_mismatch', bytesReceived: bytes, remoteObjectId: ref.remoteObjectId,
           });
+          failureRecorded = true;
           throw new UploadError('chunk_size_mismatch', 400);
         }
         // M12.a `upload.verifyIntegrity`: when enabled, a provider checksum is
@@ -141,6 +187,7 @@ export function rawChunkRouter(deps: {
               jobId, chunkIndex, accountId: allocation.provider_account_id, objectKey,
               safeCode: 'chunk_hash_mismatch', bytesReceived: bytes, remoteObjectId: ref.remoteObjectId,
             });
+            failureRecorded = true;
             throw new UploadError('chunk_hash_mismatch', 502);
           }
         }
@@ -160,6 +207,34 @@ export function rawChunkRouter(deps: {
           fileCompleted: result.fileCompleted,
         });
       } catch (err) {
+        // §9 contention: the per-account in-flight gate rejects BEFORE any
+        // durable state changes. Pure backpressure — no failure is recorded,
+        // the client simply waits and re-PUTs the same chunk.
+        if (err instanceof UploadError && err.safeCode === 'account_busy') {
+          res.set('Retry-After', '2');
+          uploadErrorResponse(res, err);
+          return;
+        }
+        // a begun attempt must never linger unresolved: record the outcome
+        // durably so retry/restart reconcile it instead of forgetting it
+        if (objectKey && uploadedAccountId && !failureRecorded) {
+          const safeCode = err instanceof UploadError || err instanceof ProviderError
+            ? err.safeCode
+            : 'upload_failed';
+          let remoteObjectId: string | null = null;
+          if (err instanceof ProviderError && AMBIGUOUS_UPLOAD_CODES.has(err.safeCode)) {
+            remoteObjectId = await probeAmbiguousObject(uploadedProviderId, uploadedAccountId, rootIdForProbe, objectKey);
+          }
+          deps.uploads.recordFailure({
+            jobId, chunkIndex, accountId: uploadedAccountId, objectKey,
+            safeCode, bytesReceived: 0, remoteObjectId,
+          });
+          // §7.3: an insufficient-storage rejection makes the quota observation
+          // stale so no new chunk is planned onto that account until refresh
+          if (safeCode === 'provider_no_space') {
+            deps.uploads.markQuotaStale(uploadedAccountId, safeCode);
+          }
+        }
         uploadErrorResponse(res, err);
       }
     },

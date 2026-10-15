@@ -29,9 +29,24 @@ const DEFAULT_CHUNK_MIB = 64;
  * clamped client-side; this constant only covers a request that failed.
  */
 const DEFAULT_GLOBAL_WORKERS = 4;
-/** At most two chunks in flight per provider account. */
+/** At most two chunks in flight per provider account (server-enforced: a third PUT answers 429 account_busy). */
 const MAX_PER_ACCOUNT_WORKERS = 2;
 const OBJECT_COUNT_WARN_THRESHOLD = 1000;
+/**
+ * §9: transient chunk failures get bounded exponential backoff with jitter,
+ * honouring the server's Retry-After. Permanent errors (auth, quota, size
+ * mismatch) stop immediately — the safe code tells the owner what to fix.
+ */
+const MAX_CHUNK_ATTEMPTS = 5;
+const TRANSIENT_UPLOAD_CODES = new Set(['provider_rate_limited', 'account_busy', 'provider_unavailable', 'upload_failed']);
+
+/** The server's §7.1 detail for a refused plan. */
+interface CapacityDetail {
+  totalUsableBytes: number | null;
+  shortfallBytes: number;
+  accounts: Array<{ label: string; reasonCode: string | null; usableBytes: number | null }>;
+  suggestedChunkSizeMiB: number | null;
+}
 
 interface JobView {
   jobId: string;
@@ -82,6 +97,8 @@ export function UploadsPage() {
   const [uploading, setUploading] = useState(false);
   const [verifiedChunks, setVerifiedChunks] = useState<number | null>(null);
   const [resumeReport, setResumeReport] = useState<string | null>(null);
+  /** §7.1(5): the server's largest feasible smaller chunk size after a refusal. */
+  const [suggestedChunkMiB, setSuggestedChunkMiB] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const runningRef = useRef(false);
   // Drag-and-drop surface (design pack §9): the hidden input still carries the
@@ -135,6 +152,7 @@ export function UploadsPage() {
     setErrorCode(null);
     setNotice(null);
     setResumeReport(null);
+    setSuggestedChunkMiB(null);
     try {
       const res = await api.planUpload(
         {
@@ -156,12 +174,34 @@ export function UploadsPage() {
         );
       } else {
         const described = describeError(res.data, t.uploads.planFailed);
-        setError(described.text);
+        // §7.1(7): the refusal explains itself — exact shortfall and, on pure
+        // placement fragmentation, a one-click feasible smaller chunk size.
+        if (described.code === 'capacity_insufficient') {
+          const detail = (res.data as CapacityDetail | null) ?? null;
+          if (detail && detail.shortfallBytes > 0) {
+            setError(`${described.text} ${tf(t.uploads.capacityShortfall, { bytes: formatBytes(detail.shortfallBytes) })}`);
+          } else {
+            setError(described.text);
+          }
+          if (detail?.suggestedChunkSizeMiB) {
+            setSuggestedChunkMiB(detail.suggestedChunkSizeMiB);
+          }
+        } else {
+          setError(described.text);
+        }
         setErrorCode(described.code || null);
       }
     } finally {
       setBusy(false);
     }
+  }
+
+  /** §7.1(5): apply the suggested size for THIS upload only — nothing is persisted. */
+  function applySuggestedChunk(): void {
+    if (!suggestedChunkMiB || !selected) return;
+    setChunkMiB(suggestedChunkMiB);
+    setSuggestedChunkMiB(null);
+    void createPlan();
   }
 
   /** Real progress straight from the durable job row. */
@@ -243,12 +283,24 @@ export function UploadsPage() {
         while (cursor < indices.length) {
           if (abortRef.current?.signal.aborted) return;
           const chunkIndex = indices[cursor++] as number;
-          // at most two chunks in flight per account is enforced server-side by
-          // the persisted allocation; the client keeps its own global bound
+          // the server enforces the per-account in-flight cap: a third
+          // concurrent PUT on one account answers 429 `account_busy` with
+          // Retry-After, and this loop backs off and re-PUTs the same chunk
           const geo = geometry.get(chunkIndex) ?? fallbackGeometry(chunkIndex);
           if (geo.sizeBytes <= 0 || geo.offsetBytes >= selected.size) continue;
           const slice = selected.slice(geo.offsetBytes, geo.offsetBytes + geo.sizeBytes);
-          const res = await api.uploadChunkRaw(id, chunkIndex, slice);
+          // §9: bounded exponential backoff with jitter for transient errors;
+          // permanent errors break out immediately with their safe code
+          let res = await api.uploadChunkRaw(id, chunkIndex, slice);
+          for (let attempt = 1; res.status !== 200 && attempt < MAX_CHUNK_ATTEMPTS; attempt++) {
+            const code = ((res.data ?? {}) as { code?: string }).code ?? '';
+            const transient = res.status === 429 || res.status >= 500 || TRANSIENT_UPLOAD_CODES.has(code);
+            if (!transient || abortRef.current?.signal.aborted) break;
+            const delayMs = res.retryAfterMs ?? Math.min(8000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            if (abortRef.current?.signal.aborted) return;
+            res = await api.uploadChunkRaw(id, chunkIndex, slice);
+          }
           if (res.status !== 200) {
             const described = describeError(res.data, t.uploads.chunkFailed);
             setError(described.text);
@@ -431,6 +483,11 @@ export function UploadsPage() {
         <div className="card error-card" role="alert">
           <p>{error}</p>
           {errorCode && <p className="muted small">{tf(t.uploads.codeLabel, { code: errorCode })}</p>}
+          {suggestedChunkMiB && (
+            <button type="button" className="btn-secondary btn-compact" disabled={busy} onClick={applySuggestedChunk}>
+              {tf(t.uploads.applySuggestion, { mib: suggestedChunkMiB })}
+            </button>
+          )}
         </div>
       )}
 

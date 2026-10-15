@@ -16,6 +16,13 @@ export interface NormalizedQuota {
   totalBytes: number | null;
   usedBytes: number | null;
   status: 'current' | 'stale' | 'unknown';
+  /**
+   * True only when the provider's own documented semantics define the observed
+   * response as unlimited quota (e.g. Google Drive omits storageQuota.limit
+   * when the user has unlimited storage). Never inferred from an API error, a
+   * missing permission, or an unrecognized response.
+   */
+  unlimited?: boolean;
   safeErrorCode?: 'quota_unavailable' | 'provider_rate_limited' | 'provider_unavailable';
 }
 
@@ -52,7 +59,8 @@ export type ProviderSafeErrorCode =
   | 'quota_unavailable'
   | 'provider_rate_limited'
   | 'provider_unavailable'
-  | 'unsupported_security_mode';
+  | 'unsupported_security_mode'
+  | 'invalid_request';
 
 export class ProviderError extends Error {
   readonly safeCode: ProviderSafeErrorCode;

@@ -69,6 +69,10 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   // Set when the user returned from Provider Setup having deliberately chosen
   // "Continue connecting {provider}": we then resume that provider's connect.
   const [continueProvider, setContinueProvider] = useState<string | null>(null);
+  // §6.2 shared-quota pool editor: the account whose provider pool is being
+  // grouped, plus the currently selected member set (always includes it).
+  const [scopeTarget, setScopeTarget] = useState<AccountInfo | null>(null);
+  const [scopeSelection, setScopeSelection] = useState<string[]>([]);
 
   // On arrival, honour a pending "continue connecting" hand-off from Settings.
   useEffect(() => {
@@ -210,6 +214,37 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       const data = res.data as { warning?: string | null };
       if (data.warning) setNotice(data.warning);
       else setNotice(t.accounts.disconnect.done);
+      await reload();
+    });
+  }
+
+  /** §6.2: open the shared-pool editor preselected with the account's current group. */
+  function openScopeEditor(account: AccountInfo) {
+    const sameProvider = accounts.filter((a) => a.provider === account.provider && a.status === 'connected');
+    const currentKey = account.quotaScopeKey;
+    const preselected = currentKey
+      ? sameProvider.filter((a) => a.quotaScopeKey === currentKey).map((a) => a.id)
+      : [account.id];
+    setScopeTarget(account);
+    setScopeSelection(preselected);
+  }
+
+  function toggleScopeMember(id: string) {
+    setScopeSelection((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function saveScope(clear: boolean) {
+    if (!scopeTarget) return;
+    const provider = scopeTarget.provider;
+    const ids = clear ? null : [...new Set([scopeTarget.id, ...scopeSelection])];
+    await withBusy('__scope__', async () => {
+      const res = await api.setQuotaScope(provider, ids);
+      if (res.status !== 200) {
+        const data = (res.data ?? {}) as { error?: string };
+        setError(data.error ?? t.accounts.sharedPool.title);
+        return;
+      }
+      setScopeTarget(null);
       await reload();
     });
   }
@@ -397,6 +432,10 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                       <span className={`state state-${a.quota.status === 'current' ? 'ok' : 'warn'}`}>
                         {(t.states.quota as Record<string, string | undefined>)[a.quota.status] ?? a.quota.status}
                       </span>
+                      {a.quota.totalBytes === null && a.quota.status === 'current' && (
+                        <div className="muted small">{t.accounts.sharedPool.unlimitedLabel}</div>
+                      )}
+                      {a.quotaScopeKey && <span className="tag">{t.accounts.sharedPool.badge}</span>}
                       {a.quota.lastCheckedAt && (
                         <div className="muted small">{tf(t.accounts.list.checked, { when: formatDateTime(a.quota.lastCheckedAt) })}</div>
                       )}
@@ -406,6 +445,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                       <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void refreshOne(a.id)}>{t.accounts.list.refreshQuota}</button>
                       <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void rename(a)}>{t.accounts.list.rename}</button>
                       <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void reconnect(a)}>{t.accounts.list.reconnect}</button>
+                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => openScopeEditor(a)}>{t.accounts.sharedPool.manage}</button>
                       <button type="button" className="btn-danger" disabled={busyId === a.id} onClick={() => void disconnect(a)}>{t.accounts.list.disconnect}</button>
                     </td>
                   </tr>
@@ -416,6 +456,42 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
         )}
         <p className="muted small">{t.accounts.list.footnote}</p>
       </section>
+
+      {scopeTarget && (
+        <Dialog title={t.accounts.sharedPool.title} onClose={() => setScopeTarget(null)}>
+          <p className="muted">{t.accounts.sharedPool.description}</p>
+          <p className="muted small">{t.accounts.sharedPool.current}</p>
+          <div className="scope-member-list">
+            {accounts
+              .filter((a) => a.provider === scopeTarget.provider && a.status === 'connected')
+              .map((a) => (
+                <label key={a.id} className="scope-member">
+                  <input
+                    type="checkbox"
+                    checked={scopeSelection.includes(a.id) || a.id === scopeTarget.id}
+                    disabled={a.id === scopeTarget.id || busyId === '__scope__'}
+                    onChange={() => toggleScopeMember(a.id)}
+                  />
+                  <span>{a.displayLabel}</span>
+                  {a.quotaScopeKey && <span className="tag">{t.accounts.sharedPool.badge}</span>}
+                </label>
+              ))}
+          </div>
+          <div className="actions">
+            <button type="button" className="btn-secondary" disabled={busyId === '__scope__'} onClick={() => void saveScope(true)}>
+              {t.accounts.sharedPool.clear}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={busyId === '__scope__' || scopeSelection.length < 1}
+              onClick={() => void saveScope(false)}
+            >
+              {t.accounts.sharedPool.save}
+            </button>
+          </div>
+        </Dialog>
+      )}
     </>
   );
 }

@@ -12,6 +12,10 @@ export interface ProviderAccountRow {
   quota_total_bytes: number | null;
   used_bytes: number | null;
   quota_status: 'current' | 'stale' | 'unknown';
+  /** Provider-documented unlimited quota (1) vs finite/unknown (0). */
+  quota_unlimited: 0 | 1;
+  /** Owner-confirmed shared-pool key; NULL = independent quota scope. */
+  quota_scope: string | null;
   reserve_bytes: number;
   reserved_inflight_bytes: number;
   last_quota_check_at: string | null;
@@ -35,16 +39,17 @@ export function makeProviderQueries(db: Database.Database) {
     insertAccount: db.prepare(
       `INSERT INTO provider_accounts
         (id, provider, display_label, account_identifier, status, quota_total_bytes, used_bytes, quota_status,
-         reserve_bytes, reserved_inflight_bytes, last_quota_check_at, last_error_code, last_error_at,
+         quota_unlimited, reserve_bytes, reserved_inflight_bytes, last_quota_check_at, last_error_code, last_error_at,
          credential_ciphertext, credential_nonce, credential_auth_tag, credential_key_version, created_at, updated_at)
        VALUES (@id, @provider, @display_label, @account_identifier, @status, @quota_total_bytes, @used_bytes, @quota_status,
-         0, 0, @last_quota_check_at, @last_error_code, @last_error_at,
+         @quota_unlimited, 0, 0, @last_quota_check_at, @last_error_code, @last_error_at,
          @credential_ciphertext, @credential_nonce, @credential_auth_tag, @credential_key_version, @created_at, @updated_at)`,
     ),
     updateConnection: db.prepare(
       `UPDATE provider_accounts SET
         display_label = @display_label, status = @status, quota_total_bytes = @quota_total_bytes,
-        used_bytes = @used_bytes, quota_status = @quota_status, last_quota_check_at = @last_quota_check_at,
+        used_bytes = @used_bytes, quota_status = @quota_status, quota_unlimited = @quota_unlimited,
+        last_quota_check_at = @last_quota_check_at,
         last_error_code = @last_error_code, last_error_at = @last_error_at,
         credential_ciphertext = @credential_ciphertext, credential_nonce = @credential_nonce,
         credential_auth_tag = @credential_auth_tag, credential_key_version = @credential_key_version,
@@ -54,9 +59,16 @@ export function makeProviderQueries(db: Database.Database) {
     updateQuota: db.prepare(
       `UPDATE provider_accounts SET
         quota_total_bytes = @quota_total_bytes, used_bytes = @used_bytes, quota_status = @quota_status,
+        quota_unlimited = @quota_unlimited,
         last_quota_check_at = @last_quota_check_at, last_quota_error_code = @last_quota_error_code,
         last_quota_error_at = @last_quota_error_at, updated_at = @updated_at
        WHERE id = @id`,
+    ),
+    setQuotaScope: db.prepare(
+      'UPDATE provider_accounts SET quota_scope = @scope, updated_at = @updated_at WHERE id = @id',
+    ),
+    clearQuotaScopeForProvider: db.prepare(
+      'UPDATE provider_accounts SET quota_scope = NULL, updated_at = @updated_at WHERE provider = @provider',
     ),
     updateStatus: db.prepare(
       'UPDATE provider_accounts SET status = @status, last_error_code = @last_error_code, last_error_at = @last_error_at, updated_at = @updated_at WHERE id = @id',

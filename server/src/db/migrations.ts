@@ -644,6 +644,37 @@ const M0010_SHARE_UNLOCK_GRANTS: Migration = {
   },
 };
 
+const M0011_QUOTA_SCOPE_AND_RECONCILE: Migration = {
+  version: 11,
+  name: '0011-quota-scope-and-reconcile',
+  up: (db) => {
+    // Multi-account storage-pool reliability task (§6.1, §6.2):
+    // - used_bytes_at_commit: the account's observed used_bytes when a chunk
+    //   was committed. A fresh quota observation may release the matching
+    //   uploaded_pending_quota reservation only when observed usage has grown
+    //   by at least those bytes since commit (propagation proof); NULL keeps
+    //   the reservation forever (conservative, e.g. quota was unknown).
+    // - quota_scope: NULL = independent quota. A non-null key groups accounts
+    //   the owner confirmed share one provider pool, so capacity is counted
+    //   and reserved once per pool, never once per login.
+    // - quota_unlimited: provider-documented unlimited quota (e.g. Google
+    //   Drive about.storageQuota omits limit when storage is unlimited). It is
+    //   never an invented numeric total; it may satisfy a plan up to the
+    //   requested bytes only.
+    db.exec(`ALTER TABLE upload_chunk_allocations ADD COLUMN used_bytes_at_commit INTEGER;`);
+    db.exec(`ALTER TABLE provider_accounts ADD COLUMN quota_scope TEXT;`);
+    db.exec(
+      `ALTER TABLE provider_accounts ADD COLUMN quota_unlimited INTEGER NOT NULL DEFAULT 0 CHECK(quota_unlimited IN (0,1));`,
+    );
+    db.exec(`CREATE INDEX idx_provider_accounts_quota_scope ON provider_accounts(quota_scope) WHERE quota_scope IS NOT NULL;`);
+    // verify referential integrity after the alteration
+    const violations = db.pragma('foreign_key_check', { simple: true });
+    if (violations) {
+      throw new Error('foreign_key_check failed after quota scope migration');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -655,4 +686,5 @@ export const allMigrations: readonly Migration[] = [
   M0008_DOWNLOAD_ENGINE,
   M0009_SHARE_LINKS,
   M0010_SHARE_UNLOCK_GRANTS,
+  M0011_QUOTA_SCOPE_AND_RECONCILE,
 ];

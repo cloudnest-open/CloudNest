@@ -387,6 +387,8 @@ export const appFr: AppStrings = {
     selectOriginal: 'Sélectionnez le fichier d’origine avant de poursuivre cet envoi.',
     jobGone: 'Cette tâche d’envoi n’existe plus.',
     planFailed: 'L’envoi n’a pas pu être planifié.',
+    capacityShortfall: 'Il manque {bytes} de capacité utile vérifiée dans le pool.',
+    applySuggestion: 'Utiliser des blocs de {mib} Mio',
     manifestFailed: 'Le plan d’envoi n’a pas pu être lu depuis le serveur.',
     chunkFailed: 'Un segment n’a pas pu être envoyé.',
     resumeHint:
@@ -525,6 +527,16 @@ export const appFr: AppStrings = {
     connectAccount: '+ Connecter un compte',
     errorLoad: 'Les comptes cloud n’ont pas pu être chargés. Le serveur n’a pas renvoyé de données réelles.',
     startFailed: 'La connexion n’a pas pu être lancée.',
+    sharedPool: {
+      badge: 'Pool partagé',
+      manage: 'Pool de quota…',
+      title: 'Pool de quota partagé',
+      description: 'Regroupez les comptes qui partagent réellement un même stockage du fournisseur (par exemple un pool d’organisation). La capacité est alors comptée une fois par pool et non par compte. Ne regroupez que des comptes dont vous savez qu’ils partagent le stockage — CloudNest ne devine jamais.',
+      current: 'Ces comptes sont regroupés : la capacité est réservée une seule fois pour le pool partagé.',
+      save: 'Enregistrer le groupe',
+      clear: 'Rendre indépendants',
+      unlimitedLabel: 'Illimité (signalé par le fournisseur)',
+    },
     picker: {
       title: 'Choisissez un fournisseur',
       setup: 'Configuration : {status}',
@@ -897,6 +909,7 @@ export const appFr: AppStrings = {
         'Le dossier CloudNest de ce compte est manquant ; essayez une actualisation du quota ou une reconnexion.',
       upload_aborted: 'L’envoi a été annulé.',
       job_paused: 'Cette tâche est en pause.',
+      account_busy: 'Ce compte a déjà son maximum de téléversements de blocs simultanés. CloudNest réessaie automatiquement.',
       job_not_found: 'Cette tâche d’envoi n’existe plus.',
       fallback: 'L’envoi a signalé une erreur.',
     },

@@ -87,10 +87,16 @@ export const googleDriveAdapter: ProviderAdapter = {
       )) as { storageQuota?: { limit?: string; usage?: string; usageInDrive?: string } };
       const limitRaw = about?.storageQuota?.limit;
       const usageRaw = about?.storageQuota?.usageInDrive ?? about?.storageQuota?.usage;
+      // Google's documented semantics: storageQuota.limit "will not be present
+      // if the user has unlimited storage". An absent limit alongside a real
+      // usage figure is therefore a provider-confirmed unlimited quota — never
+      // an unknown one, and never an invented numeric total.
+      const unlimited = limitRaw === undefined && usageRaw !== undefined;
       return {
         totalBytes: limitRaw !== undefined ? Number(limitRaw) : null,
         usedBytes: usageRaw !== undefined ? Number(usageRaw) : null,
         status: limitRaw !== undefined || usageRaw !== undefined ? 'current' : 'unknown',
+        unlimited,
         safeErrorCode: limitRaw === undefined && usageRaw === undefined ? 'quota_unavailable' : undefined,
       };
     } catch (err) {

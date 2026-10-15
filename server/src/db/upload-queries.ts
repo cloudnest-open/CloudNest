@@ -28,6 +28,8 @@ export interface AllocationRow {
   offset_bytes: number;
   state: string;
   attempt_count: number;
+  /** Provider-observed used_bytes when this allocation's chunk committed (reconciliation evidence). */
+  used_bytes_at_commit: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -130,6 +132,21 @@ export function makeUploadQueries(db: Database.Database) {
     reassignAllocation: db.prepare(
       "UPDATE upload_chunk_allocations SET provider_account_id = @provider_account_id, state = 'reserved', updated_at = @updated_at WHERE id = @id",
     ),
+    // §6.1 reconciliation evidence: remember the provider-observed usage at the
+    // moment a chunk committed, so a later CURRENT observation can prove the
+    // provider has accounted for those bytes before the reservation releases.
+    setAllocationCommitBaseline: db.prepare(
+      'UPDATE upload_chunk_allocations SET used_bytes_at_commit = ? WHERE id = ?',
+    ),
+    listPendingQuotaAllocations: db.prepare(
+      "SELECT * FROM upload_chunk_allocations WHERE provider_account_id = ? AND state = 'uploaded_pending_quota' ORDER BY used_bytes_at_commit ASC, created_at ASC",
+    ),
+    // §9 per-account concurrency: at most MAX_PER_ACCOUNT_INFLIGHT chunks of
+    // one account may be in flight; the count excludes the allocation being
+    // claimed (reserved -> uploading happens in the same transaction).
+    countUploadingForAccount: db.prepare(
+      "SELECT COUNT(*) AS n FROM upload_chunk_allocations WHERE provider_account_id = ? AND state = 'uploading' AND id <> ?",
+    ),
 
     // ---- attempts ----
     insertAttempt: db.prepare(
@@ -184,3 +201,48 @@ export function makeUploadQueries(db: Database.Database) {
 }
 
 export type UploadQueries = ReturnType<typeof makeUploadQueries>;
+
+/**
+ * §6.1 reservation reconciliation. A chunk's `uploaded_pending_quota`
+ * reservation releases only when a CURRENT quota observation proves the
+ * provider has accounted for its bytes: observed usage must have grown by at
+ * least the chunk size since the usage snapshot captured at commit. A refresh
+ * that merely "succeeded" releases nothing; unknown baselines never release.
+ *
+ * Runs inside the caller's transaction together with the quota update, so the
+ * observation and the release commit or roll back as one. Also refreshes the
+ * per-account `reserved_inflight_bytes` cache from the durable rows afterwards
+ * (the cache is never the source of truth).
+ *
+ * Returns the number of reservations released.
+ */
+export function reconcileUploadedPendingQuota(
+  db: Database.Database,
+  accountId: string,
+  freshUsedBytes: number | null,
+): number {
+  if (freshUsedBytes === null || !Number.isFinite(freshUsedBytes) || freshUsedBytes < 0) return 0;
+  const pending = db.prepare(
+    `SELECT id, size_bytes, used_bytes_at_commit FROM upload_chunk_allocations
+     WHERE provider_account_id = ? AND state = 'uploaded_pending_quota'`,
+  ).all(accountId) as Array<{ id: string; size_bytes: number; used_bytes_at_commit: number | null }>;
+  let released = 0;
+  for (const row of pending) {
+    if (row.used_bytes_at_commit === null) continue;
+    if (freshUsedBytes >= row.used_bytes_at_commit + row.size_bytes) {
+      db.prepare("UPDATE upload_chunk_allocations SET state = 'released', updated_at = ? WHERE id = ?")
+        .run(new Date().toISOString(), row.id);
+      released++;
+    }
+  }
+  if (released > 0) {
+    const now = new Date().toISOString();
+    const outstanding = db.prepare(
+      `SELECT COALESCE(SUM(size_bytes), 0) AS n FROM upload_chunk_allocations
+       WHERE provider_account_id = ? AND state IN ('reserved','uploading','uploaded_pending_quota')`,
+    ).get(accountId) as { n: number };
+    db.prepare('UPDATE provider_accounts SET reserved_inflight_bytes = ?, updated_at = ? WHERE id = ?')
+      .run(outstanding.n, now, accountId);
+  }
+  return released;
+}
