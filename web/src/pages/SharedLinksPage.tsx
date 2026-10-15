@@ -255,7 +255,7 @@ export function SharedLinksPage() {
         </div>
 
         {filesError && <div className="error-card" role="alert"><p>{filesError}</p></div>}
-        {filesLoading && files.length === 0 ? (
+        {filesError ? null : filesLoading && files.length === 0 ? (
           <SkeletonRows rows={3} />
         ) : files.length === 0 ? (
           <p className="muted">{appliedFileSearch ? t.files.emptySearchBody : t.shares.create.noneAvailable}</p>
@@ -342,7 +342,7 @@ export function SharedLinksPage() {
       <section className="card">
         <h2>{t.shares.list.title}</h2>
         {linksError && <div className="error-card" role="alert"><p>{linksError}</p></div>}
-        {linksLoading && links.length === 0 ? (
+        {linksError ? null : linksLoading && links.length === 0 ? (
           <SkeletonRows rows={2} />
         ) : links.length === 0 ? (
           <p className="muted">{t.shares.list.none}</p>
