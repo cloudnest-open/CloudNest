@@ -35,6 +35,22 @@ if (downloads) {
   if (interrupted > 0) console.log(`[cloudnest] marked ${interrupted} interrupted download(s) as failed`);
 }
 
+// a crash must never leave upload jobs "running" or stale in-flight attempts
+// holding the per-account concurrency cap: the upload engine's durable state
+// is recovered at startup exactly like downloads (B2)
+const uploads = app.get('uploads') as {
+  recoverOnStartup: () => { recovered: number; reservationsRecomputed: number; attemptsReconciled: number };
+} | undefined;
+if (uploads) {
+  const uploadRecovery = uploads.recoverOnStartup();
+  if (uploadRecovery.recovered > 0 || uploadRecovery.attemptsReconciled > 0) {
+    console.log(
+      `[cloudnest] upload recovery: paused ${uploadRecovery.recovered} job(s), ` +
+      `reconciled ${uploadRecovery.attemptsReconciled} in-flight attempt(s)`,
+    );
+  }
+}
+
 // BE-03: bounded, periodic cleanup of expired session rows, share download
 // sessions, and unlock grants. Previously these only died lazily when read,
 // so long-running instances accumulated dead rows forever.
