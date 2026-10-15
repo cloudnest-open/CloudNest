@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { formatBytes, formatDateTime } from '../components/ui.js';
+import { useI18n } from '../i18n-context.js';
 
 /**
  * Downloads (Step 5 / M10.e).
  *
  * Progress comes from persisted job rows only. Browser-native downloads are
  * used deliberately: the browser handles Range/resume itself, so the UI does
- * not offer a pause button it cannot honour.
+ * not offer a pause button it cannot honour. All copy resolves through the
+ * app-wide i18n context; the server's safe error codes map to localized
+ * remedies (t.errors.download) with the raw code kept as a diagnostic.
  */
 
 interface DownloadView {
@@ -31,40 +35,16 @@ interface FileView {
   state: string;
 }
 
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return 'Unknown';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1024;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i++;
-  }
-  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
-}
-
-const ERROR_HELP: Record<string, string> = {
-  chunk_missing: 'A required chunk is no longer present on its provider. The file needs repair.',
-  chunk_hash_mismatch: 'A chunk did not match its recorded checksum; the download was aborted rather than delivering corrupt data.',
-  file_not_complete: 'This file is not fully uploaded yet, so it cannot be downloaded.',
-  file_not_found: 'That file no longer exists.',
-  deletion_pending: 'This file is queued for deletion and cannot be downloaded.',
-  provider_needs_reauth: 'A connected account needs you to sign in again.',
-  provider_rate_limited: 'A provider is throttling requests. Try again shortly.',
-  provider_unavailable: 'A provider is temporarily unreachable.',
-  download_cancelled: 'The download was cancelled.',
-  download_interrupted: 'The download was interrupted (for example by a server restart) and did not complete.',
-  invalid_range: 'The requested byte range was not understood.',
-  range_not_satisfiable: 'The requested byte range lies outside the file.',
-};
-
 export function DownloadsPage() {
+  const { t, tf } = useI18n();
   const [downloads, setDownloads] = useState<DownloadView[]>([]);
   const [files, setFiles] = useState<FileView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const jobStateLabel = (state: string): string =>
+    (t.states.job as Record<string, string | undefined>)[state] ?? state;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,15 +54,16 @@ export function DownloadsPage() {
       if (d.status === 200) setDownloads((d.data as { downloads: DownloadView[] }).downloads ?? []);
       if (f.status === 200) setFiles((f.data as { files: FileView[] }).files ?? []);
       if (d.status !== 200 && f.status !== 200) {
-        setError('Could not load the download list. The server did not answer with real data.');
+        setError(t.downloads.errorLoad);
       } else {
         setError(null);
       }
     } catch {
-      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+      setError(t.common.errorNetwork);
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user/poll-driven; a language change must not re-fetch
   }, []);
 
   useEffect(() => {
@@ -106,7 +87,7 @@ export function DownloadsPage() {
   async function startDownload(file: FileView) {
     // FE-08: fetch first so a failed download surfaces IN-APP instead of
     // replacing the whole page with a raw JSON error document.
-    setNotice(`Starting download of ${file.originalName}...`);
+    setNotice(tf(t.downloads.starting, { name: file.originalName }));
     try {
       const res = await fetch(api.downloadUrl(file.id));
       if (!res.ok) {
@@ -118,8 +99,8 @@ export function DownloadsPage() {
           // non-JSON failure body: fall back to the status alone
         }
         setError(code
-          ? `The download failed (${code}). Check the file's chunks and provider accounts, then retry.`
-          : `The download failed (HTTP ${res.status}). Check the file's chunks and provider accounts, then retry.`);
+          ? tf(t.downloads.failedWithCode, { code })
+          : tf(t.downloads.failedWithStatus, { status: res.status }));
         return;
       }
       const disposition = res.headers.get('content-disposition') ?? '';
@@ -146,7 +127,7 @@ export function DownloadsPage() {
         try {
           const handle = await picker({
             suggestedName: name,
-            types: [{ description: 'All files', accept: { 'application/octet-stream': ['.bin'] } }],
+            types: [{ description: t.downloads.fullFile, accept: { 'application/octet-stream': ['.bin'] } }],
           });
           const writable = await handle.createWritable();
           if (res.body) {
@@ -158,18 +139,18 @@ export function DownloadsPage() {
             }
           }
           await writable.close();
-          setNotice(`Saved ${name} to disk.`);
+          setNotice(tf(t.downloads.savedToDisk, { name }));
           setTimeout(() => void load(), 1500);
           return;
         } catch (err) {
           const name2 = (err as { name?: string }).name;
           if (name2 === 'AbortError') {
             // the user dismissed the save dialog: nothing to do
-            setNotice('Download cancelled.');
+            setNotice(t.downloads.cancelled);
             return;
           }
           // any writer failure falls through to the native fallback below
-          setNotice('Direct-to-disk save failed; using the browser download instead.');
+          setNotice(t.downloads.fsFallback);
         }
       }
 
@@ -185,20 +166,20 @@ export function DownloadsPage() {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      setNotice(`Downloaded ${name} via the browser download. In-app progress and resume are limited in this fallback.`);
+      setNotice(tf(t.downloads.nativeFallback, { name }));
       setTimeout(() => void load(), 1500);
     } catch {
-      setError('Could not reach the server for the download. Check that CloudNest is running, then retry.');
+      setError(t.downloads.reachFailed);
     }
   }
 
   async function cancel(jobId: string) {
     const res = await api.cancelDownload(jobId);
     if (res.status === 200) {
-      setNotice('Cancellation recorded. The browser may still be finishing its own transfer.');
+      setNotice(t.downloads.cancelRecorded);
       await load();
     } else {
-      setError('Could not cancel that download.');
+      setError(t.downloads.cancelFailed);
     }
   }
 
@@ -207,9 +188,9 @@ export function DownloadsPage() {
   return (
     <>
       <div className="page-head">
-        <h1 className="page-title">Downloads</h1>
+        <h1 className="page-title">{t.downloads.title}</h1>
         <button type="button" className="btn-secondary" onClick={() => void load()} disabled={loading}>
-          {loading ? 'Refreshing…' : 'Refresh'}
+          {loading ? t.common.refreshing : t.common.refresh}
         </button>
       </div>
 
@@ -217,16 +198,16 @@ export function DownloadsPage() {
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
 
       <section className="card">
-        <h2>Available files</h2>
+        <h2>{t.downloads.available}</h2>
         {downloadable.length === 0 ? (
-          <p className="muted">No completed files to download yet.</p>
+          <p className="muted">{t.downloads.noneAvailable}</p>
         ) : (
           <table className="accounts-table">
             <thead>
               <tr>
-                <th>File</th>
-                <th>Size</th>
-                <th>Action</th>
+                <th>{t.downloads.file}</th>
+                <th>{t.downloads.size}</th>
+                <th>{t.downloads.action}</th>
               </tr>
             </thead>
             <tbody>
@@ -235,35 +216,31 @@ export function DownloadsPage() {
                   <td className="ellipsis">{file.originalName}</td>
                   <td>{formatBytes(file.sizeBytes)}</td>
                   <td className="actions">
-                    <button type="button" className="btn-primary" onClick={() => startDownload(file)}>Download</button>
+                    <button type="button" className="btn-primary" onClick={() => startDownload(file)}>{t.downloads.download}</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-        <p className="muted small">
-          Downloads stream through CloudNest and are reassembled chunk by chunk with a checksum check before any
-          bytes are sent. Progress below is the server's record of bytes it streamed; it is not proof that your
-          device finished saving the file. Pause/resume is provided by your browser, so no in-app pause button is shown.
-        </p>
+        <p className="muted small">{t.downloads.footnote}</p>
       </section>
 
       <section className="card">
-        <h2>Recent transfers</h2>
+        <h2>{t.downloads.transfers}</h2>
         {loading ? (
-          <p className="muted">Loading…</p>
+          <p className="muted">{t.common.loading}</p>
         ) : downloads.length === 0 ? (
-          <p className="muted">No downloads yet.</p>
+          <p className="muted">{t.downloads.none}</p>
         ) : (
           <table className="accounts-table">
             <thead>
               <tr>
-                <th>Range</th>
-                <th>Progress</th>
-                <th>State</th>
-                <th>Updated</th>
-                <th>Actions</th>
+                <th>{t.downloads.range}</th>
+                <th>{t.downloads.progress}</th>
+                <th>{t.downloads.state}</th>
+                <th>{t.downloads.updated}</th>
+                <th>{t.downloads.actions}</th>
               </tr>
             </thead>
             <tbody>
@@ -275,27 +252,27 @@ export function DownloadsPage() {
                   <tr key={d.jobId}>
                     <td className="muted small">
                       {d.rangeStart === null || d.rangeEnd === null
-                        ? 'Full file'
-                        : `bytes ${d.rangeStart}–${d.rangeEnd}`}
+                        ? t.downloads.fullFile
+                        : tf(t.downloads.bytesRange, { start: d.rangeStart, end: d.rangeEnd })}
                     </td>
                     <td>
                       {formatBytes(d.bytesCompleted)} / {formatBytes(d.requestedBytes ?? 0)}
-                      <div className="muted small">{d.chunksCompleted} / {d.chunksTotal} chunks · {percent}%</div>
+                      <div className="muted small">{tf(t.downloads.chunksOf, { done: d.chunksCompleted, total: d.chunksTotal, pct: percent })}</div>
                     </td>
                     <td>
                       <span className={`state state-${d.state === 'completed' ? 'ok' : d.state === 'failed' || d.state === 'cancelled' ? 'bad' : 'warn'}`}>
-                        {d.state}
+                        {jobStateLabel(d.state)}
                       </span>
                       {d.safeErrorCode && (
                         <div className="muted small">
-                          {ERROR_HELP[d.safeErrorCode] ?? d.safeErrorCode} ({d.safeErrorCode})
+                          {((t.errors.download as Record<string, string | undefined>)[d.safeErrorCode] ?? d.safeErrorCode)} ({d.safeErrorCode})
                         </div>
                       )}
                     </td>
-                    <td className="muted small">{new Date(d.updatedAt).toLocaleString()}</td>
+                    <td className="muted small">{formatDateTime(d.updatedAt)}</td>
                     <td className="actions">
                       <button type="button" className="btn-secondary" disabled={d.state !== 'running'} onClick={() => void cancel(d.jobId)}>
-                        Cancel
+                        {t.downloads.cancel}
                       </button>
                     </td>
                   </tr>

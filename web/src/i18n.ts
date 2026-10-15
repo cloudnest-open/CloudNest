@@ -1,19 +1,28 @@
 /**
- * Entry-page localization (approved 8-language scope).
+ * Application-wide i18n core (one system for the entry page AND the
+ * authenticated app).
  *
- * The language selector on the entry page is a real product requirement, not a
- * decoration: every visible entry-page string is resolved from these catalogs
- * and the choice persists in localStorage. The dashboard's own strings are NOT
- * part of this pass — that scope difference is stated in the completion report.
+ * Pure data + helpers, deliberately free of React/DOM side effects so the i18n
+ * tests can import it under the server test runner. React bindings live in
+ * i18n-context.tsx; the catalogs live in locales/ (per-locale files, typed so
+ * TypeScript rejects any missing or extra leaf key versus English).
  *
- * This module is deliberately free of React/DOM side effects (a pure data +
- * helpers module) so the catalog-consistency test can import it under the
- * server test runner.
- *
- * Fallback rule: if a localized string is ever missing, callers fall back to
- * English — never an empty label or a raw key. Brands (CloudNest, provider
- * names) and URLs stay untranslated.
+ * Fallback rule: catalogs are complete per locale (compile-time enforced), so
+ * a runtime English fallback should never trigger; when a *dynamic* value such
+ * as a state code or error code is not in the catalog, callers render the raw
+ * code as the diagnostic — never an empty label or a wrong-language guess.
+ * Brands (CloudNest, provider names) and URLs stay untranslated.
  */
+import { entryStrings, type EntryStrings } from './locales/entry.js';
+import { appEn, type AppStrings } from './locales/app-en.js';
+import type { Plural } from './locales/plural.js';
+import { appZhCn } from './locales/app-zh-CN.js';
+import { appEs } from './locales/app-es.js';
+import { appDe } from './locales/app-de.js';
+import { appRu } from './locales/app-ru.js';
+import { appFr } from './locales/app-fr.js';
+import { appJa } from './locales/app-ja.js';
+import { appPtBr } from './locales/app-pt-BR.js';
 
 export const LOCALES = ['en', 'zh-CN', 'es', 'de', 'ru', 'fr', 'ja', 'pt-BR'] as const;
 export type Locale = (typeof LOCALES)[number];
@@ -32,451 +41,21 @@ export const LOCALE_NAMES: Record<Locale, string> = {
   'pt-BR': 'Português (Brasil)',
 };
 
+export type { EntryStrings, AppStrings, Plural };
+export { entryStrings };
+
+export const appStrings: Record<Locale, AppStrings> = {
+  en: appEn,
+  'zh-CN': appZhCn,
+  es: appEs,
+  de: appDe,
+  ru: appRu,
+  fr: appFr,
+  ja: appJa,
+  'pt-BR': appPtBr,
+};
+
 const STORAGE_KEY = 'cloudnest.locale';
-
-const en = {
-  nav: {
-    aria: 'Main navigation',
-    home: 'Home',
-    features: 'Features',
-    documentation: 'Documentation',
-    support: 'Support',
-  },
-  badge: 'Open Source Cloud Storage',
-  headline: { line1: 'Your Files.', accent: 'Your Cloud.', rest: 'Your Way.' },
-  paragraph:
-    'CloudNest is a modern, open-source platform that helps you manage, upload and access your files from anywhere — safely, securely and with full control.',
-  features: {
-    aria: 'Feature list',
-    providers: {
-      title: 'Multiple Cloud Providers',
-      desc: 'Connect Google Drive, Dropbox, OneDrive, pCloud, MEGA and more.',
-    },
-    secure: {
-      title: 'Secure & Private',
-      desc: 'Your data stays yours. Always.',
-    },
-    fast: {
-      title: 'Fast & Reliable',
-      desc: 'High-speed transfers with resumable uploads and downloads.',
-    },
-    anywhere: {
-      title: 'Access Anywhere',
-      desc: 'Your self-hosted hub, reachable from any device with a browser.',
-    },
-  },
-  oss: {
-    title: 'Open Source',
-    desc: 'Free to use. Built by the community.',
-    cta: 'View CloudNest on GitHub',
-  },
-  login: {
-    welcome: 'Welcome Back!',
-    subtitle: 'Sign in to your CloudNest account',
-    username: 'Username',
-    password: 'Password',
-    submit: 'Log in',
-    submitting: 'Signing in…',
-    errorInvalid: 'Invalid username or password.',
-    errorTooMany: 'Too many attempts. Try again later.',
-    errorNetwork: 'Cannot reach the local server. Is CloudNest running?',
-    eyeShow: 'Show password',
-    eyeHide: 'Hide password',
-  },
-  setup: {
-    title: 'Set up CloudNest',
-    subtitle:
-      'Create your administrator password to finish installing CloudNest. There is no default password.',
-    password: 'Password (min 12 characters)',
-    confirm: 'Confirm password',
-    submit: 'Create administrator account',
-    submitting: 'Creating…',
-    errorFallback: 'Setup failed.',
-  },
-  footer: {
-    tagline: 'Open Source. Self Hosted. Always Yours.',
-    about: 'About',
-    documentation: 'Documentation',
-    support: 'Support',
-    privacy: 'Privacy',
-    operational: 'All systems operational',
-    selfHosted: 'Self-hosted instance',
-    rights: '© {year} CloudNest. All rights reserved.',
-  },
-  theme: { toDark: 'Switch to dark theme', toLight: 'Switch to light theme' },
-  lang: { label: 'Change language' },
-  illu: { synced: 'Files synced', secure: 'Secure & Private' },
-};
-
-export type EntryStrings = typeof en;
-
-const zhCN: EntryStrings = {
-  nav: { aria: '主导航', home: '首页', features: '功能', documentation: '文档', support: '支持' },
-  badge: '开源云存储',
-  headline: { line1: '你的文件。', accent: '你的云端。', rest: '由你掌控。' },
-  paragraph:
-    'CloudNest 是一个现代开源平台，帮助你随时随地管理、上传和访问自己的文件——安全、可靠，尽在掌控。',
-  features: {
-    aria: '功能列表',
-    providers: { title: '多云盘支持', desc: '连接 Google Drive、Dropbox、OneDrive、pCloud、MEGA 等服务。' },
-    secure: { title: '安全与隐私', desc: '数据始终属于你自己。' },
-    fast: { title: '快速可靠', desc: '高速传输，上传下载支持断点续传。' },
-    anywhere: { title: '随处访问', desc: '自托管应用，任何设备的浏览器都能访问。' },
-  },
-  oss: { title: '开源', desc: '免费使用，由社区共建。', cta: '在 GitHub 上查看 CloudNest' },
-  login: {
-    welcome: '欢迎回来！',
-    subtitle: '登录你的 CloudNest 账户',
-    username: '用户名',
-    password: '密码',
-    submit: '登录',
-    submitting: '正在登录…',
-    errorInvalid: '用户名或密码无效。',
-    errorTooMany: '尝试次数过多，请稍后再试。',
-    errorNetwork: '无法连接本地服务器，CloudNest 是否正在运行？',
-    eyeShow: '显示密码',
-    eyeHide: '隐藏密码',
-  },
-  setup: {
-    title: '初始化 CloudNest',
-    subtitle: '创建管理员密码以完成 CloudNest 的安装。没有默认密码。',
-    password: '密码（至少 12 个字符）',
-    confirm: '确认密码',
-    submit: '创建管理员账户',
-    submitting: '正在创建…',
-    errorFallback: '初始化失败。',
-  },
-  footer: {
-    tagline: '开源。自托管。始终属于你。',
-    about: '关于',
-    documentation: '文档',
-    support: '支持',
-    privacy: '隐私',
-    operational: '所有系统运行正常',
-    selfHosted: '自托管实例',
-    rights: '© {year} CloudNest。保留所有权利。',
-  },
-  theme: { toDark: '切换到深色主题', toLight: '切换到浅色主题' },
-  lang: { label: '选择语言' },
-  illu: { synced: '文件已同步', secure: '安全且私密' },
-};
-
-const es: EntryStrings = {
-  nav: { aria: 'Navegación principal', home: 'Inicio', features: 'Funciones', documentation: 'Documentación', support: 'Soporte' },
-  badge: 'Almacenamiento en la nube de código abierto',
-  headline: { line1: 'Tus archivos.', accent: 'Tu nube.', rest: 'A tu manera.' },
-  paragraph:
-    'CloudNest es una plataforma moderna y de código abierto que te ayuda a gestionar, subir y consultar tus archivos desde cualquier lugar — de forma segura y con control total.',
-  features: {
-    aria: 'Lista de funciones',
-    providers: { title: 'Múltiples proveedores en la nube', desc: 'Conecta Google Drive, Dropbox, OneDrive, pCloud, MEGA y más.' },
-    secure: { title: 'Seguro y privado', desc: 'Tus datos siguen siendo tuyos. Siempre.' },
-    fast: { title: 'Rápido y fiable', desc: 'Transferencias a alta velocidad con subidas y descargas reanudables.' },
-    anywhere: { title: 'Acceso desde cualquier lugar', desc: 'Tu aplicación autoalojada, al alcance de cualquier navegador.' },
-  },
-  oss: { title: 'Código abierto', desc: 'Gratis. Construido por la comunidad.', cta: 'Ver CloudNest en GitHub' },
-  login: {
-    welcome: '¡Bienvenido de nuevo!',
-    subtitle: 'Inicia sesión en tu cuenta de CloudNest',
-    username: 'Usuario',
-    password: 'Contraseña',
-    submit: 'Iniciar sesión',
-    submitting: 'Iniciando sesión…',
-    errorInvalid: 'Usuario o contraseña no válidos.',
-    errorTooMany: 'Demasiados intentos. Vuelve a probarlo más tarde.',
-    errorNetwork: 'No se puede conectar con el servidor local. ¿Está ejecutándose CloudNest?',
-    eyeShow: 'Mostrar contraseña',
-    eyeHide: 'Ocultar contraseña',
-  },
-  setup: {
-    title: 'Configura CloudNest',
-    subtitle: 'Crea la contraseña de administrador para terminar la instalación de CloudNest. No existe una contraseña predeterminada.',
-    password: 'Contraseña (mínimo 12 caracteres)',
-    confirm: 'Confirmar contraseña',
-    submit: 'Crear cuenta de administrador',
-    submitting: 'Creando…',
-    errorFallback: 'La configuración falló.',
-  },
-  footer: {
-    tagline: 'Código abierto. Autoalojado. Siempre tuyo.',
-    about: 'Acerca de',
-    documentation: 'Documentación',
-    support: 'Soporte',
-    privacy: 'Privacidad',
-    operational: 'Todos los sistemas operativos',
-    selfHosted: 'Instancia autoalojada',
-    rights: '© {year} CloudNest. Todos los derechos reservados.',
-  },
-  theme: { toDark: 'Cambiar al tema oscuro', toLight: 'Cambiar al tema claro' },
-  lang: { label: 'Cambiar idioma' },
-  illu: { synced: 'Archivos sincronizados', secure: 'Seguro y privado' },
-};
-
-const de: EntryStrings = {
-  nav: { aria: 'Hauptnavigation', home: 'Start', features: 'Funktionen', documentation: 'Dokumentation', support: 'Support' },
-  badge: 'Open-Source-Cloudspeicher',
-  headline: { line1: 'Deine Dateien.', accent: 'Deine Cloud.', rest: 'Auf deine Art.' },
-  paragraph:
-    'CloudNest ist eine moderne Open-Source-Plattform, mit der du deine Dateien von überall verwalten, hochladen und abrufen kannst — sicher und mit voller Kontrolle.',
-  features: {
-    aria: 'Funktionsliste',
-    providers: { title: 'Mehrere Cloud-Anbieter', desc: 'Verbinde Google Drive, Dropbox, OneDrive, pCloud, MEGA und mehr.' },
-    secure: { title: 'Sicher & privat', desc: 'Deine Daten bleiben deine. Immer.' },
-    fast: { title: 'Schnell & zuverlässig', desc: 'Schnelle Übertragungen mit fortsetzbaren Uploads und Downloads.' },
-    anywhere: { title: 'Überall zugreifen', desc: 'Selbst gehostet — aus jedem Browser erreichbar.' },
-  },
-  oss: { title: 'Open Source', desc: 'Kostenlos. Von der Community entwickelt.', cta: 'CloudNest auf GitHub ansehen' },
-  login: {
-    welcome: 'Willkommen zurück!',
-    subtitle: 'Melde dich bei deinem CloudNest-Konto an',
-    username: 'Benutzername',
-    password: 'Passwort',
-    submit: 'Anmelden',
-    submitting: 'Anmeldung…',
-    errorInvalid: 'Benutzername oder Passwort ist falsch.',
-    errorTooMany: 'Zu viele Versuche. Versuche es später erneut.',
-    errorNetwork: 'Der lokale Server ist nicht erreichbar. Läuft CloudNest?',
-    eyeShow: 'Passwort anzeigen',
-    eyeHide: 'Passwort verbergen',
-  },
-  setup: {
-    title: 'CloudNest einrichten',
-    subtitle: 'Erstelle das Administrator-Passwort, um die Installation von CloudNest abzuschließen. Es gibt kein Standard-Passwort.',
-    password: 'Passwort (mind. 12 Zeichen)',
-    confirm: 'Passwort bestätigen',
-    submit: 'Administrator-Konto erstellen',
-    submitting: 'Wird erstellt…',
-    errorFallback: 'Einrichtung fehlgeschlagen.',
-  },
-  footer: {
-    tagline: 'Open Source. Selbst gehostet. Immer deins.',
-    about: 'Über',
-    documentation: 'Dokumentation',
-    support: 'Support',
-    privacy: 'Datenschutz',
-    operational: 'Alle Systeme betriebsbereit',
-    selfHosted: 'Selbst gehostete Instanz',
-    rights: '© {year} CloudNest. Alle Rechte vorbehalten.',
-  },
-  theme: { toDark: 'Zum dunklen Design wechseln', toLight: 'Zum hellen Design wechseln' },
-  lang: { label: 'Sprache wählen' },
-  illu: { synced: 'Dateien synchronisiert', secure: 'Sicher & privat' },
-};
-
-const ru: EntryStrings = {
-  nav: { aria: 'Основная навигация', home: 'Главная', features: 'Возможности', documentation: 'Документация', support: 'Поддержка' },
-  badge: 'Облачное хранилище с открытым кодом',
-  headline: { line1: 'Ваши файлы.', accent: 'Ваше облако.', rest: 'Ваши правила.' },
-  paragraph:
-    'CloudNest — современная платформа с открытым кодом, которая помогает управлять файлами, выгружать их и получать к ним доступ откуда угодно — безопасно и под полным контролем.',
-  features: {
-    aria: 'Список возможностей',
-    providers: { title: 'Несколько облачных провайдеров', desc: 'Подключайте Google Drive, Dropbox, OneDrive, pCloud, MEGA и другие.' },
-    secure: { title: 'Безопасность и приватность', desc: 'Ваши данные остаются вашими. Всегда.' },
-    fast: { title: 'Быстро и надёжно', desc: 'Высокоскоростная передача с возобновлением выгрузки и загрузки.' },
-    anywhere: { title: 'Доступ отовсюду', desc: 'Самостоятельно размещённое приложение — доступ из любого браузера.' },
-  },
-  oss: { title: 'Открытый код', desc: 'Бесплатно. Создано сообществом.', cta: 'CloudNest на GitHub' },
-  login: {
-    welcome: 'С возвращением!',
-    subtitle: 'Войдите в свою учётную запись CloudNest',
-    username: 'Имя пользователя',
-    password: 'Пароль',
-    submit: 'Войти',
-    submitting: 'Вход…',
-    errorInvalid: 'Неверное имя пользователя или пароль.',
-    errorTooMany: 'Слишком много попыток. Попробуйте позже.',
-    errorNetwork: 'Не удаётся подключиться к локальному серверу. Запущен ли CloudNest?',
-    eyeShow: 'Показать пароль',
-    eyeHide: 'Скрыть пароль',
-  },
-  setup: {
-    title: 'Настройка CloudNest',
-    subtitle: 'Создайте пароль администратора, чтобы завершить установку CloudNest. Пароля по умолчанию нет.',
-    password: 'Пароль (минимум 12 символов)',
-    confirm: 'Подтвердите пароль',
-    submit: 'Создать учётную запись администратора',
-    submitting: 'Создание…',
-    errorFallback: 'Не удалось завершить настройку.',
-  },
-  footer: {
-    tagline: 'Открытый код. Свой сервер. Всегда ваш.',
-    about: 'О проекте',
-    documentation: 'Документация',
-    support: 'Поддержка',
-    privacy: 'Конфиденциальность',
-    operational: 'Все системы работают',
-    selfHosted: 'Самостоятельно размещённый экземпляр',
-    rights: '© {year} CloudNest. Все права защищены.',
-  },
-  theme: { toDark: 'Переключить на тёмную тему', toLight: 'Переключить на светлую тему' },
-  lang: { label: 'Выбрать язык' },
-  illu: { synced: 'Синхронизировано', secure: 'Безопасно и приватно' },
-};
-
-const fr: EntryStrings = {
-  nav: { aria: 'Navigation principale', home: 'Accueil', features: 'Fonctionnalités', documentation: 'Documentation', support: 'Assistance' },
-  badge: 'Stockage cloud open source',
-  headline: { line1: 'Vos fichiers.', accent: 'Votre cloud.', rest: 'À votre façon.' },
-  paragraph:
-    'CloudNest est une plateforme open source moderne qui vous aide à gérer, téléverser et consulter vos fichiers où que vous soyez — en toute sécurité et avec un contrôle total.',
-  features: {
-    aria: 'Liste des fonctionnalités',
-    providers: { title: 'Plusieurs fournisseurs cloud', desc: 'Connectez Google Drive, Dropbox, OneDrive, pCloud, MEGA et plus encore.' },
-    secure: { title: 'Sécurisé et privé', desc: 'Vos données restent les vôtres. Toujours.' },
-    fast: { title: 'Rapide et fiable', desc: 'Transferts à haute vitesse avec reprise des envois et des téléchargements.' },
-    anywhere: { title: 'Accès partout', desc: 'Application auto-hébergée, accessible depuis n’importe quel navigateur.' },
-  },
-  oss: { title: 'Open source', desc: 'Gratuit. Créé par la communauté.', cta: 'Voir CloudNest sur GitHub' },
-  login: {
-    welcome: 'Bon retour !',
-    subtitle: 'Connectez-vous à votre compte CloudNest',
-    username: 'Nom d’utilisateur',
-    password: 'Mot de passe',
-    submit: 'Se connecter',
-    submitting: 'Connexion…',
-    errorInvalid: 'Nom d’utilisateur ou mot de passe incorrect.',
-    errorTooMany: 'Trop de tentatives. Réessayez plus tard.',
-    errorNetwork: 'Impossible de joindre le serveur local. CloudNest est-il démarré ?',
-    eyeShow: 'Afficher le mot de passe',
-    eyeHide: 'Masquer le mot de passe',
-  },
-  setup: {
-    title: 'Configurer CloudNest',
-    subtitle: 'Créez le mot de passe administrateur pour terminer l’installation de CloudNest. Il n’existe pas de mot de passe par défaut.',
-    password: 'Mot de passe (12 caractères minimum)',
-    confirm: 'Confirmer le mot de passe',
-    submit: 'Créer le compte administrateur',
-    submitting: 'Création…',
-    errorFallback: 'La configuration a échoué.',
-  },
-  footer: {
-    tagline: 'Open source. Auto-hébergé. Toujours à vous.',
-    about: 'À propos',
-    documentation: 'Documentation',
-    support: 'Assistance',
-    privacy: 'Confidentialité',
-    operational: 'Tous les systèmes opérationnels',
-    selfHosted: 'Instance auto-hébergée',
-    rights: '© {year} CloudNest. Tous droits réservés.',
-  },
-  theme: { toDark: 'Passer au thème sombre', toLight: 'Passer au thème clair' },
-  lang: { label: 'Choisir la langue' },
-  illu: { synced: 'Fichiers synchronisés', secure: 'Sécurisé et privé' },
-};
-
-const ja: EntryStrings = {
-  nav: { aria: 'メインナビゲーション', home: 'ホーム', features: '機能', documentation: 'ドキュメント', support: 'サポート' },
-  badge: 'オープンソースのクラウドストレージ',
-  headline: { line1: 'あなたのファイル。', accent: 'あなたのクラウド。', rest: 'あなた流に。' },
-  paragraph:
-    'CloudNest は、ファイルをどこからでも管理・アップロード・アクセスできるモダンなオープンソースプラットフォームです。安全に、そして自分の手で。',
-  features: {
-    aria: '機能一覧',
-    providers: { title: '複数のクラウドプロバイダー', desc: 'Google Drive、Dropbox、OneDrive、pCloud、MEGA などに接続。' },
-    secure: { title: '安全・プライベート', desc: 'データは常にあなたのもの。' },
-    fast: { title: '高速で信頼性が高い', desc: '中断から再開できる高速アップロード・ダウンロード。' },
-    anywhere: { title: 'どこからでもアクセス', desc: 'セルフホスト型 — どのブラウザーからでも利用できます。' },
-  },
-  oss: { title: 'オープンソース', desc: '無料で使用可能。コミュニティが構築。', cta: 'GitHub で CloudNest を見る' },
-  login: {
-    welcome: 'おかえりなさい！',
-    subtitle: 'CloudNest アカウントにサインイン',
-    username: 'ユーザー名',
-    password: 'パスワード',
-    submit: 'ログイン',
-    submitting: 'ログイン中…',
-    errorInvalid: 'ユーザー名またはパスワードが正しくありません。',
-    errorTooMany: '試行回数が多すぎます。しばらくしてからもう一度お試しください。',
-    errorNetwork: 'ローカルサーバーに接続できません。CloudNest は起動していますか？',
-    eyeShow: 'パスワードを表示',
-    eyeHide: 'パスワードを隠す',
-  },
-  setup: {
-    title: 'CloudNest をセットアップ',
-    subtitle: '管理者パスワードを作成して CloudNest のインストールを完了してください。デフォルトのパスワードはありません。',
-    password: 'パスワード（12 文字以上）',
-    confirm: 'パスワードの確認',
-    submit: '管理者アカウントを作成',
-    submitting: '作成中…',
-    errorFallback: 'セットアップに失敗しました。',
-  },
-  footer: {
-    tagline: 'オープンソース。セルフホスト。いつもあなたのもの。',
-    about: '概要',
-    documentation: 'ドキュメント',
-    support: 'サポート',
-    privacy: 'プライバシー',
-    operational: 'すべてのシステムが正常に動作中',
-    selfHosted: 'セルフホスト インスタンス',
-    rights: '© {year} CloudNest. All rights reserved.',
-  },
-  theme: { toDark: 'ダークテーマに切り替え', toLight: 'ライトテーマに切り替え' },
-  lang: { label: '言語を選択' },
-  illu: { synced: 'ファイル同期済み', secure: '安全・プライベート' },
-};
-
-const ptBR: EntryStrings = {
-  nav: { aria: 'Navegação principal', home: 'Início', features: 'Recursos', documentation: 'Documentação', support: 'Suporte' },
-  badge: 'Armazenamento em nuvem de código aberto',
-  headline: { line1: 'Seus arquivos.', accent: 'Sua nuvem.', rest: 'Do seu jeito.' },
-  paragraph:
-    'O CloudNest é uma plataforma moderna de código aberto que ajuda você a gerenciar, enviar e acessar seus arquivos de qualquer lugar — com segurança e controle total.',
-  features: {
-    aria: 'Lista de recursos',
-    providers: { title: 'Vários provedores de nuvem', desc: 'Conecte Google Drive, Dropbox, OneDrive, pCloud, MEGA e mais.' },
-    secure: { title: 'Seguro e privado', desc: 'Seus dados continuam seus. Sempre.' },
-    fast: { title: 'Rápido e confiável', desc: 'Transferências de alta velocidade com envios e downloads retomáveis.' },
-    anywhere: { title: 'Acesso de qualquer lugar', desc: 'Auto-hospedado — alcance pelo navegador de qualquer dispositivo.' },
-  },
-  oss: { title: 'Código aberto', desc: 'Gratuito. Construído pela comunidade.', cta: 'Ver o CloudNest no GitHub' },
-  login: {
-    welcome: 'Bem-vindo de volta!',
-    subtitle: 'Entre na sua conta CloudNest',
-    username: 'Nome de usuário',
-    password: 'Senha',
-    submit: 'Entrar',
-    submitting: 'Entrando…',
-    errorInvalid: 'Nome de usuário ou senha inválidos.',
-    errorTooMany: 'Tentativas demais. Tente novamente mais tarde.',
-    errorNetwork: 'Não foi possível conectar ao servidor local. O CloudNest está em execução?',
-    eyeShow: 'Mostrar senha',
-    eyeHide: 'Ocultar senha',
-  },
-  setup: {
-    title: 'Configurar o CloudNest',
-    subtitle: 'Crie a senha do administrador para concluir a instalação do CloudNest. Não há senha padrão.',
-    password: 'Senha (mínimo de 12 caracteres)',
-    confirm: 'Confirmar senha',
-    submit: 'Criar conta de administrador',
-    submitting: 'Criando…',
-    errorFallback: 'Falha na configuração.',
-  },
-  footer: {
-    tagline: 'Código aberto. Auto-hospedado. Sempre seu.',
-    about: 'Sobre',
-    documentation: 'Documentação',
-    support: 'Suporte',
-    privacy: 'Privacidade',
-    operational: 'Todos os sistemas operacionais',
-    selfHosted: 'Instância auto-hospedada',
-    rights: '© {year} CloudNest. Todos os direitos reservados.',
-  },
-  theme: { toDark: 'Mudar para o tema escuro', toLight: 'Mudar para o tema claro' },
-  lang: { label: 'Selecionar idioma' },
-  illu: { synced: 'Arquivos sincronizados', secure: 'Seguro e privado' },
-};
-
-export const entryStrings: Record<Locale, EntryStrings> = {
-  en,
-  'zh-CN': zhCN,
-  es,
-  de,
-  ru,
-  fr,
-  ja,
-  'pt-BR': ptBR,
-};
 
 export function isLocale(value: unknown): value is Locale {
   return typeof value === 'string' && (LOCALES as readonly string[]).includes(value);
@@ -513,4 +92,135 @@ export function interpolate(template: string, vars: Record<string, string | numb
   return template.replace(/\{(\w+)\}/g, (match, key: string) =>
     Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : match,
   );
+}
+
+/** Pick the plural category exactly as Intl defines it for that locale. */
+export function pluralCategory(locale: string, count: number): string {
+  try {
+    return new Intl.PluralRules(locale).select(count);
+  } catch {
+    return count === 1 ? 'one' : 'other';
+  }
+}
+
+/** Select the right plural form for the locale and interpolate {count} into it. */
+export function plural(locale: string, entry: Plural, count: number, vars: Record<string, string | number> = {}): string {
+  const form = entry[pluralCategory(locale, count) as keyof Plural] ?? entry.other;
+  return interpolate(form, { count, ...vars });
+}
+
+/* --- active locale & locale-aware formatting ------------------------------ */
+
+/**
+ * The locale formatting helpers use. React keeps its own state for rendering;
+ * this module-level value (set by the provider on mount and on every change)
+ * lets the shared format* helpers stay signature-compatible with the old
+ * ones — the same pattern theme.ts uses for the theme.
+ */
+let activeLocale: Locale = typeof window === 'undefined' ? DEFAULT_LOCALE : readStoredLocale();
+
+/** The locale currently in effect for the shared formatting helpers. */
+export function currentLocale(): Locale {
+  return activeLocale;
+}
+
+/** Called by the provider when the locale changes (and once at mount). */
+export function setActiveLocale(locale: Locale): void {
+  activeLocale = locale;
+}
+
+/** The catalog for a locale — used where React context is unavailable (confirm.tsx defaults). */
+export function appStringsFor(locale: Locale): AppStrings {
+  return appStrings[locale] ?? appStrings[DEFAULT_LOCALE];
+}
+
+function numberFormat(locale: string, value: number, fractionDigits: number): string {
+  try {
+    return new Intl.NumberFormat(locale, {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    }).format(value);
+  } catch {
+    return value.toFixed(fractionDigits);
+  }
+}
+
+/** Locale-aware byte size with translated units, e.g. de → „1,5 MB“, ru → „1,5 МБ“, fr → « 1,5 Ko ». */
+export function formatBytes(
+  bytes: number | null | undefined,
+  locale: Locale = activeLocale,
+  units?: AppStrings['units'],
+): string {
+  const catalog = appStringsFor(locale);
+  const u = units ?? catalog.units;
+  if (bytes === null || bytes === undefined) return catalog.common.unknown;
+  if (bytes < 1024) return `${bytes}\u00A0${u.b}`;
+  const thresholds: Array<[number, keyof AppStrings['units']]> = [
+    [1024 ** 4, 'tb'],
+    [1024 ** 3, 'gb'],
+    [1024 ** 2, 'mb'],
+    [1024, 'kb'],
+  ];
+  for (const [threshold, unit] of thresholds) {
+    if (bytes >= threshold) {
+      const value = bytes / threshold;
+      return `${numberFormat(locale, value, value >= 100 ? 0 : 1)}\u00A0${u[unit]}`;
+    }
+  }
+  return `${numberFormat(locale, bytes / 1024, 1)}\u00A0${u.kb}`;
+}
+
+/** Locale-aware date-time for catalog dates, e.g. ja → 2026/10/14 10:24. */
+export function formatDateTime(
+  iso: string | null | undefined,
+  locale: Locale = activeLocale,
+): string {
+  if (!iso) return '—';
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return '—';
+  try {
+    return when.toLocaleString(locale, {
+      month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+    });
+  } catch {
+    return when.toLocaleString();
+  }
+}
+
+/** Locale-aware integer, e.g. de → 3.481. */
+export function formatNumber(value: number, locale: Locale = activeLocale): string {
+  return numberFormat(locale, value, 0);
+}
+
+/* --- file type keys ------------------------------------------------------- */
+
+export type FileTypeKey = keyof AppStrings['fileTypes'] | (string & {});
+
+/**
+ * Stable, locale-independent type key derived from the real file name (never
+ * invented data). Known families map to catalog keys; unknown extensions keep
+ * their uppercase extension as the key — the extension is data, not English.
+ */
+export function fileTypeKey(name: string): FileTypeKey {
+  const lower = name.toLowerCase();
+  const dot = lower.lastIndexOf('.');
+  const ext = dot >= 0 ? lower.slice(dot + 1) : '';
+  if (['xlsx', 'xls', 'csv'].includes(ext)) return 'excel';
+  if (['docx', 'doc', 'odt', 'rtf'].includes(ext)) return 'word';
+  if (['pptx', 'ppt', 'odp'].includes(ext)) return 'powerpoint';
+  if (ext === 'pdf') return 'pdf';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'zip';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp'].includes(ext)) return 'image';
+  if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) return 'video';
+  if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(ext)) return 'audio';
+  if (ext === 'fig') return 'figma';
+  if (['txt', 'md'].includes(ext)) return 'text';
+  if (ext === '') return 'file';
+  return ext.toUpperCase();
+}
+
+/** Localized label for a type key; unknown keys render the key itself. */
+export function fileTypeLabel(key: FileTypeKey, locale: Locale = activeLocale): string {
+  const types = appStringsFor(locale).fileTypes as Record<string, string | undefined>;
+  return types[key] ?? key;
 }

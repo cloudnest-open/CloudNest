@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog, Dialog, useToast } from './ui.js';
+import { useI18n } from '../i18n-context.js';
 
 /**
  * One place for the three file actions, so the Dashboard, the Files page and
@@ -8,7 +9,9 @@ import { ConfirmDialog, Dialog, useToast } from './ui.js';
  * - Share   → creates a real link and shows the one-time URL
  * - Rename  → metadata-only, never moves provider objects
  * - Delete  → durable deletion with the exact destructive-confirmation copy
- * Nothing here reports success before the server confirms it.
+ * Nothing here reports success before the server confirms it. All copy
+ * resolves through the app-wide i18n context; safe error codes from the
+ * server stay as diagnostics inside the localized message.
  */
 
 export interface ActionableFile {
@@ -42,6 +45,7 @@ export function useFileActions(): FileActionsApi {
 interface Pending { file: ActionableFile; reload: Reload }
 
 export function FileActionsProvider({ children }: { children: ReactNode }) {
+  const { t, tf, plural } = useI18n();
   const toast = useToast();
 
   const [renameTarget, setRenameTarget] = useState<Pending | null>(null);
@@ -94,12 +98,14 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
         const url = (res.data as { url: string }).url;
         setShareResult({
           url,
-          name: dialog.files.length > 1 ? `${dialog.files.length} files` : dialog.files[0]?.originalName ?? 'file',
+          name: dialog.files.length > 1
+            ? plural(t.fileActions.result.fileCount, dialog.files.length)
+            : dialog.files[0]?.originalName ?? t.fileTypes.file,
         });
         toast.push({
           kind: 'success',
-          title: 'Share link created',
-          body: 'Copy it now — CloudNest stores only a hash, so the URL cannot be shown again.',
+          title: t.fileActions.share.successTitle,
+          body: t.fileActions.share.successBody,
         });
         setShareDialog(null);
         setSharePassword('');
@@ -110,8 +116,8 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
         const body = res.data as { code?: string };
         setShareError(
           body.code === 'share_password_required_by_policy'
-            ? 'Your Sharing settings require a password for new links. Set a password above and create the link again.'
-            : `The link could not be created (${body.code ?? 'unknown'}). Nothing was created.`,
+            ? t.fileActions.share.policyError
+            : tf(t.fileActions.share.error, { code: body.code ?? 'unknown' }),
         );
       }
     } finally {
@@ -137,12 +143,12 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
     try {
       const res = await api.renameFile(renameTarget.file.id, next);
       if (res.status === 200) {
-        toast.push({ kind: 'success', title: 'File renamed', body: 'Only the CloudNest name changed; provider objects were not moved.' });
+        toast.push({ kind: 'success', title: t.fileActions.rename.successTitle, body: t.fileActions.rename.successBody });
         await renameTarget.reload?.();
         setRenameTarget(null);
       } else {
         const body = res.data as { code?: string; error?: string };
-        setRenameError(`Could not rename this file (${body.code ?? body.error ?? 'unknown'}).`);
+        setRenameError(tf(t.fileActions.rename.error, { code: body.code ?? body.error ?? 'unknown' }));
       }
     } finally {
       setRenameBusy(false);
@@ -187,12 +193,12 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
         }
       }
       const parts: string[] = [];
-      if (completed > 0) parts.push(`${completed} deleted`);
-      if (pending > 0) parts.push(`${pending} still pending (recorded, safe to retry)`);
-      if (failed > 0) parts.push(`${failed} could not be queued`);
+      if (completed > 0) parts.push(tf(t.fileActions.bulkResult.deleted, { count: completed }));
+      if (pending > 0) parts.push(tf(t.fileActions.bulkResult.pending, { count: pending }));
+      if (failed > 0) parts.push(tf(t.fileActions.bulkResult.failed, { count: failed }));
       toast.push({
         kind: failed > 0 ? 'error' : pending > 0 ? 'info' : 'success',
-        title: `Bulk deletion finished for ${target.files.length} file(s)`,
+        title: plural(t.fileActions.bulkResult.title, target.files.length),
         body: parts.join(' · '),
       });
       await target.reload?.();
@@ -208,7 +214,7 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
     try {
       const res = await api.deleteFile(target.file.id);
       if (res.status !== 202) {
-        toast.push({ kind: 'error', title: 'Could not queue the deletion', body: 'Nothing was deleted.' });
+        toast.push({ kind: 'error', title: t.fileActions.deleteToast.queueErrorTitle, body: t.fileActions.deleteToast.queueErrorBody });
         return;
       }
       const jobId = (res.data as { jobId: string }).jobId;
@@ -218,12 +224,12 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
         ? (retry.data as { result?: { state?: string } }).result?.state ?? 'unknown'
         : 'unknown';
       if (state === 'completed') {
-        toast.push({ kind: 'success', title: 'Deletion completed', body: 'Every CloudNest-owned chunk object is confirmed gone.' });
+        toast.push({ kind: 'success', title: t.fileActions.deleteToast.completedTitle, body: t.fileActions.deleteToast.completedBody });
       } else {
         toast.push({
           kind: 'info',
-          title: 'Deletion is still pending',
-          body: 'Some objects could not be confirmed deleted. The obligation is recorded and can be retried; nothing unrelated was touched.',
+          title: t.fileActions.deleteToast.pendingTitle,
+          body: t.fileActions.deleteToast.pendingBody,
         });
       }
       await target.reload?.();
@@ -240,23 +246,23 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
 
       {shareResult && (
         <Dialog
-          title="New link URL"
-          description="This URL cannot be shown again — CloudNest stores only a hash of the token."
+          title={t.fileActions.result.title}
+          description={t.fileActions.result.desc}
           onClose={() => setShareResult(null)}
           footer={
             <>
-              <button type="button" className="btn-secondary" onClick={() => setShareResult(null)}>Dismiss</button>
+              <button type="button" className="btn-secondary" onClick={() => setShareResult(null)}>{t.common.dismiss}</button>
               <button
                 type="button"
                 className="btn-primary"
                 onClick={() => {
                   void navigator.clipboard.writeText(shareResult.url).then(
-                    () => toast.push({ kind: 'success', title: 'URL copied to the clipboard' }),
-                    () => toast.push({ kind: 'error', title: 'Copy failed', body: 'Select the URL and copy it manually.' }),
+                    () => toast.push({ kind: 'success', title: t.fileActions.result.copiedToast }),
+                    () => toast.push({ kind: 'error', title: t.fileActions.result.copyFailedTitle, body: t.fileActions.result.copyFailedBody }),
                   );
                 }}
               >
-                Copy link
+                {t.fileActions.result.copy}
               </button>
             </>
           }
@@ -268,20 +274,20 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
 
       {renameTarget && (
         <Dialog
-          title="Rename file"
-          description="Only the CloudNest name changes. Provider objects are never moved or renamed."
+          title={t.fileActions.rename.title}
+          description={t.fileActions.rename.desc}
           onClose={() => { if (!renameBusy) setRenameTarget(null); }}
           footer={
             <>
-              <button type="button" className="btn-secondary" disabled={renameBusy} onClick={() => setRenameTarget(null)}>Cancel</button>
+              <button type="button" className="btn-secondary" disabled={renameBusy} onClick={() => setRenameTarget(null)}>{t.dialog.cancel}</button>
               <button type="button" className="btn-primary" disabled={renameBusy} onClick={() => void confirmRename()}>
-                {renameBusy ? 'Saving…' : 'Save changes'}
+                {renameBusy ? t.fileActions.rename.saving : t.fileActions.rename.save}
               </button>
             </>
           }
         >
           <div className="upload-form">
-            <label htmlFor="rename-input">File name</label>
+            <label htmlFor="rename-input">{t.fileActions.rename.label}</label>
             <input
               id="rename-input"
               type="text"
@@ -296,12 +302,12 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
 
       {deleteTarget && (
         <ConfirmDialog
-          title="Delete File"
+          title={t.fileActions.deleteOne.title}
           lines={[
-            `Are you sure you want to delete "${deleteTarget.file.originalName}"?`,
-            "This will also delete the file's CloudNest-managed chunks across all connected accounts. This action cannot be undone.",
+            tf(t.fileActions.deleteOne.question, { name: deleteTarget.file.originalName }),
+            t.fileActions.deleteOne.detail,
           ]}
-          confirmLabel="Delete file"
+          confirmLabel={t.fileActions.deleteOne.confirm}
           onConfirm={() => void confirmDelete()}
           onClose={() => setDeleteTarget(null)}
         />
@@ -309,12 +315,15 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
 
       {bulkDeleteTarget && (
         <ConfirmDialog
-          title={`Delete ${bulkDeleteTarget.files.length} files`}
+          title={tf(t.fileActions.deleteMany.title, { count: bulkDeleteTarget.files.length })}
           lines={[
-            `Are you sure you want to delete these ${bulkDeleteTarget.files.length} files (${bulkDeleteTarget.files.slice(0, 3).map((f) => `"${f.originalName}"`).join(', ')}${bulkDeleteTarget.files.length > 3 ? '…' : ''})?`,
-            'This will also delete each file\'s CloudNest-managed chunks across all connected accounts. This action cannot be undone; the result is reported per file.',
+            tf(t.fileActions.deleteMany.question, {
+              count: bulkDeleteTarget.files.length,
+              names: `${bulkDeleteTarget.files.slice(0, 3).map((f) => `“${f.originalName}”`).join(', ')}${bulkDeleteTarget.files.length > 3 ? '…' : ''}`,
+            }),
+            t.fileActions.deleteMany.detail,
           ]}
-          confirmLabel="Delete files"
+          confirmLabel={t.fileActions.deleteMany.confirm}
           onConfirm={() => void confirmBulkDelete()}
           onClose={() => { if (!bulkBusy) setBulkDeleteTarget(null); }}
         />
@@ -322,20 +331,18 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
 
       {shareDialog && (
         <Dialog
-          title={shareDialog.files.length > 1 ? `Create shared link — ${shareDialog.files.length} files` : 'Create share link'}
-          description={
-            shareDialog.files.length > 1
-              ? 'Anyone with the link can download the files in this collection individually until it expires or is revoked.'
-              : 'Anyone with the link can download this file until it expires or is revoked.'
-          }
+          title={shareDialog.files.length > 1
+            ? tf(t.fileActions.share.titleMany, { count: shareDialog.files.length })
+            : t.fileActions.share.title}
+          description={shareDialog.files.length > 1 ? t.fileActions.share.descMany : t.fileActions.share.descOne}
           onClose={() => { if (!shareBusy) setShareDialog(null); }}
           footer={
             <>
               <button type="button" className="btn-secondary" disabled={shareBusy} onClick={() => setShareDialog(null)}>
-                Cancel
+                {t.dialog.cancel}
               </button>
               <button type="button" className="btn-primary" disabled={shareBusy} onClick={() => void confirmShare()}>
-                {shareBusy ? 'Creating…' : 'Create link'}
+                {shareBusy ? t.fileActions.share.creating : t.fileActions.share.create}
               </button>
             </>
           }
@@ -344,35 +351,35 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
             <ul className="plain-list">
               {shareDialog.files.map((f) => <li key={f.id}>{f.originalName}</li>)}
             </ul>
-            <label htmlFor="share-expiry">Expiry date</label>
+            <label htmlFor="share-expiry">{t.fileActions.share.expiry}</label>
             <select
               id="share-expiry"
               value={shareExpiry}
               disabled={shareBusy}
               onChange={(e) => setShareExpiry(e.target.value as '1' | '7' | '30' | 'never')}
             >
-              <option value="1">1 day</option>
-              <option value="7">7 days</option>
-              <option value="30">30 days</option>
-              <option value="never">No expiry</option>
+              <option value="1">{t.fileActions.share.expiry1}</option>
+              <option value="7">{t.fileActions.share.expiry7}</option>
+              <option value="30">{t.fileActions.share.expiry30}</option>
+              <option value="never">{t.fileActions.share.expiryNever}</option>
             </select>
-            <label htmlFor="share-password">Password (optional)</label>
+            <label htmlFor="share-password">{t.fileActions.share.password}</label>
             <input
               id="share-password"
               type="password"
               value={sharePassword}
-              placeholder="Set a password"
+              placeholder={t.fileActions.share.passwordPlaceholder}
               autoComplete="new-password"
               disabled={shareBusy}
               onChange={(e) => setSharePassword(e.target.value)}
             />
-            <label htmlFor="share-limit">Download limit (optional)</label>
+            <label htmlFor="share-limit">{t.fileActions.share.limit}</label>
             <input
               id="share-limit"
               type="number"
               min={1}
               value={shareLimit}
-              placeholder="Unlimited"
+              placeholder={t.fileActions.share.limitPlaceholder}
               disabled={shareBusy}
               onChange={(e) => setShareLimit(e.target.value)}
             />

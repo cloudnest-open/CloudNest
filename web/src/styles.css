@@ -223,7 +223,80 @@ body {
 .search-wrap { position: relative; width: min(470px, 100%); }
 
 /* --- Account chip + menu (design pack §3.2) ------------------------------ */
-.account-menu { position: relative; margin-left: auto; }
+.account-menu { position: relative; }
+
+/* Language selector (shell): the same one-preference control as the entry
+   page, styled with the shell tokens. It groups with bell + account on the
+   right; the search stays left. */
+.shell-lang-wrap { position: relative; margin-left: auto; }
+.shell-lang { position: relative; }
+
+.shell-lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 200px;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cn-text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.shell-lang-btn:hover, .shell-lang-btn[aria-expanded='true'] { background: var(--cn-surface-muted); color: var(--cn-text); }
+.shell-lang-current { overflow: hidden; text-overflow: ellipsis; }
+.shell-lang-chevron { flex-shrink: 0; }
+
+.shell-lang-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 200px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--cn-surface);
+  border: 1px solid var(--cn-border);
+  border-radius: 12px;
+  box-shadow: var(--cn-shadow-dialog);
+}
+
+.shell-lang-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--cn-text);
+  font: inherit;
+  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.shell-lang-option:hover { background: var(--cn-surface-muted); }
+.shell-lang-option.selected { color: var(--cn-primary); font-weight: 600; }
+
+/* Narrow screens: the label (e.g. «Português (Brasil)», 「简体中文」) would
+   push the topbar past the viewport, so the control collapses to the globe
+   icon — the aria-label still announces the current language. */
+@media (max-width: 767px) {
+  .shell-lang-current, .shell-lang-chevron { display: none; }
+  .shell-lang-btn { padding: 0 8px; }
+}
 
 /* Notification bell (reference topbar): a real toggle with a truthful
    empty-state panel — never a decorative icon. */

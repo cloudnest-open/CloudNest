@@ -1,38 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ProviderInfo, type AccountInfo } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
-import { Dialog } from '../components/ui.js';
+import { Dialog, formatBytes, formatDateTime } from '../components/ui.js';
 import { ProviderLogo } from '../components/ProviderLogo.js';
+import { useI18n } from '../i18n-context.js';
 
 /**
  * Cloud Accounts: real database rows only. Unknown quota is shown as unknown,
  * never as zero. MEGA is visibly Experimental. No fake progress or storage.
+ * All copy resolves through the app-wide i18n context.
  *
  * Connection behavior (owner task 2026-10-15): every provider's Connect
  * action lives and stays on this page. OAuth start failures for a missing
  * application configuration open an explanatory dialog with an explicit
  * "Configure Provider" choice — the user is never auto-navigated to Settings.
  */
-
-function formatBytes(bytes: number | null): string {
-  if (bytes === null || bytes === undefined) return 'Unknown';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
-  let value = bytes / 1024;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i++;
-  }
-  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
-}
-
-function statusLabel(account: AccountInfo): { text: string; tone: string } {
-  if (account.status === 'connected') return { text: 'Connected', tone: 'ok' };
-  if (account.status === 'needs_reauth') return { text: 'Needs reconnect', tone: 'warn' };
-  if (account.status === 'error') return { text: 'Error', tone: 'bad' };
-  return { text: 'Disconnected', tone: 'muted' };
-}
 
 /**
  * Connect ↔ Provider-setup hand-off (owner task 2026-10-15).
@@ -66,6 +48,7 @@ function writeHandoff(key: string, value: { provider: string; displayName?: stri
 }
 
 export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => void }) {
+  const { t, tf, plural } = useI18n();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,15 +99,16 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       if (p.status === 200) setProviders((p.data as { providers: ProviderInfo[] }).providers);
       if (a.status === 200) setAccounts((a.data as { accounts: AccountInfo[] }).accounts);
       if (p.status !== 200 && a.status !== 200) {
-        setError('Could not load cloud accounts. The server did not answer with real data.');
+        setError(t.accounts.errorLoad);
       } else {
         setError(null);
       }
     } catch {
-      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+      setError(t.common.errorNetwork);
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
   }, []);
 
   useEffect(() => {
@@ -154,7 +138,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       setSetupNeeded(p);
       return;
     }
-    setError(data.error ?? 'Could not start the connection.');
+    setError(data.error ?? t.accounts.startFailed);
   }
 
   async function withBusy(id: string, fn: () => Promise<void>) {
@@ -171,7 +155,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     await withBusy(id, async () => {
       const res = await api.refreshQuota(id);
       const result = (res.data as { result?: { ok: boolean; code?: string } }).result;
-      if (!result?.ok) setError(`Quota refresh failed (${result?.code ?? 'unknown'}). Previous data was kept.`);
+      if (!result?.ok) setError(tf(t.accounts.quotaRefresh.failed, { code: result?.code ?? 'unknown' }));
       await reload();
     });
   }
@@ -181,13 +165,13 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       const res = await api.refreshAllQuotas();
       const results = (res.data as { results?: Array<{ id: string; ok: boolean; code?: string }> }).results ?? [];
       const failed = results.filter((r) => !r.ok);
-      if (failed.length > 0) setError(`${failed.length} of ${results.length} quota refresh(es) failed. Other accounts were still updated.`);
+      if (failed.length > 0) setError(plural(t.accounts.quotaRefresh.allFailed, failed.length, { total: results.length }));
       await reload();
     });
   }
 
   async function rename(account: AccountInfo) {
-    const label = window.prompt('New label for this account:', account.displayLabel);
+    const label = window.prompt(t.accounts.list.renamePrompt, account.displayLabel);
     if (!label) return;
     await withBusy(account.id, async () => {
       await api.updateAccount(account.id, { displayLabel: label });
@@ -205,10 +189,10 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       }
       if (data.mode === 'credentials') {
         setMegaOpen(true);
-        setNotice(data.message ?? 'Enter your MEGA credentials again.');
+        setNotice(data.message ?? t.accounts.mega.reauthNotice);
         return;
       }
-      setError((res.data as { error?: string }).error ?? 'Reconnect failed.');
+      setError((res.data as { error?: string }).error ?? t.accounts.reconnect.failed);
     });
   }
 
@@ -217,15 +201,15 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     // it until reconnection — warn with the real count before confirming.
     const tracked = account.usage?.trackedFiles ?? 0;
     const message = tracked > 0
-      ? `Disconnect ${account.displayLabel}? ${tracked} file${tracked === 1 ? ' stores' : 's store'} chunks on this account and may be unavailable until it is reconnected. Local credentials are removed. No remote files are deleted.`
-      : `Disconnect ${account.displayLabel}? Local credentials are removed. No remote files are deleted.`;
-    const ok = await confirmDestructive(message, { title: 'Disconnect account', confirmLabel: 'Disconnect' });
+      ? plural(t.accounts.disconnect.confirmWithFiles, tracked, { label: account.displayLabel })
+      : tf(t.accounts.disconnect.confirmPlain, { label: account.displayLabel });
+    const ok = await confirmDestructive(message, { title: t.accounts.disconnect.title, confirmLabel: t.accounts.disconnect.confirmLabel });
     if (!ok) return;
     await withBusy(account.id, async () => {
       const res = await api.disconnect(account.id);
       const data = res.data as { warning?: string | null };
       if (data.warning) setNotice(data.warning);
-      else setNotice('Account disconnected. No remote files were deleted.');
+      else setNotice(t.accounts.disconnect.done);
       await reload();
     });
   }
@@ -238,28 +222,35 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     if (res.status === 201) {
       setMegaOpen(false);
       setMegaEmail('');
-      setNotice('MEGA account connected (experimental).');
+      setNotice(t.accounts.mega.connected);
       await reload();
     } else {
       const data = res.data as { error?: string; code?: string };
-      setError(data.code === 'invalid_credentials' ? 'MEGA rejected those credentials.' : data.error ?? 'MEGA connection failed.');
+      setError(data.code === 'invalid_credentials' ? t.accounts.mega.badCredentials : data.error ?? t.accounts.mega.failed);
     }
   }
 
   const setupSummary = (provider: ProviderInfo): { text: string; tone: string } => {
-    if (!provider.requiresAppConfig) return { text: 'Experimental', tone: 'warn' };
-    if (provider.verificationStatus === 'verified') return { text: 'Verified', tone: 'ok' };
-    if (provider.verificationStatus === 'saved') return { text: 'Saved — not yet verified', tone: 'warn' };
-    if (provider.verificationStatus === 'needs_correction') return { text: 'Needs correction', tone: 'bad' };
-    return { text: 'Not set', tone: 'muted' };
+    if (!provider.requiresAppConfig) return { text: t.accounts.setupStatus.experimental, tone: 'warn' };
+    if (provider.verificationStatus === 'verified') return { text: t.accounts.setupStatus.verified, tone: 'ok' };
+    if (provider.verificationStatus === 'saved') return { text: t.accounts.setupStatus.saved, tone: 'warn' };
+    if (provider.verificationStatus === 'needs_correction') return { text: t.accounts.setupStatus.needsCorrection, tone: 'bad' };
+    return { text: t.accounts.setupStatus.notSet, tone: 'muted' };
+  };
+
+  const accountStatus = (a: AccountInfo): { text: string; tone: string } => {
+    if (a.status === 'connected') return { text: t.states.account.connected, tone: 'ok' };
+    if (a.status === 'needs_reauth') return { text: t.states.account.needs_reauth, tone: 'warn' };
+    if (a.status === 'error') return { text: t.states.account.error, tone: 'bad' };
+    return { text: t.states.account.disconnected, tone: 'muted' };
   };
 
   return (
     <>
       <div className="page-head">
-        <h1 className="page-title">Cloud Accounts</h1>
+        <h1 className="page-title">{t.accounts.title}</h1>
         <button type="button" className="btn-primary btn-compact" onClick={() => setPickerOpen((v) => !v)}>
-          + Connect Account
+          {t.accounts.connectAccount}
         </button>
       </div>
 
@@ -276,7 +267,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
 
       {pickerOpen && (
         <section className="card">
-          <h2>Choose a provider</h2>
+          <h2>{t.accounts.picker.title}</h2>
           <div className="provider-grid">
             {providers.map((p) => {
               const s = setupSummary(p);
@@ -287,17 +278,17 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                       <ProviderLogo provider={p.id} size={24} />
                       <strong>{p.displayName}</strong>
                     </span>
-                    {p.experimental && <span className="tag tag-warn">Experimental</span>}
+                    {p.experimental && <span className="tag tag-warn">{t.accounts.picker.experimental}</span>}
                   </div>
-                  <p className={`setup-state setup-${s.tone}`}>Setup: {s.text}</p>
+                  <p className={`setup-state setup-${s.tone}`}>{tf(t.accounts.picker.setup, { status: s.text })}</p>
                   {!p.requiresAppConfig && (
-                    <p className="muted small">Connects with email and password — experimental, not OAuth.</p>
+                    <p className="muted small">{t.accounts.picker.megaNote}</p>
                   )}
                   {/* The real connection action always lives here. If the
                       instance lacks the app configuration, Connect explains
                       in place instead of rerouting to Settings. */}
                   <button type="button" className="btn-primary btn-block" onClick={() => void connect(p)}>
-                    Connect {p.displayName}
+                    {tf(t.accounts.picker.connect, { provider: p.displayName })}
                   </button>
                 </div>
               );
@@ -308,13 +299,13 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
 
       {setupNeeded && (
         <Dialog
-          title={`${setupNeeded.displayName} needs administrator setup`}
-          description={`Connecting ${setupNeeded.displayName} requires this CloudNest instance's application credentials, which only an administrator can configure. Nothing was connected and no account was changed.`}
+          title={tf(t.accounts.setupNeeded.title, { provider: setupNeeded.displayName })}
+          description={tf(t.accounts.setupNeeded.desc, { provider: setupNeeded.displayName })}
           onClose={() => setSetupNeeded(null)}
           footer={
             <>
               <button type="button" className="btn-secondary" onClick={() => setSetupNeeded(null)}>
-                Back
+                {t.accounts.setupNeeded.back}
               </button>
               <button
                 type="button"
@@ -327,34 +318,27 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                   onGoToSettings();
                 }}
               >
-                Configure Provider
+                {t.accounts.setupNeeded.configure}
               </button>
             </>
           }
         >
-          <p className="small muted">
-            Application-level OAuth setup (Client ID, secret, Authorized Redirect URI) is separate from your
-            personal cloud-account connections. Once it is configured, Connect from this page starts the real
-            authorization flow — no more trips to Settings.
-          </p>
+          <p className="small muted">{t.accounts.setupNeeded.body}</p>
         </Dialog>
       )}
 
       {megaOpen && (
         <section className="card">
-          <h2>Connect MEGA <span className="tag tag-warn">Experimental</span></h2>
-          <p className="muted">
-            MEGA uses an unofficial Node.js library. Credentials are sent only to your local CloudNest
-            server and stored encrypted. Two-factor codes are never saved.
-          </p>
+          <h2>{t.accounts.mega.title} <span className="tag tag-warn">{t.accounts.mega.experimental}</span></h2>
+          <p className="muted">{t.accounts.mega.note}</p>
           <form onSubmit={submitMega} className="password-form">
-            <label htmlFor="mega-email">MEGA email</label>
+            <label htmlFor="mega-email">{t.accounts.mega.email}</label>
             <input id="mega-email" type="email" value={megaEmail} onChange={(e) => setMegaEmail(e.target.value)} required />
-            <label htmlFor="mega-password">MEGA password</label>
+            <label htmlFor="mega-password">{t.accounts.mega.password}</label>
             <input id="mega-password" type="password" value={megaPassword} onChange={(e) => setMegaPassword(e.target.value)} required />
-            <button type="submit" className="btn-primary">Connect MEGA</button>
+            <button type="submit" className="btn-primary">{t.accounts.mega.submit}</button>
             <button type="button" className="btn-secondary" onClick={() => { setMegaOpen(false); setMegaPassword(''); }}>
-              Cancel
+              {t.dialog.cancel}
             </button>
           </form>
         </section>
@@ -362,32 +346,32 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
 
       <section className="card">
         <div className="page-head">
-          <h2>Accounts</h2>
+          <h2>{t.accounts.list.title}</h2>
           {accounts.length > 0 && (
             <button type="button" className="btn-secondary" disabled={busyId === '__all__'} onClick={() => void refreshAll()}>
-              {busyId === '__all__' ? 'Refreshing…' : 'Refresh All Quotas'}
+              {busyId === '__all__' ? t.accounts.list.refreshing : t.accounts.list.refreshAll}
             </button>
           )}
         </div>
         {loading ? (
-          <p className="muted">Loading…</p>
+          <p className="muted">{t.common.loading}</p>
         ) : accounts.length === 0 ? (
-          <p className="muted">No cloud accounts connected yet.</p>
+          <p className="muted">{t.common.noAccountsYet}</p>
         ) : (
           <table className="accounts-table">
             <thead>
               <tr>
-                <th>Provider</th>
-                <th>Account</th>
-                <th>Status</th>
-                <th>Used / Total</th>
-                <th>Quota</th>
-                <th>Actions</th>
+                <th>{t.accounts.list.provider}</th>
+                <th>{t.accounts.list.account}</th>
+                <th>{t.accounts.list.status}</th>
+                <th>{t.accounts.list.usedTotal}</th>
+                <th>{t.accounts.list.quota}</th>
+                <th>{t.accounts.list.actions}</th>
               </tr>
             </thead>
             <tbody>
               {accounts.map((a) => {
-                const s = statusLabel(a);
+                const s = accountStatus(a);
                 return (
                   <tr key={a.id}>
                     <td>
@@ -395,7 +379,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                         <ProviderLogo provider={a.provider} size={20} />
                         {a.displayName}
                       </span>
-                      {a.experimental && <span className="tag tag-warn">Beta</span>}
+                      {a.experimental && <span className="tag tag-warn">{t.accounts.picker.experimental}</span>}
                     </td>
                     <td className="ellipsis">{a.displayLabel}</td>
                     <td>
@@ -403,24 +387,26 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                       {a.lastErrorCode && <div className="muted small">{a.lastErrorCode}</div>}
                     </td>
                     <td>
-                      {a.quota.usedBytes === null ? 'Unknown' : formatBytes(a.quota.usedBytes)} /{' '}
-                      {a.quota.totalBytes === null ? 'Unknown' : formatBytes(a.quota.totalBytes)}
+                      {a.quota.usedBytes === null ? t.common.unknown : formatBytes(a.quota.usedBytes)} /{' '}
+                      {a.quota.totalBytes === null ? t.common.unknown : formatBytes(a.quota.totalBytes)}
                       {a.quota.availableBytes !== null && (
-                        <div className="muted small">Available (estimated): {formatBytes(a.quota.availableBytes)}</div>
+                        <div className="muted small">{tf(t.accounts.list.available, { size: formatBytes(a.quota.availableBytes) })}</div>
                       )}
                     </td>
                     <td>
-                      <span className={`state state-${a.quota.status === 'current' ? 'ok' : 'warn'}`}>{a.quota.status}</span>
+                      <span className={`state state-${a.quota.status === 'current' ? 'ok' : 'warn'}`}>
+                        {(t.states.quota as Record<string, string | undefined>)[a.quota.status] ?? a.quota.status}
+                      </span>
                       {a.quota.lastCheckedAt && (
-                        <div className="muted small">Checked {new Date(a.quota.lastCheckedAt).toLocaleString()}</div>
+                        <div className="muted small">{tf(t.accounts.list.checked, { when: formatDateTime(a.quota.lastCheckedAt) })}</div>
                       )}
                       {a.quota.lastErrorCode && <div className="muted small">{a.quota.lastErrorCode}</div>}
                     </td>
                     <td className="actions">
-                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void refreshOne(a.id)}>Refresh quota</button>
-                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void rename(a)}>Rename</button>
-                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void reconnect(a)}>Reconnect</button>
-                      <button type="button" className="btn-danger" disabled={busyId === a.id} onClick={() => void disconnect(a)}>Disconnect</button>
+                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void refreshOne(a.id)}>{t.accounts.list.refreshQuota}</button>
+                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void rename(a)}>{t.accounts.list.rename}</button>
+                      <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void reconnect(a)}>{t.accounts.list.reconnect}</button>
+                      <button type="button" className="btn-danger" disabled={busyId === a.id} onClick={() => void disconnect(a)}>{t.accounts.list.disconnect}</button>
                     </td>
                   </tr>
                 );
@@ -428,10 +414,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
             </tbody>
           </table>
         )}
-        <p className="muted small">
-          Provider-reported quotas can change outside CloudNest. “Available” is an estimate, not a reservation guarantee.
-          Remote files are never deleted by disconnecting.
-        </p>
+        <p className="muted small">{t.accounts.list.footnote}</p>
       </section>
     </>
   );

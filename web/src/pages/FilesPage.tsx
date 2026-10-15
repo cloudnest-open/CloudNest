@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Folder, RefreshCw, Upload } from 'lucide-react';
 import { api } from '../api.js';
 import { FileTable, type FileTableRow } from '../components/FileTable.js';
-import { EmptyState, SkeletonRows, formatBytes, formatDateTime, pageList, typeLabel } from '../components/ui.js';
+import { EmptyState, SkeletonRows, formatBytes, formatDateTime, fileTypeName, fileTypeDisplay, pageList } from '../components/ui.js';
+import { useI18n } from '../i18n-context.js';
 
 /**
  * Files (design pack §8): one row per logical file — never one per chunk.
@@ -10,6 +11,7 @@ import { EmptyState, SkeletonRows, formatBytes, formatDateTime, pageList, typeLa
  * Every action is real: Share opens the link dialog, Rename changes metadata
  * only, Delete runs the durable deletion with the destructive-confirmation
  * copy. Pagination is server-driven; the numbered footer shows the real total.
+ * All copy resolves through the app-wide i18n context.
  */
 
 interface FileView {
@@ -30,6 +32,7 @@ interface FileView {
 const PAGE_SIZE = 100;
 
 export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initialSearch?: string; onGoToCloudAccounts?: () => void } = {}) {
+  const { t, tf } = useI18n();
   const [files, setFiles] = useState<FileView[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -37,7 +40,8 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
   const [search, setSearch] = useState(initialSearch);
   const [sortBy, setSortBy] = useState<'modified' | 'name' | 'size'>('modified');
   const [detail, setDetail] = useState<FileView | null>(null);
-  // "All types" filter over the loaded rows; the label comes from real names.
+  // "All types" filter over the loaded rows; the value is the locale-
+  // independent type key, the label is localized.
   const [typeFilter, setTypeFilter] = useState('all');
   // FE-13: server-driven pagination so the library is not silently capped at
   // the first 100 rows.
@@ -55,13 +59,14 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
         setTotal(data.total ?? 0);
         setError(null);
       } else {
-        setError('Could not load the file list. Nothing is shown as an empty result while the API is failing.');
+        setError(t.files.errorLoad);
       }
     } catch {
-      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+      setError(t.common.errorNetwork);
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
   }, [page, search]);
 
   useEffect(() => {
@@ -79,9 +84,9 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
     searchTimer.current = window.setTimeout(() => void load(), 250);
   }
 
-  const typeOptions = Array.from(new Set(files.map((f) => typeLabel(f.originalName)))).sort();
+  const typeOptions = Array.from(new Set(files.map((f) => fileTypeName(f.originalName)))).sort();
   const visible = files
-    .filter((f) => (typeFilter === 'all' ? true : typeLabel(f.originalName) === typeFilter))
+    .filter((f) => (typeFilter === 'all' ? true : fileTypeName(f.originalName) === typeFilter))
     .sort((a, b) => {
       if (sortBy === 'name') return a.originalName.localeCompare(b.originalName);
       if (sortBy === 'size') return b.sizeBytes - a.sizeBytes;
@@ -110,13 +115,13 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
     <>
       <div className="page-head">
         <div>
-          <h1 className="page-title">Files</h1>
-          <p className="muted">One row per CloudNest file. Chunk objects inside your providers are never listed as files.</p>
+          <h1 className="page-title">{t.files.title}</h1>
+          <p className="muted">{t.files.subtitle}</p>
         </div>
         <div className="card-tools">
           <button type="button" className="btn-secondary" onClick={() => void load()} disabled={loading}>
             <RefreshCw size={15} aria-hidden="true" />
-            {loading ? 'Refreshing…' : 'Refresh'}
+            {loading ? t.common.refreshing : t.common.refresh}
           </button>
         </div>
       </div>
@@ -125,31 +130,31 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
 
       <section className="card">
         <div className="card-head">
-          <h2>All files</h2>
+          <h2>{t.files.allFiles}</h2>
           <div className="card-tools">
             <input
               type="search"
-              aria-label="Search files"
-              placeholder="Search files..."
+              aria-label={t.files.searchLabel}
+              placeholder={t.files.searchPlaceholder}
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
             />
             <select
-              aria-label="Filter by type"
+              aria-label={t.files.filterLabel}
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
             >
-              <option value="all">All Types</option>
-              {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+              <option value="all">{t.files.filterAll}</option>
+              {typeOptions.map((key) => <option key={key} value={key}>{fileTypeDisplay(key)}</option>)}
             </select>
             <select
-              aria-label="Sort files"
+              aria-label={t.files.sortLabel}
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as 'modified' | 'name' | 'size')}
             >
-              <option value="modified">Sort by: Modified</option>
-              <option value="name">Sort by: Name</option>
-              <option value="size">Sort by: Size</option>
+              <option value="modified">{t.files.sortModified}</option>
+              <option value="name">{t.files.sortName}</option>
+              <option value="size">{t.files.sortSize}</option>
             </select>
           </div>
         </div>
@@ -159,8 +164,8 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
         ) : visible.length === 0 ? (
           <EmptyState
             icon={search ? Folder : Upload}
-            title={search ? 'No files match your search' : 'No files yet'}
-            body={search ? 'Clear the search to see every file.' : 'Upload a file and it appears here as one logical file.'}
+            title={search ? t.files.emptySearchTitle : t.files.emptyTitle}
+            body={search ? t.files.emptySearchBody : t.files.emptyBody}
           />
         ) : (
           <FileTable
@@ -174,14 +179,18 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
             footer={
               <div className="files-footer">
                 <span className="muted small">
-                  Showing {page * PAGE_SIZE + 1}–{page * PAGE_SIZE + visible.length} of {total} files
+                  {tf(t.common.showingRange, {
+                    from: page * PAGE_SIZE + 1,
+                    to: page * PAGE_SIZE + visible.length,
+                    total,
+                  })}
                 </span>
-                <nav className="pagination" aria-label="Files pagination">
+                <nav className="pagination" aria-label={t.files.paginationAria}>
                   <button
                     type="button"
                     className="page-btn"
                     disabled={page === 0}
-                    aria-label="Previous page"
+                    aria-label="‹"
                     onClick={() => goTo(page - 1)}
                   >
                     ‹
@@ -205,7 +214,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
                     type="button"
                     className="page-btn"
                     disabled={page + 1 >= totalPages}
-                    aria-label="Next page"
+                    aria-label="›"
                     onClick={() => goTo(page + 1)}
                   >
                     ›
@@ -217,43 +226,42 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts }: { initial
         )}
 
         <p className="muted small" style={{ marginTop: 12 }}>
-          Downloads verify every chunk's checksum before any bytes are sent. Renaming changes metadata only and never
-          moves provider objects. Deleting removes only the CloudNest-owned chunk objects and reports anything it could
-          not confirm.
+          {t.files.footnote}
         </p>
       </section>
 
       {detail && (
         <section className="card">
           <div className="page-head">
-            <h2>File details</h2>
-            <button type="button" className="btn-secondary" onClick={() => setDetail(null)}>Close</button>
+            <h2>{t.files.details.title}</h2>
+            <button type="button" className="btn-secondary" onClick={() => setDetail(null)}>{t.common.close}</button>
           </div>
           <ul className="plain-list">
-            <li><strong>Name:</strong> {detail.originalName}</li>
-            <li><strong>Size:</strong> {formatBytes(detail.sizeBytes)} ({detail.sizeBytes} bytes)</li>
-            <li><strong>Type:</strong> {detail.mimeType ?? 'Unknown'}</li>
-            <li><strong>Chunks:</strong> {detail.chunkCount} × {formatBytes(detail.chunkSizeBytes)}</li>
-            <li><strong>State:</strong> {detail.state}</li>
-            <li><strong>Stored across:</strong> {detail.storedAcross.length === 0 ? 'Not yet placed' : detail.storedAcross.join(', ')}</li>
+            <li><strong>{t.files.details.nameLabel}</strong> {detail.originalName}</li>
+            <li><strong>{t.files.details.sizeLabel}</strong> {formatBytes(detail.sizeBytes)} ({detail.sizeBytes} bytes)</li>
+            <li><strong>{t.files.details.typeLabel}</strong> {detail.mimeType ?? t.common.unknown}</li>
+            <li><strong>{t.files.details.chunksLabel}</strong> {tf(t.files.details.chunksValue, { count: detail.chunkCount, size: formatBytes(detail.chunkSizeBytes) })}</li>
+            <li><strong>{t.files.details.stateLabel}</strong> {detail.state}</li>
+            <li><strong>{t.files.details.storedAcrossLabel}</strong> {detail.storedAcross.length === 0 ? t.common.notPlaced : detail.storedAcross.join(', ')}</li>
             <li>
-              <strong>Availability:</strong>{' '}
+              <strong>{t.files.details.availabilityLabel}</strong>{' '}
               {detail.storageHealth?.status === 'account_unavailable' ? (
                 <>
-                  Reconnect required — offline accounts: {detail.storageHealth.unavailable.map((u) => u.label).join(', ')}. The
-                  file is not corrupted; its chunks are intact.
+                  {tf(t.files.details.reconnectRequired, {
+                    accounts: detail.storageHealth.unavailable.map((u) => u.label).join(', '),
+                  })}
                   {onGoToCloudAccounts && (
                     <button type="button" className="btn-inline" style={{ marginLeft: 8 }} onClick={onGoToCloudAccounts}>
-                      Go to Cloud Accounts
+                      {t.files.details.goToCloudAccounts}
                     </button>
                   )}
                 </>
               ) : (
-                'All storage accounts holding this file are connected.'
+                t.files.details.allAccountsOk
               )}
             </li>
-            <li><strong>Created:</strong> {formatDateTime(detail.createdAt)}</li>
-            <li><strong>Completed:</strong> {formatDateTime(detail.completedAt)}</li>
+            <li><strong>{t.files.details.createdLabel}</strong> {formatDateTime(detail.createdAt)}</li>
+            <li><strong>{t.files.details.completedLabel}</strong> {formatDateTime(detail.completedAt)}</li>
           </ul>
         </section>
       )}

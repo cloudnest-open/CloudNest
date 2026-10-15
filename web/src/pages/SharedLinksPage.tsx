@@ -3,12 +3,14 @@ import { api } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
 import { useFileActions } from '../components/FileActionsProvider.js';
 import { Badge, formatBytes, formatDateTime } from '../components/ui.js';
+import { useI18n } from '../i18n-context.js';
 
 /**
  * Shared Links (Step 5 / M11.e).
  *
  * The raw URL is shown exactly once at creation — the server keeps only a hash,
  * so it can never be displayed again. Revoking a link never deletes the file.
+ * All copy resolves through the app-wide i18n context.
  */
 
 interface LinkView {
@@ -30,6 +32,7 @@ interface FileView {
 }
 
 export function SharedLinksPage() {
+  const { t, tf } = useI18n();
   const actions = useFileActions();
   const [links, setLinks] = useState<LinkView[]>([]);
   const [files, setFiles] = useState<FileView[]>([]);
@@ -42,6 +45,9 @@ export function SharedLinksPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const shareStateLabel = (state: string): string =>
+    (t.states.share as Record<string, string | undefined>)[state] ?? state;
+
   const load = useCallback(async () => {
     // FE-04: surface a real error instead of leaving the page half-empty
     try {
@@ -49,13 +55,14 @@ export function SharedLinksPage() {
       if (l.status === 200) setLinks((l.data as { links: LinkView[] }).links ?? []);
       if (f.status === 200) setFiles((f.data as { files: FileView[] }).files ?? []);
       if (l.status !== 200 && f.status !== 200) {
-        setError('Could not load share links. The server did not answer with real data.');
+        setError(t.shares.errorLoad);
       } else {
         setError(null);
       }
     } catch {
-      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+      setError(t.common.errorNetwork);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
   }, []);
 
   useEffect(() => {
@@ -70,7 +77,7 @@ export function SharedLinksPage() {
 
   async function create(): Promise<void> {
     if (selected.length === 0) {
-      setError('Select at least one completed file to share.');
+      setError(t.shares.create.selectOne);
       return;
     }
     setBusy(true);
@@ -86,14 +93,14 @@ export function SharedLinksPage() {
       });
       if (res.status === 201) {
         setCreatedUrl((res.data as { url: string }).url);
-        setNotice('Link created. The URL below is shown only once — copy it now.');
+        setNotice(t.shares.create.success);
         setPassword('');
         setSelected([]);
         setExpiresAt('');
         setDownloadLimit('');
         await load();
       } else {
-        setError('The link could not be created.');
+        setError(t.shares.create.failed);
       }
     } finally {
       setBusy(false);
@@ -102,32 +109,32 @@ export function SharedLinksPage() {
 
   async function revoke(id: string): Promise<void> {
     const ok = await confirmDestructive(
-      'Revoke this link? Anyone holding the URL will lose access immediately. The files are not deleted.',
-      { title: 'Revoke link', confirmLabel: 'Revoke link' },
+      t.shares.revoke.message,
+      { title: t.shares.revoke.title, confirmLabel: t.shares.revoke.confirmLabel },
     );
     if (!ok) return;
     const res = await api.revokeShareLink(id);
     if (res.status === 200) {
-      setNotice('Link revoked. The stored files were not deleted.');
+      setNotice(t.shares.revoke.success);
       await load();
     } else {
-      setError('Could not revoke that link.');
+      setError(t.shares.revoke.failed);
     }
   }
 
   async function rotate(id: string): Promise<void> {
     const ok = await confirmDestructive(
-      'Rotate this link? The old URL stops working immediately and a new URL is issued once.',
-      { title: 'Rotate link', confirmLabel: 'Rotate link' },
+      t.shares.rotate.message,
+      { title: t.shares.rotate.title, confirmLabel: t.shares.rotate.confirmLabel },
     );
     if (!ok) return;
     const res = await api.rotateShareLink(id);
     if (res.status === 200) {
       setCreatedUrl((res.data as { url: string }).url);
-      setNotice('Link rotated. The previous URL no longer works.');
+      setNotice(t.shares.rotate.success);
       await load();
     } else {
-      setError('Could not rotate that link.');
+      setError(t.shares.rotate.failed);
     }
   }
 
@@ -142,8 +149,8 @@ export function SharedLinksPage() {
   return (
     <>
       <div className="page-head">
-        <h1 className="page-title">Shared Links</h1>
-        <button type="button" className="btn-secondary" onClick={() => void load()}>Refresh</button>
+        <h1 className="page-title">{t.shares.title}</h1>
+        <button type="button" className="btn-secondary" onClick={() => void load()}>{t.common.refresh}</button>
       </div>
 
       {notice && <div className="card notice-card" role="status"><p>{notice}</p></div>}
@@ -151,7 +158,7 @@ export function SharedLinksPage() {
 
       {createdUrl && (
         <section className="card">
-          <h2>New link URL</h2>
+          <h2>{t.shares.newUrl}</h2>
           <div className="copy-row">
             <code className="callback-uri">{createdUrl}</code>
             <button
@@ -159,25 +166,23 @@ export function SharedLinksPage() {
               className="btn-secondary"
               onClick={() => {
                 void navigator.clipboard.writeText(createdUrl).then(
-                  () => setNotice('URL copied.'),
-                  () => setNotice('Copy failed; select the URL and copy it manually.'),
+                  () => setNotice(t.shares.urlCopied),
+                  () => setNotice(t.shares.copyFailed),
                 );
               }}
             >
-              Copy
+              {t.common.copy}
             </button>
           </div>
-          <p className="muted small">
-            This URL cannot be shown again — CloudNest stores only a hash of the token. If you lose it, rotate the link.
-          </p>
+          <p className="muted small">{t.shares.shownOnce}</p>
         </section>
       )}
 
       <section className="card">
-        <h2>Create a link</h2>
-        <p className="muted">Select one or more completed files. A collection link lists them individually; ZIP bundles are not part of V1.</p>
+        <h2>{t.shares.create.title}</h2>
+        <p className="muted">{t.shares.create.desc}</p>
         {shareable.length === 0 ? (
-          <p className="muted">No completed files are available to share yet.</p>
+          <p className="muted">{t.shares.create.noneAvailable}</p>
         ) : (
           <>
             <ul className="plain-list">
@@ -195,16 +200,16 @@ export function SharedLinksPage() {
               ))}
             </ul>
             <div className="upload-form">
-              <label htmlFor="share-password">Optional password (min 12 characters)</label>
+              <label htmlFor="share-password">{t.shares.create.password}</label>
               <input id="share-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-              <label htmlFor="share-expiry">Optional expiry</label>
+              <label htmlFor="share-expiry">{t.shares.create.expiry}</label>
               <input id="share-expiry" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
-              <label htmlFor="share-limit">Optional download limit</label>
+              <label htmlFor="share-limit">{t.shares.create.limit}</label>
               <input id="share-limit" type="number" min={1} value={downloadLimit} onChange={(e) => setDownloadLimit(e.target.value)} />
             </div>
             <div className="actions">
               <button type="button" className="btn-primary" disabled={busy || selected.length === 0} onClick={() => void create()}>
-                {busy ? 'Creating…' : 'Create link'}
+                {busy ? t.shares.create.creating : t.shares.create.submit}
               </button>
             </div>
           </>
@@ -212,61 +217,59 @@ export function SharedLinksPage() {
       </section>
 
       <section className="card">
-        <h2>Existing links</h2>
+        <h2>{t.shares.list.title}</h2>
         {links.length === 0 ? (
-          <p className="muted">No share links yet.</p>
+          <p className="muted">{t.shares.list.none}</p>
         ) : (
           <table className="accounts-table">
             <thead>
               <tr>
-                <th>State</th>
-                <th>Files</th>
-                <th>Usage</th>
-                <th>Policy</th>
-                <th>Actions</th>
+                <th>{t.shares.list.state}</th>
+                <th>{t.shares.list.files}</th>
+                <th>{t.shares.list.usage}</th>
+                <th>{t.shares.list.policy}</th>
+                <th>{t.shares.list.actions}</th>
               </tr>
             </thead>
             <tbody>
               {links.map((link) => (
                 <tr key={link.id}>
-                  <td><Badge tone={link.state === 'active' ? 'ok' : 'muted'}>{link.state}</Badge></td>
+                  <td><Badge tone={link.state === 'active' ? 'ok' : 'muted'}>{shareStateLabel(link.state)}</Badge></td>
                   <td>{link.fileCount}</td>
                   <td>
-                    {link.downloadCount}
-                    {link.downloadLimit !== null ? ` / ${link.downloadLimit}` : ' (unlimited)'}
+                    {link.downloadLimit !== null
+                      ? tf(t.shares.list.withLimit, { count: link.downloadCount, limit: link.downloadLimit })
+                      : tf(t.shares.list.unlimited, { count: link.downloadCount })}
                   </td>
                   <td className="muted small">
-                    {link.hasPassword ? 'Password protected' : 'No password'}
-                    {link.expiresAt ? ` · expires ${formatDateTime(link.expiresAt)}` : ''}
+                    {link.hasPassword ? t.shares.list.passwordProtected : t.shares.list.noPassword}
+                    {link.expiresAt ? ` · ${tf(t.shares.list.expires, { when: formatDateTime(link.expiresAt) })}` : ''}
                   </td>
                   <td className="actions">
-                    <button type="button" className="btn-secondary" disabled={link.state !== 'active'} onClick={() => void rotate(link.id)}>Rotate</button>
-                    <button type="button" className="btn-danger" disabled={link.state !== 'active'} onClick={() => void revoke(link.id)}>Revoke</button>
+                    <button type="button" className="btn-secondary" disabled={link.state !== 'active'} onClick={() => void rotate(link.id)}>{t.shares.list.rotate}</button>
+                    <button type="button" className="btn-danger" disabled={link.state !== 'active'} onClick={() => void revoke(link.id)}>{t.shares.list.revoke}</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-        <p className="muted small">Revoking or rotating a link never deletes your stored files.</p>
+        <p className="muted small">{t.shares.footnote}</p>
       </section>
 
       <section className="card">
-        <h2>Delete a file</h2>
-        <p className="muted">
-          Deletion removes only the chunk objects CloudNest placed, inside its own provider folder. Share links for the
-          file are revoked first. Anything that cannot be confirmed deleted stays recorded as pending.
-        </p>
+        <h2>{t.shares.deleteSection.title}</h2>
+        <p className="muted">{t.shares.deleteSection.desc}</p>
         {files.length === 0 ? (
-          <p className="muted">No files recorded.</p>
+          <p className="muted">{t.shares.deleteSection.none}</p>
         ) : (
           <table className="accounts-table">
             <thead>
               <tr>
-                <th>File</th>
-                <th>Size</th>
-                <th>State</th>
-                <th>Actions</th>
+                <th>{t.shares.deleteSection.file}</th>
+                <th>{t.shares.deleteSection.size}</th>
+                <th>{t.shares.deleteSection.state}</th>
+                <th>{t.shares.deleteSection.actions}</th>
               </tr>
             </thead>
             <tbody>
@@ -274,7 +277,7 @@ export function SharedLinksPage() {
                 <tr key={file.id}>
                   <td className="ellipsis">{file.originalName}</td>
                   <td>{formatBytes(file.sizeBytes)}</td>
-                  <td><Badge tone={file.state === 'completed' ? 'ok' : file.state === 'deleted' ? 'muted' : 'warn'}>{file.state}</Badge></td>
+                  <td><Badge tone={file.state === 'completed' ? 'ok' : file.state === 'deleted' ? 'muted' : 'warn'}>{shareStateLabel(file.state)}</Badge></td>
                   <td className="actions">
                     <button
                       type="button"
@@ -282,7 +285,7 @@ export function SharedLinksPage() {
                       disabled={file.state === 'deleted'}
                       onClick={() => void removeFile(file)}
                     >
-                      Delete
+                      {t.shares.deleteSection.delete}
                     </button>
                   </td>
                 </tr>

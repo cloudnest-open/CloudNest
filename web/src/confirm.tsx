@@ -10,9 +10,14 @@
  * modal per the design pack §13) — never `window.confirm`. If no host is mounted
  * the call falls back to `window.confirm` so a headless/test context still has a
  * working gate.
+ *
+ * Callers pass already-localized copy; the fallback defaults below resolve
+ * through the app-wide i18n core (current locale, English catalog as ultimate
+ * fallback) so they can never appear in the wrong language.
  */
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
+import { appStringsFor, currentLocale } from './i18n.js';
 import { ConfirmDialog } from './components/ui.js';
 
 export interface ConfirmRequest {
@@ -56,12 +61,13 @@ function resolvePreference(): Promise<boolean> {
 
 /** Split a plain message into the dialog's one-line question and its detail. */
 function splitMessage(message: string, title?: string, confirmLabel?: string): Omit<ConfirmRequest, 'resolve'> {
+  const t = appStringsFor(currentLocale()).dialog;
   const [first = message, ...rest] = message.split('\n\n');
   const detail = rest.join(' ').replace(/\s+/g, ' ').trim();
   return {
-    title: title ?? 'Are you sure?',
-    lines: [first.replace(/\s+/g, ' ').trim(), detail || 'This action cannot be undone.'],
-    confirmLabel: confirmLabel ?? 'Confirm',
+    title: title ?? t.sureTitle,
+    lines: [first.replace(/\s+/g, ' ').trim(), detail || t.irreversible],
+    confirmLabel: confirmLabel ?? t.confirm,
   };
 }
 

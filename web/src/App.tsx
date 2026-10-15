@@ -14,6 +14,9 @@ import { SharedLinksPage } from './pages/SharedLinksPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { EmptyState, ToastProvider } from './components/ui.js';
 import { FileActionsProvider } from './components/FileActionsProvider.js';
+import { LanguageMenu } from './components/LanguageMenu.js';
+import { useI18n } from './i18n-context.js';
+import { formatBytes } from './i18n.js';
 import { currentTheme, toggleTheme } from './theme.js';
 import { setConfirmDestructivePreference, ConfirmHost } from './confirm.js';
 
@@ -29,6 +32,17 @@ const NAV_ITEMS = [
 
 type NavItem = (typeof NAV_ITEMS)[number];
 
+/** Internal nav identity → catalog key (labels are translated, keys are not). */
+const NAV_KEYS: Record<NavItem, keyof import('./i18n.js').AppStrings['nav']> = {
+  Dashboard: 'dashboard',
+  Files: 'files',
+  Uploads: 'uploads',
+  Downloads: 'downloads',
+  'Shared Links': 'sharedLinks',
+  'Cloud Accounts': 'cloudAccounts',
+  Settings: 'settings',
+};
+
 /** One consistent outline icon per navigation entry (design pack §3.1). */
 const NAV_ICONS: Record<NavItem, typeof Cloud> = {
   Dashboard: House,
@@ -39,15 +53,6 @@ const NAV_ICONS: Record<NavItem, typeof Cloud> = {
   'Cloud Accounts': Cloud,
   Settings: SettingsIcon,
 };
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1024;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
-  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
-}
 
 interface SearchHit {
   id: string;
@@ -62,6 +67,7 @@ interface Health {
 }
 
 export default function App() {
+  const { t, tf } = useI18n();
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [active, setActive] = useState<NavItem>('Dashboard');
   const [health, setHealth] = useState<Health | null>(null);
@@ -98,10 +104,13 @@ export default function App() {
         if (meUsername) setUsername(meUsername);
         setAuthState(authenticated ? 'ready' : 'login');
       } catch {
-        setServerError('Cannot reach the local server. Is CloudNest running?');
+        setServerError(t.common.errorNetwork);
         setAuthState('login');
       }
     })();
+    // The startup reachability check runs once; the message stays in the
+    // language chosen at start (a later change is cosmetic only here).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -109,21 +118,13 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const connectResult = params.get('connect');
     if (connectResult) {
-      const messages: Record<string, string> = {
-        connected: 'Account connected successfully.',
-        refresh_token_missing: 'Connected, but the provider did not return a durable refresh token. Reconnect and grant offline access to keep this account usable unattended.',
-        oauth_state_invalid: 'The authorization request could not be validated. Start the connection again.',
-        oauth_denied: 'Authorization was declined at the provider. No account was created.',
-        token_exchange_failed: 'The provider rejected the authorization code. Start the connection again.',
-        provider_not_configured: 'Provider setup is missing. Configure it in Settings → Provider Setup.',
-        provider_unavailable: 'The provider is temporarily unavailable. Try again later.',
-        provider_rate_limited: 'The provider rate-limited the request. Try again shortly.',
-        needs_reauth: 'The provider requires you to sign in again.',
-      };
-      setNotice(messages[connectResult] ?? 'The connection could not be completed.');
+      setNotice(
+        (t.connectResults as Record<string, string | undefined>)[connectResult] ?? t.connectResults.fallback,
+      );
       setActive('Cloud Accounts');
       window.history.replaceState({}, '', '/');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the redirect cleanup must not re-run on a language change
   }, [authState]);
 
   useEffect(() => {
@@ -207,8 +208,10 @@ export default function App() {
     return <LoginPage onDone={() => setAuthState('ready')} serverError={serverError} />;
   }
   if (authState === 'loading') {
-    return <div className="auth-card">Loading…</div>;
+    return <div className="auth-card">{t.shell.loading}</div>;
   }
+
+  const navLabel = (item: NavItem): string => t.nav[NAV_KEYS[item]];
 
   return (
     <ToastProvider>
@@ -219,7 +222,7 @@ export default function App() {
           <span className="brand-mark" aria-hidden="true"><Cloud size={19} strokeWidth={2} /></span>
           <span className="brand-name">CloudNest</span>
         </div>
-        <nav className="nav" aria-label="Main navigation">
+        <nav className="nav" aria-label={t.nav.aria}>
           {NAV_ITEMS.map((item) => {
             const Icon = NAV_ICONS[item];
             return (
@@ -231,7 +234,7 @@ export default function App() {
                 onClick={() => setActive(item)}
               >
                 <Icon className="nav-icon" size={20} strokeWidth={1.9} aria-hidden="true" />
-                <span>{item}</span>
+                <span>{navLabel(item)}</span>
               </button>
             );
           })}
@@ -240,18 +243,18 @@ export default function App() {
           <span className="status-line">
             <span className={health ? 'status-dot status-ok' : 'status-dot status-down'} aria-hidden="true" />
             <span className="status-text">
-              {health ? `Local server: connected (v${health.version})` : 'Local server: not connected'}
+              {health ? tf(t.shell.status.connected, { version: health.version }) : t.shell.status.down}
             </span>
           </span>
           <button
             type="button"
             className="btn-logout"
-            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            aria-label={theme === 'dark' ? t.shell.theme.toLight : t.shell.theme.toDark}
+            title={theme === 'dark' ? t.shell.theme.toLight : t.shell.theme.toDark}
             onClick={() => setTheme(toggleTheme())}
           >
             {theme === 'dark' ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
-            <span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+            <span>{theme === 'dark' ? t.shell.theme.light : t.shell.theme.dark}</span>
           </button>
         </div>
       </aside>
@@ -263,8 +266,8 @@ export default function App() {
             <input
               className="search"
               type="search"
-              placeholder="Search files and folders..."
-              aria-label="Search files and folders"
+              placeholder={t.shell.search.placeholder}
+              aria-label={t.shell.search.label}
               role="combobox"
               aria-expanded={searchOpen && hits.length > 0}
               aria-controls="header-search-listbox"
@@ -297,10 +300,10 @@ export default function App() {
               }}
             />
             {searchOpen && (
-              <div className="search-results" role="listbox" id="header-search-listbox" aria-label="Search results">
+              <div className="search-results" role="listbox" id="header-search-listbox" aria-label={t.shell.search.resultsLabel}>
                 {hits.length === 0 ? (
                   <p className="muted small" style={{ padding: '8px 10px', margin: 0 }}>
-                    No CloudNest-managed files match.
+                    {t.shell.search.noMatch}
                   </p>
                 ) : (
                   hits.map((hit, i) => (
@@ -322,14 +325,17 @@ export default function App() {
               </div>
             )}
           </div>
+          <div className="shell-lang-wrap">
+            <LanguageMenu variant="shell" />
+          </div>
           <div className="bell-menu">
             <button
               type="button"
               className="bell-btn"
               aria-haspopup="dialog"
               aria-expanded={bellOpen}
-              aria-label="Notifications"
-              title="Notifications"
+              aria-label={t.shell.bell.label}
+              title={t.shell.bell.label}
               onClick={() => setBellOpen((open) => !open)}
             >
               <Bell size={17} aria-hidden="true" />
@@ -339,15 +345,15 @@ export default function App() {
                 <button
                   type="button"
                   className="account-scrim"
-                  aria-label="Close notifications"
+                  aria-label={t.shell.bell.close}
                   tabIndex={-1}
                   onClick={() => setBellOpen(false)}
                 />
-                <div className="account-dropdown bell-dropdown" role="dialog" aria-label="Notifications">
+                <div className="account-dropdown bell-dropdown" role="dialog" aria-label={t.shell.bell.label}>
                   <EmptyState
                     icon={Bell}
-                    title="No notifications yet"
-                    body="Upload, share and account events will appear here."
+                    title={t.shell.bell.emptyTitle}
+                    body={t.shell.bell.emptyBody}
                   />
                 </div>
               </>
@@ -364,7 +370,7 @@ export default function App() {
               <span className="account-avatar" aria-hidden="true">{username.charAt(0).toUpperCase()}</span>
               <span className="account-text">
                 <strong>{username}</strong>
-                <span className="muted">CloudNest administrator</span>
+                <span className="muted">{t.shell.account.role}</span>
               </span>
               <ChevronDown size={15} aria-hidden="true" className="muted" />
             </button>
@@ -373,7 +379,7 @@ export default function App() {
                 <button
                   type="button"
                   className="account-scrim"
-                  aria-label="Close account menu"
+                  aria-label={t.shell.account.close}
                   onClick={() => setAccountOpen(false)}
                   onKeyDown={(e) => {
                     // FE-12: Escape closes the menu and returns focus to the chip
@@ -399,7 +405,7 @@ export default function App() {
                     onClick={() => { setAccountOpen(false); void logout(); }}
                   >
                     <LogOut size={15} aria-hidden="true" />
-                    <span>Sign out</span>
+                    <span>{t.shell.account.signOut}</span>
                   </button>
                 </div>
               </>
@@ -428,8 +434,8 @@ export default function App() {
             <DashboardPage onNavigate={(page) => setActive(page)} />
           ) : (
             <section className="card placeholder-card">
-              <h1>{active}</h1>
-              <p>Not implemented yet. This section will arrive in a later step.</p>
+              <h1>{navLabel(active)}</h1>
+              <p>{t.shell.notImplemented}</p>
             </section>
           )}
         </main>

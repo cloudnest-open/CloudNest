@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudUpload, Pause, Play, RotateCcw, X } from 'lucide-react';
 import { api } from '../api.js';
+import { formatBytes, formatDateTime } from '../components/ui.js';
+import { useI18n } from '../i18n-context.js';
 
 /**
  * Uploads (Step 4 / M9.e).
@@ -13,6 +15,10 @@ import { api } from '../api.js';
  *   number of cloud objects;
  * - on resume the UI states plainly that bytes which were never uploaded have
  *   no earlier digest to compare against (a documented V1 limitation).
+ *
+ * All copy resolves through the app-wide i18n context; the server's safe error
+ * codes map to localized remedies (t.errors.upload) with the raw code kept as
+ * a diagnostic.
  */
 
 const CHUNK_SIZES = [8, 16, 32, 64] as const;
@@ -57,41 +63,8 @@ interface DashboardSummary {
   totalFiles: number;
 }
 
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return 'Unknown';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1024;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) {
-    value /= 1024;
-    i++;
-  }
-  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
-}
-
-/** The exact safe codes the server may return, with plain-language remedies. */
-const ERROR_HELP: Record<string, string> = {
-  capacity_insufficient: 'Not enough verified free space across your connected accounts. Refresh quota or connect another account.',
-  invalid_upload_metadata: 'The file details were rejected. Check the name and size.',
-  chunk_size_mismatch: 'A chunk did not arrive with the expected byte count. It was rejected and will be retried.',
-  source_changed: 'The file you selected does not match the one this upload started with. Progress was preserved; select the original file again.',
-  provider_no_space: 'A provider reported it is out of space. Its quota was marked stale; refresh it and retry.',
-  provider_rate_limited: 'A provider is throttling requests. Wait a moment and retry.',
-  provider_unavailable: 'A provider is temporarily unreachable. Retry shortly.',
-  cleanup_pending: 'Some temporary remote objects could not be confirmed deleted. They stay recorded and will be retried.',
-  job_not_resumable: 'This job can no longer be resumed.',
-  idempotency_key_reused: 'The same request key was reused with different file details.',
-  account_needs_reauth: 'A connected account needs you to sign in again.',
-  provider_checksum_mismatch: 'A provider reported a size that does not match the uploaded bytes.',
-  remote_size_mismatch: 'The stored object size does not match what was sent.',
-  provider_root_missing: 'The CloudNest folder for that account is missing; try a quota refresh or reconnect.',
-  upload_aborted: 'The upload was cancelled.',
-  job_paused: 'This job is paused.',
-  job_not_found: 'That upload job no longer exists.',
-};
-
 export function UploadsPage() {
+  const { t, tf, plural } = useI18n();
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [jobs, setJobs] = useState<JobView[]>([]);
   const [selected, setSelected] = useState<File | null>(null);
@@ -116,6 +89,14 @@ export function UploadsPage() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /** The localized remedy for a server safe code; the raw code stays visible. */
+  function describeError(data: unknown, fallback: string): { code: string; text: string } {
+    const body = (data ?? {}) as { error?: string; code?: string };
+    const code = body.code ?? body.error ?? '';
+    const help = (t.errors.upload as Record<string, string | undefined>)[code];
+    return { code, text: help ? `${help}${code ? ` (${code})` : ''}` : fallback };
+  }
+
   const loadSummary = useCallback(async () => {
     // FE-04: an unreachable server is reported, not hidden behind stale zeros
     try {
@@ -130,11 +111,12 @@ export function UploadsPage() {
         }
       }
       if (summary.status !== 200 && list.status !== 200) {
-        setError('Could not load upload status. The server did not answer with real data.');
+        setError(t.uploads.errorLoad);
       }
     } catch {
-      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+      setError(t.common.errorNetwork);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
   }, []);
 
   useEffect(() => {
@@ -144,13 +126,6 @@ export function UploadsPage() {
   const chunkSizeBytes = chunkMiB * 1024 * 1024;
   const estimatedObjects = selected ? Math.ceil(selected.size / chunkSizeBytes) : 0;
   const shortFinalChunk = selected ? selected.size % chunkSizeBytes : 0;
-
-  function describeError(data: unknown, fallback: string): { code: string; text: string } {
-    const body = (data ?? {}) as { error?: string; code?: string };
-    const code = body.code ?? body.error ?? '';
-    const help = ERROR_HELP[code];
-    return { code, text: help ? `${help}${code ? ` (${code})` : ''}` : fallback };
-  }
 
   /** Metadata-only plan; no file bytes are sent in this step. */
   async function createPlan(): Promise<void> {
@@ -176,11 +151,11 @@ export function UploadsPage() {
         setPlannedChunks(data.allocations);
         setNotice(
           data.chunkCount === 0
-            ? 'This file is empty and needs no upload; it was recorded as complete.'
-            : `Capacity reserved for ${data.chunkCount} chunk(s). You can start the upload now.`,
+            ? t.uploads.emptyFile
+            : plural(t.uploads.reserved, data.chunkCount),
         );
       } else {
-        const described = describeError(res.data, 'The upload could not be planned.');
+        const described = describeError(res.data, t.uploads.planFailed);
         setError(described.text);
         setErrorCode(described.code || null);
       }
@@ -207,7 +182,7 @@ export function UploadsPage() {
    */
   async function runUpload(id: string, onlyIndices?: number[]): Promise<void> {
     if (!selected) {
-      setError('Select the original file before continuing this upload.');
+      setError(t.uploads.selectOriginal);
       return;
     }
     if (runningRef.current) return;
@@ -222,7 +197,7 @@ export function UploadsPage() {
       // the plan is authoritative: never trust a client-side chunk list
       const job = await refreshJob(id);
       if (!job) {
-        setError('That upload job no longer exists.');
+        setError(t.uploads.jobGone);
         return;
       }
       const planRes = await api.getUploadJob(id);
@@ -234,7 +209,7 @@ export function UploadsPage() {
         // rebuild the chunk geometry from the server's persisted plan
         const manifest = await api.resumeManifest(id, 1000);
         if (manifest.status !== 200) {
-          setError('Could not read the upload plan from the server.');
+          setError(t.uploads.manifestFailed);
           return;
         }
         const done = new Set(
@@ -275,7 +250,7 @@ export function UploadsPage() {
           const slice = selected.slice(geo.offsetBytes, geo.offsetBytes + geo.sizeBytes);
           const res = await api.uploadChunkRaw(id, chunkIndex, slice);
           if (res.status !== 200) {
-            const described = describeError(res.data, 'A chunk failed to upload.');
+            const described = describeError(res.data, t.uploads.chunkFailed);
             setError(described.text);
             setErrorCode(described.code || null);
             return;
@@ -286,7 +261,10 @@ export function UploadsPage() {
       await Promise.all(workers);
       const finalJob = await refreshJob(id);
       if (finalJob?.state === 'completed') {
-        setNotice(`Upload complete: ${finalJob.originalName ?? 'file'} (${formatBytes(finalJob.sizeBytes)}).`);
+        setNotice(tf(t.uploads.complete, {
+          name: finalJob.originalName ?? t.fileTypes.file,
+          size: formatBytes(finalJob.sizeBytes),
+        }));
         setPlannedChunks(null);
         setJobId(null);
         setSelected(null);
@@ -309,7 +287,7 @@ export function UploadsPage() {
   async function prepareResume(): Promise<void> {
     const target = resumeTarget;
     if (!target || !selected) {
-      setError('Pick the interrupted upload below and choose the original file, then use Resume.');
+      setError(t.uploads.resumeHint);
       return;
     }
     const targetId = target.jobId;
@@ -321,7 +299,7 @@ export function UploadsPage() {
       for (let off = 0; ; off += 500) {
         const page = await api.resumeManifest(targetId, off, 500);
         if (page.status !== 200) {
-          setError('Could not read the resume information for this upload.');
+          setError(t.uploads.resumeInfoFailed);
           return;
         }
         const pageChunks = (page.data as { chunks: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number; sha256: string }> }).chunks ?? [];
@@ -338,7 +316,7 @@ export function UploadsPage() {
       }
       if (mismatched.length > 0) {
         setErrorCode('source_changed');
-        setError(ERROR_HELP['source_changed'] as string);
+        setError(`${t.errors.upload.source_changed} (source_changed)`);
         return;
       }
       const done = new Set(chunks.map((c) => c.chunkIndex));
@@ -348,8 +326,8 @@ export function UploadsPage() {
       for (let i = 0; i < total; i++) if (!done.has(i)) missing.push(i);
       setVerifiedChunks(chunks.length);
       setResumeReport(
-        `Verified ${chunks.length} previously uploaded chunk(s); ${missing.length} still to send. ` +
-          'Note: chunks that were never uploaded cannot be compared with an earlier checksum because those bytes were never read.',
+        `${plural(t.uploads.resumeReportVerified, chunks.length)}; ${plural(t.uploads.resumeReportMissing, missing.length)}. ` +
+          t.uploads.resumeReportNote,
       );
       setJobId(targetId);
       await runUpload(targetId, missing);
@@ -365,9 +343,9 @@ export function UploadsPage() {
       const res = await api.pauseUpload(jobId);
       if (res.status === 200) {
         await refreshJob(jobId);
-        setNotice('Paused. Chunks already in flight were allowed to finish safely.');
+        setNotice(t.uploads.pauseNotice);
       } else {
-        const described = describeError(res.data, 'Could not pause the upload.');
+        const described = describeError(res.data, t.uploads.pauseFailed);
         setError(described.text);
       }
     } finally {
@@ -384,7 +362,7 @@ export function UploadsPage() {
         await refreshJob(jobId);
         await runUpload(jobId);
       } else {
-        const described = describeError(res.data, 'Could not resume the upload.');
+        const described = describeError(res.data, t.uploads.resumeFailed);
         setError(described.text);
       }
     } finally {
@@ -394,7 +372,7 @@ export function UploadsPage() {
 
   async function cancel(): Promise<void> {
     if (!jobId) return;
-    if (!window.confirm('Cancel this upload? Temporary remote objects are cleaned up; completed chunks are preserved.')) return;
+    if (!window.confirm(t.uploads.cancelConfirm)) return;
     abortRef.current?.abort();
     setBusy(true);
     try {
@@ -402,14 +380,14 @@ export function UploadsPage() {
       if (res.status === 200) {
         const job = (res.data as { job: JobView | null }).job;
         if (job?.state === 'deletion_pending') {
-          setNotice('Some temporary objects could not be confirmed deleted; they stay recorded as cleanup pending and will be retried.');
+          setNotice(t.uploads.cancelledCleanup);
         } else {
-          setNotice('Upload cancelled. Completed chunks were preserved.');
+          setNotice(t.uploads.cancelled);
         }
         await refreshJob(jobId);
         await loadSummary();
       } else {
-        const described = describeError(res.data, 'Could not cancel the upload.');
+        const described = describeError(res.data, t.uploads.cancelFailed);
         setError(described.text);
       }
     } finally {
@@ -425,7 +403,7 @@ export function UploadsPage() {
       if (res.status === 200) {
         await runUpload(jobId);
       } else {
-        const described = describeError(res.data, 'Could not retry the upload.');
+        const described = describeError(res.data, t.uploads.retryFailed);
         setError(described.text);
       }
     } finally {
@@ -439,26 +417,26 @@ export function UploadsPage() {
       ? Math.min(100, Math.round((currentJob.bytesCompleted / currentJob.sizeBytes) * 100))
       : 0;
 
+  const jobStateLabel = (state: string): string =>
+    (t.states.job as Record<string, string | undefined>)[state] ?? state;
+
   return (
     <>
       <div className="page-head">
-        <h1 className="page-title">Uploads</h1>
+        <h1 className="page-title">{t.uploads.title}</h1>
       </div>
 
       {notice && <div className="card notice-card" role="status"><p>{notice}</p></div>}
       {error && (
         <div className="card error-card" role="alert">
           <p>{error}</p>
-          {errorCode && <p className="muted small">Code: {errorCode}</p>}
+          {errorCode && <p className="muted small">{tf(t.uploads.codeLabel, { code: errorCode })}</p>}
         </div>
       )}
 
       <section className="card">
-        <h2>Select a file</h2>
-        <p className="muted">
-          The original file is never stored on the server. It is split in your browser and each chunk is
-          streamed straight to your connected accounts.
-        </p>
+        <h2>{t.uploads.selectFile}</h2>
+        <p className="muted">{t.uploads.privacy}</p>
         <div className="upload-form">
           <input
             ref={fileInputRef}
@@ -494,8 +472,8 @@ export function UploadsPage() {
             }}
           >
             <CloudUpload className="dropzone-icon" size={28} strokeWidth={1.6} aria-hidden="true" />
-            <strong>Drag &amp; drop a file here</strong>
-            <span className="muted">or click to choose a file from your device</span>
+            <strong>{t.uploads.dropzone}</strong>
+            <span className="muted">{t.uploads.dropzoneOr}</span>
           </button>
           {selected ? (
             <p className="dropzone-hint">
@@ -507,13 +485,13 @@ export function UploadsPage() {
                 onClick={() => { setSelected(null); setPlannedChunks(null); setJobId(null); }}
               >
                 <X size={13} aria-hidden="true" />
-                Remove
+                {t.common.remove}
               </button>
             </p>
           ) : (
-            <p className="muted small dropzone-hint">The file stays on this device; only its chunks are sent.</p>
+            <p className="muted small dropzone-hint">{t.uploads.keepHint}</p>
           )}
-          <label htmlFor="upload-chunk-size">Chunk size</label>
+          <label htmlFor="upload-chunk-size">{t.uploads.chunkSize}</label>
           <select
             id="upload-chunk-size"
             value={chunkMiB}
@@ -532,13 +510,12 @@ export function UploadsPage() {
               <strong>{selected.name}</strong> — {formatBytes(selected.size)}
             </p>
             <p className="muted small">
-              Estimated logical chunks / remote objects: <strong>{estimatedObjects}</strong>
-              {shortFinalChunk > 0 ? ' (the final chunk is smaller)' : ''}
+              {t.uploads.planPreview.objects} <strong>{estimatedObjects}</strong>
+              {shortFinalChunk > 0 ? ` ${t.uploads.planPreview.shortFinal}` : ''}
             </p>
             {estimatedObjects > OBJECT_COUNT_WARN_THRESHOLD && (
               <p className="form-error" role="alert">
-                Warning: this creates about {estimatedObjects} separate cloud objects and API calls.
-                A larger chunk size produces fewer objects; smaller chunks make many more.
+                {tf(t.uploads.planPreview.warning, { count: estimatedObjects })}
               </p>
             )}
           </div>
@@ -546,7 +523,7 @@ export function UploadsPage() {
 
         <div className="actions">
           <button type="button" className="btn-primary" disabled={!selected || busy || uploading} onClick={() => void createPlan()}>
-            {busy ? 'Working…' : 'Plan upload'}
+            {busy ? t.common.working : t.uploads.plan}
           </button>
           <button
             type="button"
@@ -554,21 +531,23 @@ export function UploadsPage() {
             disabled={!jobId || busy || uploading}
             onClick={() => void prepareResume()}
           >
-            Resume (after restart)
+            {t.uploads.resumeRestart}
           </button>
         </div>
         {verifiedChunks !== null && (
-          <p className="muted small">Previously uploaded chunks verified by checksum: {verifiedChunks}</p>
+          <p className="muted small">{tf(t.uploads.verifiedCount, { count: verifiedChunks })}</p>
         )}
         {resumeReport && <p className="muted small">{resumeReport}</p>}
       </section>
 
       {plannedChunks && (
         <section className="card">
-          <h2>Ready to upload</h2>
+          <h2>{t.uploads.ready}</h2>
           <p className="muted">
-            {plannedChunks.length} chunk(s) reserved. Upload is bounded to {workerLimit} chunks at once
-            (at most {MAX_PER_ACCOUNT_WORKERS} per account).
+            {plural(t.uploads.readyDetail, plannedChunks.length, {
+              workers: workerLimit,
+              perAccount: MAX_PER_ACCOUNT_WORKERS,
+            })}
           </p>
           <div className="actions">
             <button
@@ -577,7 +556,7 @@ export function UploadsPage() {
               disabled={uploading || busy || !jobId}
               onClick={() => jobId && void runUpload(jobId)}
             >
-              {uploading ? 'Uploading…' : 'Start upload'}
+              {uploading ? t.uploads.uploading : t.uploads.start}
             </button>
           </div>
         </section>
@@ -586,58 +565,64 @@ export function UploadsPage() {
       {currentJob && (
         <section className="card">
           <div className="page-head">
-            <h2>Current upload</h2>
+            <h2>{t.uploads.current}</h2>
             <span className={`state state-${currentJob.state === 'completed' ? 'ok' : currentJob.state === 'failed' || currentJob.state === 'deletion_pending' ? 'bad' : 'warn'}`}>
-              {currentJob.state}
+              {jobStateLabel(currentJob.state)}
             </span>
           </div>
           <p className="muted small">
-            {currentJob.originalName ?? 'file'} — {currentJob.chunksCompleted} / {currentJob.chunksTotal} chunks ·{' '}
-            {formatBytes(currentJob.bytesCompleted)} of {formatBytes(currentJob.sizeBytes)}
+            {tf(t.uploads.progressDetail, {
+              name: currentJob.originalName ?? t.fileTypes.file,
+              done: currentJob.chunksCompleted,
+              total: currentJob.chunksTotal,
+              bytes: formatBytes(currentJob.bytesCompleted),
+              size: formatBytes(currentJob.sizeBytes),
+            })}
           </p>
           <div className="progress-track" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
             <div className="progress-fill" style={{ width: `${percent}%` }} />
           </div>
-          <p className="muted small">{percent}% (from server-reported progress)</p>
+          <p className="muted small">{tf(t.uploads.progressFromServer, { pct: percent })}</p>
           {currentJob.safeErrorCode && (
             <p className="form-error">
-              {ERROR_HELP[currentJob.safeErrorCode] ?? 'The upload reported an error.'} ({currentJob.safeErrorCode})
+              {((t.errors.upload as Record<string, string | undefined>)[currentJob.safeErrorCode] ?? t.errors.upload.fallback)}
+              {' '}({currentJob.safeErrorCode})
             </p>
           )}
           <div className="actions">
             <button type="button" className="btn-secondary btn-compact" disabled={!(currentJob.jobId === jobId) || busy || uploading} onClick={() => void pause()}>
               <Pause size={14} aria-hidden="true" />
-              Pause
+              {t.uploads.pause}
             </button>
             <button type="button" className="btn-secondary btn-compact" disabled={!(currentJob.jobId === jobId) || busy || uploading} onClick={() => void resume()}>
               <Play size={14} aria-hidden="true" />
-              Resume
+              {t.uploads.resume}
             </button>
             <button type="button" className="btn-secondary btn-compact" disabled={!(currentJob.jobId === jobId) || busy || uploading} onClick={() => void retry()}>
               <RotateCcw size={14} aria-hidden="true" />
-              Retry
+              {t.uploads.retry}
             </button>
             <button type="button" className="btn-danger btn-compact" disabled={!(currentJob.jobId === jobId) || busy || !currentJob.cancellable} onClick={() => void cancel()}>
               <X size={14} aria-hidden="true" />
-              Cancel
+              {t.uploads.cancel}
             </button>
           </div>
         </section>
       )}
 
       <section className="card">
-        <h2>Recent uploads</h2>
+        <h2>{t.uploads.recent}</h2>
         {jobs.length === 0 ? (
-          <p className="muted">No uploads yet.</p>
+          <p className="muted">{t.uploads.none}</p>
         ) : (
           <table className="accounts-table">
             <thead>
               <tr>
-                <th>File</th>
-                <th>Size</th>
-                <th>Chunks</th>
-                <th>State</th>
-                <th>Updated</th>
+                <th>{t.uploads.file}</th>
+                <th>{t.uploads.size}</th>
+                <th>{t.uploads.chunks}</th>
+                <th>{t.uploads.state}</th>
+                <th>{t.uploads.updated}</th>
               </tr>
             </thead>
             <tbody>
@@ -646,8 +631,8 @@ export function UploadsPage() {
                   <td className="ellipsis">{job.originalName ?? '—'}</td>
                   <td>{formatBytes(job.sizeBytes)}</td>
                   <td>{job.chunksCompleted} / {job.chunksTotal}</td>
-                  <td><span className={`state state-${job.state === 'completed' ? 'ok' : job.state === 'failed' || job.state === 'deletion_pending' ? 'bad' : 'warn'}`}>{job.state}</span></td>
-                  <td className="muted small">{new Date(job.updatedAt).toLocaleString()}</td>
+                  <td><span className={`state state-${job.state === 'completed' ? 'ok' : job.state === 'failed' || job.state === 'deletion_pending' ? 'bad' : 'warn'}`}>{jobStateLabel(job.state)}</span></td>
+                  <td className="muted small">{formatDateTime(job.updatedAt)}</td>
                 </tr>
               ))}
             </tbody>
@@ -656,26 +641,34 @@ export function UploadsPage() {
       </section>
 
       <section className="card">
-        <h2>Storage overview</h2>
+        <h2>{t.uploads.overview}</h2>
         {dashboard ? (
           <>
             <p className="muted small">
-              {dashboard.accounts.length} connected account(s) · {dashboard.activeJobs} active upload(s) · {dashboard.totalFiles} file(s) recorded
+              {[
+                plural(t.uploads.overviewAccounts, dashboard.accounts.length),
+                plural(t.uploads.overviewJobs, dashboard.activeJobs),
+                plural(t.uploads.overviewFiles, dashboard.totalFiles),
+              ].join(' · ')}
             </p>
             {dashboard.accounts.length === 0 ? (
-              <p className="muted">No cloud accounts connected yet.</p>
+              <p className="muted">{t.common.noAccountsYet}</p>
             ) : (
               <ul className="plain-list">
                 {dashboard.accounts.map((a) => (
                   <li key={a.id}>
-                    <strong>{a.displayLabel}</strong> — {a.status}; quota {a.quotaStatus}
+                    {tf(t.uploads.accountLine, {
+                      label: a.displayLabel,
+                      status: a.status,
+                      quota: (t.states.quota as Record<string, string | undefined>)[a.quotaStatus] ?? a.quotaStatus,
+                    })}
                   </li>
                 ))}
               </ul>
             )}
           </>
         ) : (
-          <p className="muted">Loading…</p>
+          <p className="muted">{t.common.loading}</p>
         )}
       </section>
     </>

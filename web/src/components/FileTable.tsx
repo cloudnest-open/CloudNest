@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Info, Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
 import { useFileActions } from './FileActionsProvider.js';
-import { Badge, TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS, typeLabel } from './ui.js';
+import { Badge, TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS, fileTypeName, fileTypeDisplay } from './ui.js';
 import { ProviderLogo } from './ProviderLogo.js';
+import { useI18n } from '../i18n-context.js';
 
 /**
  * The one file table used by Dashboard's Recent Files and the Files page
  * (design pack §7 "columns match the Files page", §8 columns + multi-select).
  * Selection lives here so both surfaces get identical, REAL bulk actions —
- * a checkbox that selects nothing would be a dead control.
+ * a checkbox that selects nothing would be a dead control. All copy resolves
+ * through the app-wide i18n context.
  */
 
 export interface FileTableRow {
@@ -36,6 +38,7 @@ interface FileTableProps {
 }
 
 export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTableProps) {
+  const { t, tf, plural } = useI18n();
   const actions = useFileActions();
   const [selected, setSelected] = useState<string[]>([]);
 
@@ -61,32 +64,32 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
   return (
     <>
       {selectedFiles.length > 0 && (
-        <div className="bulk-bar" role="toolbar" aria-label="Bulk actions for selected files">
-          <span className="bulk-count">{selectedFiles.length} selected</span>
+        <div className="bulk-bar" role="toolbar" aria-label={t.table.bulkAria}>
+          <span className="bulk-count">{plural(t.table.selected, selectedFiles.length)}</span>
           <span className="actions">
             <button
               type="button"
               className="btn-primary btn-compact"
               disabled={!bulkShareable}
-              title={bulkShareable ? undefined : 'Every selected file must be completed before it can be shared.'}
+              title={bulkShareable ? undefined : t.table.shareDisabledTitle}
               onClick={() => actions.shareMany(selectedFiles, reload)}
             >
               <ShareIcon size={14} aria-hidden="true" />
-              Share selected
+              {t.table.shareSelected}
             </button>
             <button
               type="button"
               className="btn-danger btn-compact"
               disabled={!bulkDeletable}
-              title={bulkDeletable ? undefined : 'The selected files are already deleted.'}
+              title={bulkDeletable ? undefined : t.table.deleteDisabledTitle}
               onClick={() => actions.removeMany(selectedFiles, reload)}
             >
               <Trash2 size={14} aria-hidden="true" />
-              Delete selected
+              {t.table.deleteSelected}
             </button>
             <button type="button" className="btn-secondary btn-compact" onClick={() => setSelected([])}>
               <X size={14} aria-hidden="true" />
-              Clear
+              {t.table.clearSelection}
             </button>
           </span>
         </div>
@@ -98,17 +101,17 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
             <th style={{ width: 36 }}>
               <input
                 type="checkbox"
-                aria-label="Select all files on this page"
+                aria-label={t.table.selectAllAria}
                 checked={allVisibleSelected}
                 onChange={toggleAllVisible}
               />
             </th>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Size</th>
-            <th>Stored in</th>
-            <th>Last modified</th>
-            <th>Actions</th>
+            <th>{t.table.name}</th>
+            <th>{t.table.type}</th>
+            <th>{t.table.size}</th>
+            <th>{t.table.storedIn}</th>
+            <th>{t.table.lastModified}</th>
+            <th>{t.table.actions}</th>
           </tr>
         </thead>
         <tbody>
@@ -117,7 +120,7 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
               <td>
                 <input
                   type="checkbox"
-                  aria-label={`Select ${file.originalName}`}
+                  aria-label={tf(t.table.selectOneAria, { name: file.originalName })}
                   checked={selected.includes(file.id)}
                   onChange={() => toggleOne(file.id)}
                 />
@@ -131,19 +134,21 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                   <span className="ellipsis">{file.originalName}</span>
                   {file.needsReconnect && (
                     <span
-                      title={`Account needed for this file is offline: ${(file.unavailableLabels ?? []).join(', ')}. Reconnect it in Cloud Accounts to download this file. The file is not corrupted.`}
+                      title={tf(t.table.reconnectTooltip, {
+                        accounts: (file.unavailableLabels ?? []).join(', '),
+                      })}
                     >
-                      <Badge tone="warn">Reconnect required</Badge>
+                      <Badge tone="warn">{t.table.reconnectBadge}</Badge>
                     </span>
                   )}
                 </span>
               </td>
-              <td>{typeLabel(file.originalName)}</td>
+              <td>{fileTypeDisplay(fileTypeName(file.originalName))}</td>
               <td>{formatBytes(file.sizeBytes)}</td>
               <td>
                 <span className="file-name-cell">
                   {file.storedAcross.length === 0 ? (
-                    <span className="muted small">Not yet placed</span>
+                    <span className="muted small">{t.common.notPlaced}</span>
                   ) : (
                     <>
                       {file.storedAcross.slice(0, 2).map((p) => <ProviderLogo key={p} provider={p} size={18} />)}
@@ -151,7 +156,7 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                         {file.storedAcross.length === 1
                           ? PROVIDER_LABELS[file.storedAcross[0]!] ?? file.storedAcross[0]
                           : file.storedAcross.length > 2
-                            ? `${file.storedAcross.length} cloud accounts`
+                            ? plural(t.table.storedMulti, file.storedAcross.length)
                             : file.storedAcross.map((p) => PROVIDER_LABELS[p] ?? p).join(' + ')}
                       </span>
                     </>
@@ -164,7 +169,7 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                   {onDetails && (
                     <button type="button" className="btn-inline" onClick={() => onDetails(file)}>
                       <Info size={14} aria-hidden="true" />
-                      Details
+                      {t.table.details}
                     </button>
                   )}
                   <button
@@ -174,11 +179,11 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                     onClick={() => actions.share(file, reload)}
                   >
                     <ShareIcon size={14} aria-hidden="true" />
-                    Share
+                    {t.table.share}
                   </button>
                   <button type="button" className="btn-inline" onClick={() => actions.rename(file, reload)}>
                     <Pencil size={14} aria-hidden="true" />
-                    Rename
+                    {t.table.rename}
                   </button>
                   <button
                     type="button"
@@ -187,7 +192,7 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                     onClick={() => actions.remove(file, reload)}
                   >
                     <Trash2 size={14} aria-hidden="true" />
-                    Delete
+                    {t.table.delete}
                   </button>
                 </span>
               </td>

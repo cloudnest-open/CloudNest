@@ -7,8 +7,9 @@ import { FileTable, type FileTableRow } from '../components/FileTable.js';
 import { ProviderLogo } from '../components/ProviderLogo.js';
 import {
   Badge, EmptyState, ProgressBar, SkeletonRows, pageList,
-  formatBytes, formatDateTime, PROVIDER_LABELS, typeLabel,
+  formatBytes, formatDateTime, fileTypeName, fileTypeDisplay, PROVIDER_LABELS,
 } from '../components/ui.js';
+import { useI18n } from '../i18n-context.js';
 
 /**
  * Dashboard (reference spec §5): Reference 01's primary hierarchy — heading,
@@ -18,7 +19,8 @@ import {
  *
  * Honesty rules enforced here: every number comes from the API, unknown/stale
  * quota renders as "Unknown"/"Not connected" (never 0 or invented), and an
- * unhealthy account can never be labelled "Connected".
+ * unhealthy account can never be labelled "Connected". All copy resolves
+ * through the app-wide i18n context.
  */
 
 type Page = 'Files' | 'Uploads' | 'Cloud Accounts' | 'Shared Links';
@@ -69,7 +71,7 @@ interface ProviderSlot {
   provider: string;
   label: string;
   status: 'ok' | 'warn' | 'bad' | 'muted';
-  statusLabel: string;
+  statusKey: 'connected' | 'error' | 'needsAttention' | 'notConnected' | 'quotaStale';
   usedBytes: number | null;
   totalBytes: number | null;
   experimental: boolean;
@@ -83,21 +85,21 @@ function buildProviderSlots(accounts: AccountDetail[]): ProviderSlot[] {
     if (list.length === 0) {
       return {
         provider, label,
-        status: 'muted', statusLabel: 'Not connected',
+        status: 'muted', statusKey: 'notConnected',
         usedBytes: null, totalBytes: null,
         experimental: provider === 'mega',
         action: 'connect',
-      };
+      } as ProviderSlot;
     }
     const hasError = list.some((a) => a.status === 'error');
     const needsReauth = list.some((a) => a.status === 'needs_reauth');
     const allDisconnected = list.every((a) => a.status === 'disconnected');
     let status: ProviderSlot['status'] = 'ok';
-    let statusLabel = 'Connected';
-    if (hasError) { status = 'bad'; statusLabel = 'Error — check account'; }
-    else if (needsReauth) { status = 'warn'; statusLabel = 'Needs attention'; }
-    else if (allDisconnected) { status = 'muted'; statusLabel = 'Not connected'; }
-    else if (list.some((a) => a.quotaStatus !== 'current')) { status = 'warn'; statusLabel = 'Quota not refreshed'; }
+    let statusKey: ProviderSlot['statusKey'] = 'connected';
+    if (hasError) { status = 'bad'; statusKey = 'error'; }
+    else if (needsReauth) { status = 'warn'; statusKey = 'needsAttention'; }
+    else if (allDisconnected) { status = 'muted'; statusKey = 'notConnected'; }
+    else if (list.some((a) => a.quotaStatus !== 'current')) { status = 'warn'; statusKey = 'quotaStale'; }
     // Aggregate the provider's accounts only when every quota figure is known;
     // partial data must never be presented as a complete quota.
     const fullyKnown = list.every(
@@ -106,7 +108,7 @@ function buildProviderSlots(accounts: AccountDetail[]): ProviderSlot[] {
     const usedBytes = fullyKnown ? list.reduce((sum, a) => sum + (a.quotaUsedBytes ?? 0), 0) : null;
     const totalBytes = fullyKnown ? list.reduce((sum, a) => sum + (a.quotaTotalBytes ?? 0), 0) : null;
     return {
-      provider, label, status, statusLabel,
+      provider, label, status, statusKey,
       usedBytes, totalBytes,
       experimental: provider === 'mega',
       action: allDisconnected ? 'connect' : 'manage',
@@ -127,6 +129,7 @@ interface RecentFile {
 const RECENT_PAGE_SIZE = 5;
 
 export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
+  const { t, tf, plural } = useI18n();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -149,13 +152,14 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
         setSummary(res.data as Summary);
         setError(null);
       } else {
-        setError('Could not load the dashboard. The server did not answer with real data.');
+        setError(t.dashboard.errorLoad);
       }
     } catch {
-      setError('Could not reach the server. Check that CloudNest is running, then retry.');
+      setError(t.common.errorNetwork);
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
   }, []);
 
   const loadFiles = useCallback(async () => {
@@ -205,9 +209,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
   const attention = accounts.length - healthy;
   const slots = buildProviderSlots(accounts);
 
-  const typeOptions = Array.from(new Set(files.map((f) => typeLabel(f.originalName)))).sort();
+  const typeOptions = Array.from(new Set(files.map((f) => fileTypeName(f.originalName)))).sort();
   const visible = files
-    .filter((f) => (typeFilter === 'all' ? true : typeLabel(f.originalName) === typeFilter))
+    .filter((f) => (typeFilter === 'all' ? true : fileTypeName(f.originalName) === typeFilter))
     .sort((a, b) => {
       if (sortBy === 'name') return a.originalName.localeCompare(b.originalName);
       if (sortBy === 'size') return b.sizeBytes - a.sizeBytes;
@@ -234,12 +238,12 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
     <>
       <div className="page-head">
         <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="muted">Manage your files, cloud accounts and storage across multiple providers.</p>
+          <h1 className="page-title">{t.dashboard.title}</h1>
+          <p className="muted">{t.dashboard.subtitle}</p>
         </div>
         <button type="button" className="btn-secondary" onClick={reloadAll} disabled={loading || filesLoading}>
           <RefreshCw size={15} aria-hidden="true" />
-          {loading || filesLoading ? 'Refreshing…' : 'Refresh'}
+          {loading || filesLoading ? t.common.refreshing : t.common.refresh}
         </button>
       </div>
 
@@ -252,14 +256,14 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
             <section className="card metric-card">
               <span className="metric-icon" aria-hidden="true"><Cloud size={20} /></span>
               <div className="metric-text">
-                <span className="metric-label">Connected Accounts</span>
+                <span className="metric-label">{t.dashboard.metric.accounts}</span>
                 <span className="metric-value">{accounts.length === 0 ? '—' : `${healthy} / ${accounts.length}`}</span>
                 {accounts.length === 0 ? (
-                  <span className="small muted">None connected yet</span>
+                  <span className="small muted">{t.dashboard.metric.accountsNone}</span>
                 ) : attention === 0 ? (
-                  <span className="metric-sub ok"><span className="status-dot status-ok" aria-hidden="true" />All Connected</span>
+                  <span className="metric-sub ok"><span className="status-dot status-ok" aria-hidden="true" />{t.dashboard.metric.allConnected}</span>
                 ) : (
-                  <span className="metric-sub warn"><span className="status-dot status-warn" aria-hidden="true" />{attention} need attention</span>
+                  <span className="metric-sub warn"><span className="status-dot status-warn" aria-hidden="true" />{plural(t.dashboard.metric.needAttention, attention)}</span>
                 )}
               </div>
             </section>
@@ -267,21 +271,23 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
             <section className="card metric-card">
               <span className="metric-icon" aria-hidden="true"><Database size={20} /></span>
               <div className="metric-text">
-                <span className="metric-label">Available Storage</span>
-                <span className="metric-value">{storageKnown ? formatBytes(storage!.usableBytes) : 'Unknown'}</span>
+                <span className="metric-label">{t.dashboard.metric.storage}</span>
+                <span className="metric-value">{storageKnown ? formatBytes(storage!.usableBytes) : t.common.unknown}</span>
                 {storageKnown ? (
                   <>
                     <span className="metric-row">
-                      <span className="muted">of {formatBytes(storage!.totalBytes)} total</span>
-                      <span className="muted">{Math.max(0, 100 - usedPct)}% free</span>
+                      <span className="muted">{tf(t.dashboard.metric.ofTotal, { total: formatBytes(storage!.totalBytes) })}</span>
+                      <span className="muted">{tf(t.dashboard.metric.pctFree, { pct: Math.max(0, 100 - usedPct) })}</span>
                     </span>
                     <ProgressBar value={usedPct} />
                   </>
                 ) : (
                   <span className="small muted">
                     {accounts.length === 0
-                      ? 'Connect an account to see real capacity.'
-                      : `Quota not verified${storage?.lastCheckedAt ? ` · last checked ${formatDateTime(storage.lastCheckedAt)}` : ''}`}
+                      ? t.dashboard.metric.connectHint
+                      : storage?.lastCheckedAt
+                        ? tf(t.dashboard.metric.quotaUnverifiedWithTime, { when: formatDateTime(storage.lastCheckedAt) })
+                        : t.dashboard.metric.quotaUnverified}
                   </span>
                 )}
               </div>
@@ -290,24 +296,24 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
             <section className="card metric-card">
               <span className="metric-icon" aria-hidden="true"><FileText size={20} /></span>
               <div className="metric-text">
-                <span className="metric-label">Files Stored</span>
+                <span className="metric-label">{t.dashboard.metric.files}</span>
                 <span className="metric-value">{summary?.totalFiles ?? 0}</span>
-                <span className="small muted">Total files &amp; folders</span>
+                <span className="small muted">{t.dashboard.metric.filesSub}</span>
               </div>
             </section>
 
             <section className="card metric-card">
               <span className="metric-icon" aria-hidden="true"><LinkIcon size={20} /></span>
               <div className="metric-text">
-                <span className="metric-label">Shared Links</span>
+                <span className="metric-label">{t.dashboard.metric.links}</span>
                 <span className="metric-value">{summary?.activeShareLinks ?? 0}</span>
-                <span className="small muted">Active links</span>
+                <span className="small muted">{t.dashboard.metric.linksSub}</span>
               </div>
             </section>
           </div>
 
           {/* ---- provider slots: five cards, always present (reference 01) ---- */}
-          <h2 className="section-title">Cloud Provider Accounts</h2>
+          <h2 className="section-title">{t.dashboard.providersTitle}</h2>
           {loading && accounts.length === 0 ? (
             <section className="card"><SkeletonRows rows={2} /></section>
           ) : (
@@ -321,14 +327,14 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                         <ProviderLogo provider={slot.provider} size={24} />
                         <strong>{slot.label}</strong>
                       </span>
-                      {slot.experimental && <Badge tone="warn">Experimental</Badge>}
+                      {slot.experimental && <Badge tone="warn">{t.dashboard.experimental}</Badge>}
                     </div>
                     <p className="small muted">
                       {known
-                        ? `${formatBytes(slot.usedBytes)} used of ${formatBytes(slot.totalBytes)}`
+                        ? tf(t.dashboard.slot.usedOf, { used: formatBytes(slot.usedBytes), total: formatBytes(slot.totalBytes) })
                         : slot.action === 'connect'
-                          ? 'Not connected yet'
-                          : 'Capacity unknown — refresh the quota on Cloud Accounts.'}
+                          ? t.dashboard.slot.notConnectedYet
+                          : t.dashboard.slot.capacityUnknown}
                     </p>
                     {known && (
                       <ProgressBar
@@ -341,14 +347,14 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                         className={`status-dot status-${slot.status === 'bad' ? 'down' : slot.status === 'ok' ? 'ok' : slot.status === 'warn' ? 'warn' : 'muted'}`}
                         aria-hidden="true"
                       />
-                      {slot.statusLabel}
+                      {t.dashboard.slot[slot.statusKey]}
                     </p>
                     <button
                       type="button"
                       className="btn-secondary btn-block"
                       onClick={() => onNavigate('Cloud Accounts')}
                     >
-                      {slot.action === 'connect' ? 'Connect' : 'Manage'}
+                      {slot.action === 'connect' ? t.dashboard.slot.connect : t.dashboard.slot.manage}
                     </button>
                   </section>
                 );
@@ -359,34 +365,34 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
           {/* ---- recent files: real server-paged table ---- */}
           <section className="card">
             <div className="card-head">
-              <h2>Recent Files</h2>
+              <h2>{t.dashboard.recent.title}</h2>
               <div className="card-tools">
                 <input
                   type="search"
-                  aria-label="Search files"
-                  placeholder="Search files..."
+                  aria-label={t.dashboard.recent.searchLabel}
+                  placeholder={t.dashboard.recent.searchPlaceholder}
                   value={fileSearch}
                   onChange={(e) => onSearchChange(e.target.value)}
                 />
                 <select
-                  aria-label="Filter by type"
+                  aria-label={t.dashboard.recent.filterLabel}
                   value={typeFilter}
                   onChange={(e) => setTypeFilter(e.target.value)}
                 >
-                  <option value="all">All Types</option>
-                  {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                  <option value="all">{t.dashboard.recent.filterAll}</option>
+                  {typeOptions.map((key) => <option key={key} value={key}>{fileTypeDisplay(key)}</option>)}
                 </select>
                 <select
-                  aria-label="Sort files"
+                  aria-label={t.dashboard.recent.sortLabel}
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as 'modified' | 'name' | 'size')}
                 >
-                  <option value="modified">Sort by: Modified (Newest)</option>
-                  <option value="name">Sort by: Name</option>
-                  <option value="size">Sort by: Size</option>
+                  <option value="modified">{t.dashboard.recent.sortModified}</option>
+                  <option value="name">{t.dashboard.recent.sortName}</option>
+                  <option value="size">{t.dashboard.recent.sortSize}</option>
                 </select>
                 <button type="button" className="btn-secondary" onClick={() => onNavigate('Files')}>
-                  View all
+                  {t.dashboard.recent.viewAll}
                 </button>
               </div>
             </div>
@@ -396,15 +402,15 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
             ) : visible.length === 0 ? (
               <EmptyState
                 icon={Upload}
-                title={fileSearch || typeFilter !== 'all' ? 'No files match your filters' : 'No files yet'}
+                title={fileSearch || typeFilter !== 'all' ? t.dashboard.recent.emptyFilteredTitle : t.dashboard.recent.emptyTitle}
                 body={fileSearch || typeFilter !== 'all'
-                  ? 'Clear the search or type filter to see more files.'
-                  : 'Upload a file and it will appear here as one logical file.'}
+                  ? t.dashboard.recent.emptyFilteredBody
+                  : t.dashboard.recent.emptyBody}
               >
                 {!fileSearch && typeFilter === 'all' && (
                   <button type="button" className="btn-primary" onClick={() => onNavigate('Uploads')}>
                     <Upload size={15} aria-hidden="true" />
-                    Upload files
+                    {t.dashboard.recent.uploadCta}
                   </button>
                 )}
               </EmptyState>
@@ -417,15 +423,22 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                   <div className="files-footer">
                     <span className="muted small">
                       {typeFilter === 'all'
-                        ? `Showing ${page * RECENT_PAGE_SIZE + 1}–${page * RECENT_PAGE_SIZE + visible.length} of ${filesTotal} files`
-                        : `${visible.length} of ${filesTotal} files match “${typeFilter}” on this page`}
+                        ? tf(t.common.showingRange, {
+                            from: page * RECENT_PAGE_SIZE + 1,
+                            to: page * RECENT_PAGE_SIZE + visible.length,
+                            total: filesTotal,
+                          })
+                        : plural(t.dashboard.recent.filteredCount, visible.length, {
+                            total: filesTotal,
+                            type: fileTypeDisplay(typeFilter),
+                          })}
                     </span>
-                    <nav className="pagination" aria-label="Recent files pagination">
+                    <nav className="pagination" aria-label={t.dashboard.recent.paginationAria}>
                       <button
                         type="button"
                         className="page-btn"
                         disabled={page === 0 || filesLoading}
-                        aria-label="Previous page"
+                        aria-label="‹"
                         onClick={() => setPage((p) => Math.max(0, p - 1))}
                       >
                         ‹
@@ -449,7 +462,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                         type="button"
                         className="page-btn"
                         disabled={page + 1 >= totalPages || filesLoading}
-                        aria-label="Next page"
+                        aria-label="›"
                         onClick={() => setPage((p) => p + 1)}
                       >
                         ›
@@ -466,35 +479,35 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
         <aside className="dash-rail">
           <section className="card">
             <div className="card-head">
-              <h2>Recent Activity</h2>
+              <h2>{t.dashboard.activity.title}</h2>
             </div>
             {/* No activity/audit event source exists yet; the card and its slot
                 stay present with a truthful empty state (reference spec §1.5). */}
             <EmptyState
               icon={Activity}
-              title="No recent activity yet"
-              body="Uploads, downloads and account events will appear here."
+              title={t.dashboard.activity.emptyTitle}
+              body={t.dashboard.activity.emptyBody}
             />
           </section>
           <section className="card">
-            <h2>Storage Usage</h2>
-            <p className="small muted">Across all providers</p>
+            <h2>{t.dashboard.storage.title}</h2>
+            <p className="small muted">{t.dashboard.storage.acrossProviders}</p>
             {storageKnown ? (
               <div className="donut-row">
                 <Donut percent={usedPct} />
                 <div className="donut-stats">
-                  <span className="muted small">Used</span>
+                  <span className="muted small">{t.dashboard.storage.used}</span>
                   <strong>{formatBytes(storage!.usedBytes)}</strong>
-                  <span className="muted small">Total quota</span>
+                  <span className="muted small">{t.dashboard.storage.totalQuota}</span>
                   <strong>{formatBytes(storage!.totalBytes)}</strong>
-                  <span className="muted small">Reserved</span>
+                  <span className="muted small">{t.dashboard.storage.reserved}</span>
                   <strong>{formatBytes(storage!.reservedBytes)}</strong>
                 </div>
               </div>
             ) : (
               <p className="muted small">
-                Unknown — no verified quota yet.
-                {storage?.lastCheckedAt ? ` Last checked ${formatDateTime(storage.lastCheckedAt)}.` : ''}
+                {t.dashboard.storage.unknown}
+                {storage?.lastCheckedAt ? ` ${tf(t.dashboard.storage.lastChecked, { when: formatDateTime(storage.lastCheckedAt) })}` : ''}
               </p>
             )}
           </section>
@@ -506,11 +519,12 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
 
 /** Token-coloured donut; the arc is real data, never decorative. */
 function Donut({ percent }: { percent: number }) {
+  const { t, tf } = useI18n();
   const radius = 34;
   const circumference = 2 * Math.PI * radius;
   const filled = (Math.max(0, Math.min(100, percent)) / 100) * circumference;
   return (
-    <svg width="96" height="96" viewBox="0 0 88 88" role="img" aria-label={`${percent}% of quota used`}>
+    <svg width="96" height="96" viewBox="0 0 88 88" role="img" aria-label={tf(t.dashboard.donut.aria, { pct: percent })}>
       <circle cx="44" cy="44" r={radius} fill="none" stroke="var(--cn-surface-muted)" strokeWidth="9" />
       <circle
         cx="44"
@@ -524,7 +538,7 @@ function Donut({ percent }: { percent: number }) {
         transform="rotate(-90 44 44)"
       />
       <text x="44" y="42" textAnchor="middle" className="donut-value">{percent}%</text>
-      <text x="44" y="58" textAnchor="middle" className="donut-label">used</text>
+      <text x="44" y="58" textAnchor="middle" className="donut-label">{t.dashboard.donut.used}</text>
     </svg>
   );
 }

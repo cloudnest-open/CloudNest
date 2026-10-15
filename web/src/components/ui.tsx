@@ -6,37 +6,23 @@ import {
   AlertTriangle, CheckCircle2, Info, X, Cloud, Folder, FileText, FileArchive,
   FileSpreadsheet, FileImage, Presentation, File, Trash2, type LucideIcon,
 } from 'lucide-react';
+import {
+  formatBytes, formatDateTime, fileTypeKey, fileTypeLabel, type FileTypeKey,
+} from '../i18n.js';
+import { useI18n } from '../i18n-context.js';
 
 /**
  * Shared UI kit (design pack §20): Button styles live in CSS, this file holds
- * the reusable behaviour-bearing pieces — dialog, toasts, badges, tiles and the
- * formatting helpers every page needs. All of it reads semantic tokens only.
+ * the reusable behaviour-bearing pieces — dialog, toasts, badges, tiles and
+ * the formatting helpers every page needs. All of it reads semantic tokens
+ * only. Byte/date formatting is locale-aware via the app-wide i18n core.
  */
 
-/* --- formatting ---------------------------------------------------------- */
-
-export function formatBytes(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return 'Unknown';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
-  let value = bytes / 1024;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
-  return `${value.toFixed(value >= 100 ? 0 : 1)}\u00A0${units[i]}`;
-}
-
-/** Locale date-time, e.g. "Oct 14, 2026, 10:24 AM". */
-export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const when = new Date(iso);
-  if (Number.isNaN(when.getTime())) return '—';
-  return when.toLocaleString(undefined, {
-    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
-  });
-}
+export { formatBytes, formatDateTime };
 
 /* --- provider identity --------------------------------------------------- */
 
+/** Provider names are brands and stay untranslated. */
 export const PROVIDER_LABELS: Record<string, string> = {
   google_drive: 'Google Drive',
   dropbox: 'Dropbox',
@@ -72,25 +58,17 @@ export function ProviderTile({ provider, size = 28 }: { provider: string; size?:
 /* --- file type icon ------------------------------------------------------ */
 
 /**
- * Friendly type word derived from the real file name (never invented data):
- * the Files table and Dashboard's Recent Files show this in a Type column.
+ * Locale-independent type key derived from the real file name (never invented
+ * data): the Files table and Dashboard's Recent Files filter on this key and
+ * render the localized label. Unknown extensions keep their raw uppercase
+ * extension — an extension is data, never translated.
  */
-export function typeLabel(name: string): string {
-  const lower = name.toLowerCase();
-  const dot = lower.lastIndexOf('.');
-  const ext = dot >= 0 ? lower.slice(dot + 1) : '';
-  if (['xlsx', 'xls', 'csv'].includes(ext)) return 'Excel';
-  if (['docx', 'doc', 'odt', 'rtf'].includes(ext)) return 'Word';
-  if (['pptx', 'ppt', 'odp'].includes(ext)) return 'PowerPoint';
-  if (ext === 'pdf') return 'PDF';
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'Zip';
-  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp'].includes(ext)) return 'Image';
-  if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) return 'Video';
-  if (['mp3', 'wav', 'ogg', 'flac', 'm4a'].includes(ext)) return 'Audio';
-  if (ext === 'fig') return 'Figma';
-  if (['txt', 'md'].includes(ext)) return 'Text';
-  if (ext === '') return 'File';
-  return ext.toUpperCase();
+export function fileTypeName(name: string): FileTypeKey {
+  return fileTypeKey(name);
+}
+
+export function fileTypeDisplay(key: FileTypeKey): string {
+  return fileTypeLabel(key);
 }
 
 export function TypeIcon({ name, size = 18 }: { name: string; size?: number }) {
@@ -185,6 +163,7 @@ export function Dialog({ title, description, children, footer, onClose, role = '
   onClose: () => void;
   role?: 'dialog' | 'alertdialog';
 }) {
+  const { t } = useI18n();
   const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -223,7 +202,7 @@ export function Dialog({ title, description, children, footer, onClose, role = '
       >
         <div className="dialog-head">
           <h2>{title}</h2>
-          <button type="button" className="dialog-close" onClick={onClose} aria-label="Close dialog">
+          <button type="button" className="dialog-close" onClick={onClose} aria-label={t.dialog.close}>
             <X size={16} aria-hidden="true" />
           </button>
         </div>
@@ -243,6 +222,7 @@ export function ConfirmDialog({ title, lines, confirmLabel, onConfirm, onClose }
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <Dialog
       title={title}
@@ -250,7 +230,7 @@ export function ConfirmDialog({ title, lines, confirmLabel, onConfirm, onClose }
       onClose={onClose}
       footer={
         <>
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn-secondary" onClick={onClose}>{t.dialog.cancel}</button>
           <button type="button" className="btn-danger-solid" onClick={() => { onConfirm(); onClose(); }}>
             {confirmLabel}
           </button>
@@ -268,11 +248,12 @@ export function ConfirmDialog({ title, lines, confirmLabel, onConfirm, onClose }
   );
 }
 
-export function Spinner({ label = 'Working…' }: { label?: string }) {
+export function Spinner({ label }: { label?: string }) {
+  const { t } = useI18n();
   return (
     <span className="spinner-wrap" role="status">
       <span className="spinner" aria-hidden="true" />
-      <span className="sr-only">{label}</span>
+      <span className="sr-only">{label ?? t.common.working}</span>
     </span>
   );
 }
@@ -295,6 +276,7 @@ const TOAST_ICONS: Record<ToastKind, LucideIcon> = {
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n();
   const [items, setItems] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
 
@@ -304,14 +286,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const dismiss = useCallback((id: number) => {
-    setItems((prev) => prev.filter((t) => t.id !== id));
+    setItems((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
   // Errors stay until dismissed; success/info self-dismiss after 6 s.
   useEffect(() => {
     const timers = items
-      .filter((t) => t.kind !== 'error')
-      .map((t) => setTimeout(() => dismiss(t.id), 6000));
+      .filter((toast) => toast.kind !== 'error')
+      .map((toast) => setTimeout(() => dismiss(toast.id), 6000));
     return () => timers.forEach(clearTimeout);
   }, [items, dismiss]);
 
@@ -319,16 +301,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={{ push }}>
       {children}
       <div className="toast-region" aria-live="polite">
-        {items.map((t) => {
-          const Icon = TOAST_ICONS[t.kind];
+        {items.map((toast) => {
+          const Icon = TOAST_ICONS[toast.kind];
           return (
-            <div className={`toast toast-${t.kind}`} role="status" key={t.id}>
+            <div className={`toast toast-${toast.kind}`} role="status" key={toast.id}>
               <Icon size={18} aria-hidden="true" className="toast-icon" />
               <div>
-                <strong className="toast-title">{t.title}</strong>
-                {t.body && <p className="small muted">{t.body}</p>}
+                <strong className="toast-title">{toast.title}</strong>
+                {toast.body && <p className="small muted">{toast.body}</p>}
               </div>
-              <button type="button" className="toast-close" onClick={() => dismiss(t.id)} aria-label="Dismiss notification">
+              <button type="button" className="toast-close" onClick={() => dismiss(toast.id)} aria-label={t.common.dismiss}>
                 <X size={14} aria-hidden="true" />
               </button>
             </div>

@@ -21,28 +21,15 @@ import {
   ShieldCheck, Sun, Moon, User, Zap,
 } from 'lucide-react';
 import { api, refreshCsrfToken } from '../api.js';
-import {
-  LOCALES, LOCALE_NAMES, entryStrings, interpolate, readStoredLocale, storeLocale,
-  type EntryStrings, type Locale,
-} from '../i18n.js';
+import { interpolate, type EntryStrings } from '../i18n.js';
+import { useI18n } from '../i18n-context.js';
+import { LanguageMenu } from '../components/LanguageMenu.js';
 import { applyTheme, currentTheme, type Theme } from '../theme.js';
 
 const REPO_URL = 'https://github.com/cloudnest-open/CloudNest';
 const DOCS_URL = 'https://github.com/cloudnest-open/CloudNest#readme';
 const SUPPORT_URL = 'https://github.com/cloudnest-open/CloudNest/issues';
 const PRIVACY_URL = 'https://github.com/cloudnest-open/CloudNest/blob/main/SECURITY.md';
-
-function useEntryLocale(): { locale: Locale; setLocale: (next: Locale) => void; t: EntryStrings } {
-  const [locale, setLocaleState] = useState<Locale>(() => readStoredLocale());
-  useEffect(() => {
-    document.documentElement.lang = locale;
-  }, [locale]);
-  function setLocale(next: Locale): void {
-    storeLocale(next);
-    setLocaleState(next);
-  }
-  return { locale, setLocale, t: entryStrings[locale] };
-}
 
 /** The approved CloudNest cloud mark, reused from the app's sidebar brand. */
 function BrandLockup({ markSize, className }: { markSize: number; className: string }) {
@@ -83,99 +70,17 @@ function ThemePill({ theme, onSet, t }: { theme: Theme; onSet: (next: Theme) => 
   );
 }
 
-function LanguageMenu({ locale, onSet, t }: { locale: Locale; onSet: (next: Locale) => void; t: EntryStrings }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocPointer(event: MouseEvent): void {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onDocPointer);
-    return () => document.removeEventListener('mousedown', onDocPointer);
-  }, [open]);
-
-  // Open → focus the selected option so keyboard users land inside the listbox.
-  useEffect(() => {
-    if (!open) return;
-    rootRef.current?.querySelector<HTMLButtonElement>('.entry-lang-option.selected')?.focus();
-  }, [open]);
-
-  function onMenuKeyDown(e: React.KeyboardEvent): void {
-    const options = Array.from(rootRef.current?.querySelectorAll<HTMLButtonElement>('.entry-lang-option') ?? []);
-    const index = options.findIndex((el) => el === document.activeElement);
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      setOpen(false);
-      buttonRef.current?.focus();
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const delta = e.key === 'ArrowDown' ? 1 : -1;
-      const next = ((index < 0 ? 0 : index) + delta + options.length) % options.length;
-      options[next]?.focus();
-    } else if (e.key === 'Home') {
-      e.preventDefault();
-      options[0]?.focus();
-    } else if (e.key === 'End') {
-      e.preventDefault();
-      options[options.length - 1]?.focus();
-    }
-  }
-
-  return (
-    <div className="entry-lang" ref={rootRef}>
-      <button
-        type="button"
-        ref={buttonRef}
-        className="entry-lang-btn"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-label={`${t.lang.label}: ${LOCALE_NAMES[locale]}`}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Globe size={16} aria-hidden="true" />
-        <span className="entry-lang-current">{LOCALE_NAMES[locale]}</span>
-        <ChevronDown size={14} className="entry-lang-chevron" aria-hidden="true" />
-      </button>
-      {open && (
-        <ul className="entry-lang-menu" role="listbox" aria-label={t.lang.label} onKeyDown={onMenuKeyDown}>
-          {LOCALES.map((id) => (
-            <li key={id} role="option" aria-selected={id === locale}>
-              <button
-                type="button"
-                className={`entry-lang-option${id === locale ? ' selected' : ''}`}
-                onClick={() => {
-                  onSet(id);
-                  setOpen(false);
-                  buttonRef.current?.focus();
-                }}
-              >
-                <span>{LOCALE_NAMES[id]}</span>
-                {id === locale && <Check size={14} aria-hidden="true" />}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function EntryHeader({ t, theme, onSetTheme, locale, onSetLocale }: {
-  t: EntryStrings;
+function EntryHeader({ e, theme, onSetTheme }: {
+  e: EntryStrings;
   theme: Theme;
   onSetTheme: (next: Theme) => void;
-  locale: Locale;
-  onSetLocale: (next: Locale) => void;
 }) {
   const navLinks = (
     <>
-      <a className="entry-nav-link active" href="#entry-top" aria-current="page">{t.nav.home}</a>
-      <a className="entry-nav-link" href="#entry-features">{t.nav.features}</a>
-      <a className="entry-nav-link" href={DOCS_URL} target="_blank" rel="noreferrer">{t.nav.documentation}</a>
-      <a className="entry-nav-link" href={SUPPORT_URL} target="_blank" rel="noreferrer">{t.nav.support}</a>
+      <a className="entry-nav-link active" href="#entry-top" aria-current="page">{e.nav.home}</a>
+      <a className="entry-nav-link" href="#entry-features">{e.nav.features}</a>
+      <a className="entry-nav-link" href={DOCS_URL} target="_blank" rel="noreferrer">{e.nav.documentation}</a>
+      <a className="entry-nav-link" href={SUPPORT_URL} target="_blank" rel="noreferrer">{e.nav.support}</a>
     </>
   );
   return (
@@ -183,14 +88,14 @@ function EntryHeader({ t, theme, onSetTheme, locale, onSetLocale }: {
       <a className="entry-brand" href="#entry-top" aria-label="CloudNest">
         <BrandLockup markSize={34} className="entry-lockup-header" />
       </a>
-      <nav className="entry-nav" aria-label={t.nav.aria}>{navLinks}</nav>
+      <nav className="entry-nav" aria-label={e.nav.aria}>{navLinks}</nav>
       <details className="entry-mobile-nav">
-        <summary aria-label={t.nav.aria}><Menu size={19} aria-hidden="true" /></summary>
+        <summary aria-label={e.nav.aria}><Menu size={19} aria-hidden="true" /></summary>
         <div className="entry-mobile-nav-panel">{navLinks}</div>
       </details>
       <div className="entry-header-actions">
-        <ThemePill theme={theme} onSet={onSetTheme} t={t} />
-        <LanguageMenu locale={locale} onSet={onSetLocale} t={t} />
+        <ThemePill theme={theme} onSet={onSetTheme} t={e} />
+        <LanguageMenu variant="entry" />
       </div>
     </header>
   );
@@ -376,51 +281,51 @@ function HeroIllustration({ synced, secure }: { synced: string; secure: string }
   );
 }
 
-function EntryHero({ t }: { t: EntryStrings }) {
+function EntryHero({ e }: { e: EntryStrings }) {
   return (
     <section className="entry-hero" aria-labelledby="entry-headline">
       <div className="entry-hero-copy">
         <p className="entry-badge">
           <Cloud size={14} strokeWidth={2.4} aria-hidden="true" />
-          {t.badge}
+          {e.badge}
         </p>
         <h1 className="entry-headline" id="entry-headline">
-          {t.headline.line1}
+          {e.headline.line1}
           <br />
-          <span className="entry-headline-accent">{t.headline.accent}</span> {t.headline.rest}
+          <span className="entry-headline-accent">{e.headline.accent}</span> {e.headline.rest}
         </h1>
-        <p className="entry-paragraph">{t.paragraph}</p>
-        <ul className="entry-features" id="entry-features" aria-label={t.features.aria}>
-          <FeatureRow icon={<Cloud size={24} strokeWidth={1.9} />} title={t.features.providers.title} desc={t.features.providers.desc} />
-          <FeatureRow icon={<ShieldCheck size={24} strokeWidth={1.9} />} title={t.features.secure.title} desc={t.features.secure.desc} />
-          <FeatureRow icon={<Zap size={24} strokeWidth={1.9} />} title={t.features.fast.title} desc={t.features.fast.desc} />
-          <FeatureRow icon={<Monitor size={24} strokeWidth={1.9} />} title={t.features.anywhere.title} desc={t.features.anywhere.desc} />
+        <p className="entry-paragraph">{e.paragraph}</p>
+        <ul className="entry-features" id="entry-features" aria-label={e.features.aria}>
+          <FeatureRow icon={<Cloud size={24} strokeWidth={1.9} />} title={e.features.providers.title} desc={e.features.providers.desc} />
+          <FeatureRow icon={<ShieldCheck size={24} strokeWidth={1.9} />} title={e.features.secure.title} desc={e.features.secure.desc} />
+          <FeatureRow icon={<Zap size={24} strokeWidth={1.9} />} title={e.features.fast.title} desc={e.features.fast.desc} />
+          <FeatureRow icon={<Monitor size={24} strokeWidth={1.9} />} title={e.features.anywhere.title} desc={e.features.anywhere.desc} />
         </ul>
         <a className="entry-oss" href={REPO_URL} target="_blank" rel="noreferrer">
           <span className="entry-oss-mark" aria-hidden="true"><GitHubMark size={22} /></span>
           <span className="entry-oss-text">
-            <strong>{t.oss.title}</strong>
-            <small>{t.oss.desc}</small>
+            <strong>{e.oss.title}</strong>
+            <small>{e.oss.desc}</small>
           </span>
           <ArrowRight size={18} className="entry-oss-arrow" aria-hidden="true" />
-          <span className="visually-hidden">{t.oss.cta}</span>
+          <span className="visually-hidden">{e.oss.cta}</span>
         </a>
       </div>
       <div className="entry-hero-art" aria-hidden="true">
-        <HeroIllustration synced={t.illu.synced} secure={t.illu.secure} />
+        <HeroIllustration synced={e.illu.synced} secure={e.illu.secure} />
       </div>
     </section>
   );
 }
 
-function PasswordField({ id, label, value, onChange, autoComplete, minLength, t }: {
+function PasswordField({ id, label, value, onChange, autoComplete, minLength, e }: {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
   autoComplete: string;
   minLength?: number;
-  t: EntryStrings;
+  e: EntryStrings;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -441,7 +346,7 @@ function PasswordField({ id, label, value, onChange, autoComplete, minLength, t 
       <button
         type="button"
         className="entry-field-trail"
-        aria-label={show ? t.login.eyeHide : t.login.eyeShow}
+        aria-label={show ? e.login.eyeHide : e.login.eyeShow}
         aria-pressed={show}
         onClick={() => setShow((current) => !current)}
       >
@@ -451,13 +356,13 @@ function PasswordField({ id, label, value, onChange, autoComplete, minLength, t 
   );
 }
 
-function LoginForm({ t, serverUnreachable, onDone }: { t: EntryStrings; serverUnreachable: boolean; onDone: () => void }) {
+function LoginForm({ e, serverUnreachable, onDone }: { e: EntryStrings; serverUnreachable: boolean; onDone: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
+  async function submit(ev: FormEvent) {
+    ev.preventDefault();
     if (busy) return;
     setBusy(true);
     setError(null);
@@ -471,13 +376,13 @@ function LoginForm({ t, serverUnreachable, onDone }: { t: EntryStrings; serverUn
       }
       setError(
         status === 401
-          ? t.login.errorInvalid
+          ? e.login.errorInvalid
           : status === 429
-            ? t.login.errorTooMany
-            : (data as { error?: string })?.error ?? t.login.errorInvalid,
+            ? e.login.errorTooMany
+            : (data as { error?: string })?.error ?? e.login.errorInvalid,
       );
     } catch {
-      setError(t.login.errorNetwork);
+      setError(e.login.errorNetwork);
     } finally {
       setBusy(false);
     }
@@ -493,40 +398,40 @@ function LoginForm({ t, serverUnreachable, onDone }: { t: EntryStrings; serverUn
           type="text"
           value="admin"
           readOnly
-          aria-label={t.login.username}
+          aria-label={e.login.username}
           autoComplete="username"
         />
       </div>
       <PasswordField
         id="login-password"
-        label={t.login.password}
+        label={e.login.password}
         value={password}
         onChange={setPassword}
         autoComplete="current-password"
-        t={t}
+        e={e}
       />
       {serverUnreachable && (
-        <p className="entry-error" role="alert">{t.login.errorNetwork}</p>
+        <p className="entry-error" role="alert">{e.login.errorNetwork}</p>
       )}
       {error && (
         <p className="entry-error" role="alert">{error}</p>
       )}
       <button type="submit" className="entry-submit" disabled={busy}>
         {busy ? <span className="entry-spinner" aria-hidden="true" /> : <ArrowRight size={17} aria-hidden="true" />}
-        <span>{busy ? t.login.submitting : t.login.submit}</span>
+        <span>{busy ? e.login.submitting : e.login.submit}</span>
       </button>
     </form>
   );
 }
 
-function SetupForm({ t, serverUnreachable, onDone }: { t: EntryStrings; serverUnreachable: boolean; onDone: () => void }) {
+function SetupForm({ e, serverUnreachable, onDone }: { e: EntryStrings; serverUnreachable: boolean; onDone: () => void }) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
+  async function submit(ev: FormEvent) {
+    ev.preventDefault();
     if (busy) return;
     setBusy(true);
     setError(null);
@@ -539,9 +444,9 @@ function SetupForm({ t, serverUnreachable, onDone }: { t: EntryStrings; serverUn
         onDone();
         return;
       }
-      setError((data as { error?: string })?.error ?? t.setup.errorFallback);
+      setError((data as { error?: string })?.error ?? e.setup.errorFallback);
     } catch {
-      setError(t.login.errorNetwork);
+      setError(e.login.errorNetwork);
     } finally {
       setBusy(false);
     }
@@ -551,37 +456,37 @@ function SetupForm({ t, serverUnreachable, onDone }: { t: EntryStrings; serverUn
     <form className="entry-form" onSubmit={submit}>
       <PasswordField
         id="setup-password"
-        label={t.setup.password}
+        label={e.setup.password}
         value={password}
         onChange={setPassword}
         autoComplete="new-password"
         minLength={12}
-        t={t}
+        e={e}
       />
       <PasswordField
         id="setup-confirm"
-        label={t.setup.confirm}
+        label={e.setup.confirm}
         value={confirm}
         onChange={setConfirm}
         autoComplete="new-password"
         minLength={12}
-        t={t}
+        e={e}
       />
       {serverUnreachable && (
-        <p className="entry-error" role="alert">{t.login.errorNetwork}</p>
+        <p className="entry-error" role="alert">{e.login.errorNetwork}</p>
       )}
       {error && (
         <p className="entry-error" role="alert">{error}</p>
       )}
       <button type="submit" className="entry-submit" disabled={busy}>
         {busy ? <span className="entry-spinner" aria-hidden="true" /> : <ArrowRight size={17} aria-hidden="true" />}
-        <span>{busy ? t.setup.submitting : t.setup.submit}</span>
+        <span>{busy ? e.setup.submitting : e.setup.submit}</span>
       </button>
     </form>
   );
 }
 
-function EntryFooter({ t, theme, onSetTheme }: { t: EntryStrings; theme: Theme; onSetTheme: (next: Theme) => void }) {
+function EntryFooter({ e, theme, onSetTheme }: { e: EntryStrings; theme: Theme; onSetTheme: (next: Theme) => void }) {
   const [health, setHealth] = useState<'ok' | 'unverified'>('unverified');
   useEffect(() => {
     let cancelled = false;
@@ -603,28 +508,30 @@ function EntryFooter({ t, theme, onSetTheme }: { t: EntryStrings; theme: Theme; 
     <footer className="entry-footer">
       <div className="entry-footer-brand">
         <BrandLockup markSize={26} className="entry-lockup-footer" />
-        <p className="entry-footer-tagline">{t.footer.tagline}</p>
+        <p className="entry-footer-tagline">{e.footer.tagline}</p>
       </div>
-      <nav className="entry-footer-links" aria-label={t.nav.aria}>
-        <a href={REPO_URL} target="_blank" rel="noreferrer">{t.footer.about}</a>
-        <a href={DOCS_URL} target="_blank" rel="noreferrer">{t.footer.documentation}</a>
-        <a href={SUPPORT_URL} target="_blank" rel="noreferrer">{t.footer.support}</a>
-        <a href={PRIVACY_URL} target="_blank" rel="noreferrer">{t.footer.privacy}</a>
+      <nav className="entry-footer-links" aria-label={e.nav.aria}>
+        <a href={REPO_URL} target="_blank" rel="noreferrer">{e.footer.about}</a>
+        <a href={DOCS_URL} target="_blank" rel="noreferrer">{e.footer.documentation}</a>
+        <a href={SUPPORT_URL} target="_blank" rel="noreferrer">{e.footer.support}</a>
+        <a href={PRIVACY_URL} target="_blank" rel="noreferrer">{e.footer.privacy}</a>
       </nav>
       <div className="entry-footer-status">
         <span className={`entry-status${health === 'ok' ? ' ok' : ''}`}>
           <span className="entry-status-dot" aria-hidden="true" />
-          {health === 'ok' ? t.footer.operational : t.footer.selfHosted}
+          {health === 'ok' ? e.footer.operational : e.footer.selfHosted}
         </span>
-        <ThemePill theme={theme} onSet={onSetTheme} t={t} />
-        <span className="entry-footer-rights">{interpolate(t.footer.rights, { year: new Date().getFullYear() })}</span>
+        <ThemePill theme={theme} onSet={onSetTheme} t={e} />
+        <span className="entry-footer-rights">{interpolate(e.footer.rights, { year: new Date().getFullYear() })}</span>
       </div>
     </footer>
   );
 }
 
 export function LoginPage({ onDone, serverError }: { onDone: () => void; serverError?: string | null }) {
-  const { locale, setLocale, t } = useEntryLocale();
+  // One shared language preference/instance — the same the shell and every
+  // page use, so the login choice simply continues after authentication.
+  const { e } = useI18n();
   const [theme, setThemeState] = useState<Theme>(() => currentTheme());
   function setTheme(next: Theme): void {
     applyTheme(next);
@@ -632,25 +539,25 @@ export function LoginPage({ onDone, serverError }: { onDone: () => void; serverE
   }
   return (
     <div className="entry-page">
-      <EntryHeader t={t} theme={theme} onSetTheme={setTheme} locale={locale} onSetLocale={setLocale} />
+      <EntryHeader e={e} theme={theme} onSetTheme={setTheme} />
       <main className="entry-main">
         <section className="entry-auth" aria-labelledby="entry-auth-title">
           <div className="entry-auth-content">
             <BrandLockup markSize={52} className="entry-lockup-panel" />
-            <h2 className="entry-auth-title" id="entry-auth-title">{t.login.welcome}</h2>
-            <p className="entry-auth-subtitle">{t.login.subtitle}</p>
-            <LoginForm t={t} serverUnreachable={serverError != null} onDone={onDone} />
+            <h2 className="entry-auth-title" id="entry-auth-title">{e.login.welcome}</h2>
+            <p className="entry-auth-subtitle">{e.login.subtitle}</p>
+            <LoginForm e={e} serverUnreachable={serverError != null} onDone={onDone} />
           </div>
         </section>
-        <EntryHero t={t} />
+        <EntryHero e={e} />
       </main>
-      <EntryFooter t={t} theme={theme} onSetTheme={setTheme} />
+      <EntryFooter e={e} theme={theme} onSetTheme={setTheme} />
     </div>
   );
 }
 
 export function FirstRunPage({ onDone, serverError }: { onDone: () => void; serverError?: string | null }) {
-  const { locale, setLocale, t } = useEntryLocale();
+  const { e } = useI18n();
   const [theme, setThemeState] = useState<Theme>(() => currentTheme());
   function setTheme(next: Theme): void {
     applyTheme(next);
@@ -658,19 +565,19 @@ export function FirstRunPage({ onDone, serverError }: { onDone: () => void; serv
   }
   return (
     <div className="entry-page">
-      <EntryHeader t={t} theme={theme} onSetTheme={setTheme} locale={locale} onSetLocale={setLocale} />
+      <EntryHeader e={e} theme={theme} onSetTheme={setTheme} />
       <main className="entry-main">
         <section className="entry-auth" aria-labelledby="entry-auth-title">
           <div className="entry-auth-content">
             <BrandLockup markSize={52} className="entry-lockup-panel" />
-            <h2 className="entry-auth-title" id="entry-auth-title">{t.setup.title}</h2>
-            <p className="entry-auth-subtitle">{t.setup.subtitle}</p>
-            <SetupForm t={t} serverUnreachable={serverError != null} onDone={onDone} />
+            <h2 className="entry-auth-title" id="entry-auth-title">{e.setup.title}</h2>
+            <p className="entry-auth-subtitle">{e.setup.subtitle}</p>
+            <SetupForm e={e} serverUnreachable={serverError != null} onDone={onDone} />
           </div>
         </section>
-        <EntryHero t={t} />
+        <EntryHero e={e} />
       </main>
-      <EntryFooter t={t} theme={theme} onSetTheme={setTheme} />
+      <EntryFooter e={e} theme={theme} onSetTheme={setTheme} />
     </div>
   );
 }
