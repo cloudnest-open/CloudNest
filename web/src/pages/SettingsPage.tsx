@@ -71,7 +71,7 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)}\u00A0${units[i]}`;
 }
 
-export function SettingsPage() {
+export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: () => void } = {}) {
   const [section, setSection] = useState<SectionKey>('general');
   const [settings, setSettings] = useState<Settings | null>(null);
   const [system, setSystem] = useState<SystemInfo | null>(null);
@@ -120,6 +120,15 @@ export function SettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Arriving via “Configure Provider” from Cloud Accounts: bring the dedicated
+  // Provider Setup section into view (it lives below the settings tabs).
+  useEffect(() => {
+    let pending: string | null = null;
+    try { pending = sessionStorage.getItem('cloudnest.pendingConnect'); } catch { /* private mode */ }
+    if (!pending) return;
+    window.setTimeout(() => document.getElementById('provider-setup')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 80);
+  }, []);
 
   async function save(patch: Record<string, unknown>): Promise<void> {
     setBusy(true);
@@ -723,9 +732,9 @@ export function SettingsPage() {
         </div>
       )}
 
-      <section className="card">
+      <section className="card" id="provider-setup">
         <h2>Provider Setup</h2>
-        <ProviderSetupCard onChanged={() => void load()} />
+        <ProviderSetupCard onChanged={() => void load()} onGoToCloudAccounts={onGoToCloudAccounts} />
       </section>
     </>
   );

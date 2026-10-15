@@ -34,6 +34,37 @@ function statusLabel(account: AccountInfo): { text: string; tone: string } {
   return { text: 'Disconnected', tone: 'muted' };
 }
 
+/**
+ * Connect ↔ Provider-setup hand-off (owner task 2026-10-15).
+ *
+ * Connecting an account and configuring the installation's own OAuth app are
+ * two different operations. When a Connect attempt finds the app credentials
+ * missing, the user stays HERE and may deliberately choose “Configure
+ * Provider”; these session-scoped hand-off entries then preserve the chosen
+ * provider across the Settings round-trip so the user can continue connecting
+ * it intentionally — nothing navigates on its own.
+ */
+const PENDING_KEY = 'cloudnest.pendingConnect';
+const CONTINUE_KEY = 'cloudnest.connectContinue';
+
+function readHandoff(key: string): { provider?: string; displayName?: string } | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as { provider?: string; displayName?: string }) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeHandoff(key: string, value: { provider: string; displayName?: string } | null): void {
+  try {
+    if (value) sessionStorage.setItem(key, JSON.stringify(value));
+    else sessionStorage.removeItem(key);
+  } catch {
+    /* private mode: the hand-off is lost, nothing else breaks */
+  }
+}
+
 export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => void }) {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
@@ -52,6 +83,27 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   // Set when an OAuth start fails because this instance lacks the provider's
   // application configuration; rendered as the explanatory dialog below.
   const [setupNeeded, setSetupNeeded] = useState<ProviderInfo | null>(null);
+  // Set when the user returned from Provider Setup having deliberately chosen
+  // "Continue connecting {provider}": we then resume that provider's connect.
+  const [continueProvider, setContinueProvider] = useState<string | null>(null);
+
+  // On arrival, honour a pending "continue connecting" hand-off from Settings.
+  useEffect(() => {
+    const pending = readHandoff(CONTINUE_KEY);
+    if (!pending?.provider) return;
+    writeHandoff(CONTINUE_KEY, null);
+    setPickerOpen(true);
+    setContinueProvider(pending.provider);
+  }, []);
+
+  // Resume only once the provider catalog is loaded (connect() needs the record).
+  useEffect(() => {
+    if (!continueProvider || providers.length === 0) return;
+    const target = providers.find((p) => p.id === continueProvider);
+    setContinueProvider(null);
+    if (target) void connect(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- connect is stable per render cycle
+  }, [continueProvider, providers]);
 
   useEffect(() => {
     try { sessionStorage.setItem('cloudnest.connectPickerOpen', pickerOpen ? '1' : '0'); } catch { /* private mode */ }
@@ -90,6 +142,8 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     const res = await api.oauthStart(p.id);
     if (res.status === 200) {
       const url = (res.data as { authorizationUrl: string }).authorizationUrl;
+      // the setup round-trip is complete; no stale hand-off should linger
+      writeHandoff(PENDING_KEY, null);
       window.location.assign(url);
       return;
     }
@@ -265,7 +319,13 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
               <button
                 type="button"
                 className="btn-primary"
-                onClick={() => { setSetupNeeded(null); onGoToSettings(); }}
+                onClick={() => {
+                  // remember WHICH provider the user was connecting so the
+                  // setup section can open it and offer the way back
+                  writeHandoff(PENDING_KEY, { provider: setupNeeded.id, displayName: setupNeeded.displayName });
+                  setSetupNeeded(null);
+                  onGoToSettings();
+                }}
               >
                 Configure Provider
               </button>

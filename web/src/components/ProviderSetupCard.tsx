@@ -11,7 +11,7 @@ import { ProviderLogo } from './ProviderLogo.js';
  * → note → Save/Cancel form. The compact row keeps only identity, status and
  * the setup action — the raw URI is never squeezed in beside them.
  */
-export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
+export function ProviderSetupCard({ onChanged, onGoToCloudAccounts }: { onChanged: () => void; onGoToCloudAccounts?: () => void }) {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [clientId, setClientId] = useState('');
@@ -25,6 +25,41 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const copyTimer = useRef<number | null>(null);
+  // Arriving from Cloud Accounts' “Configure Provider”: which provider the
+  // user was connecting, so this dedicated section opens THAT form and can
+  // offer the deliberate way back and (after saving) the continue action.
+  const [context, setContext] = useState<{ provider: string; displayName: string } | null>(() => {
+    try {
+      const raw = sessionStorage.getItem('cloudnest.pendingConnect');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { provider?: string; displayName?: string };
+      return parsed.provider ? { provider: parsed.provider, displayName: parsed.displayName ?? parsed.provider } : null;
+    } catch {
+      return null;
+    }
+  });
+  const [savedProvider, setSavedProvider] = useState<string | null>(null);
+  const autoOpened = useRef(false);
+
+  // Open the arriving provider's form exactly once (a later Cancel must stay cancelled).
+  useEffect(() => {
+    if (!context || autoOpened.current) return;
+    autoOpened.current = true;
+    setOpenId(context.provider);
+  }, [context]);
+
+  function clearContext(): void {
+    try { sessionStorage.removeItem('cloudnest.pendingConnect'); } catch { /* private mode */ }
+    setContext(null);
+  }
+
+  /** Only a deliberate click here resumes the connection for that provider. */
+  function continueConnecting(): void {
+    if (!context) return;
+    try { sessionStorage.setItem('cloudnest.connectContinue', JSON.stringify({ provider: context.provider })); } catch { /* private mode */ }
+    clearContext();
+    onGoToCloudAccounts?.();
+  }
 
   useEffect(() => {
     void (async () => {
@@ -62,6 +97,7 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
     if (res.status === 200) {
       setClientSecret('');
       setNeedsConfirm(false);
+      setSavedProvider(provider.id);
       setMessage(`${provider.displayName} configuration saved. It is not verified until a successful sign-in.`);
       onChanged();
       const refreshed = await api.providers();
@@ -79,6 +115,25 @@ export function ProviderSetupCard({ onChanged }: { onChanged: () => void }) {
         Configure CloudNest's own application credentials once per provider. This is separate from connecting
         your accounts — the Connect button cannot bypass each provider's app registration.
       </p>
+
+      {context && (
+        <div className="setup-context">
+          <p className="small" style={{ margin: 0 }}>
+            You chose to configure <strong>{context.displayName}</strong> so an account can be connected.
+          </p>
+          <div className="actions">
+            {savedProvider === context.provider && (
+              <button type="button" className="btn-primary" onClick={continueConnecting}>
+                Continue connecting {context.displayName}
+              </button>
+            )}
+            <button type="button" className="btn-secondary" onClick={() => { clearContext(); onGoToCloudAccounts?.(); }}>
+              Back to Cloud Accounts
+            </button>
+          </div>
+        </div>
+      )}
+
       {message && <p className="form-ok" role="status">{message}</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
 

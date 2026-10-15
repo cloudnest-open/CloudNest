@@ -835,6 +835,19 @@ input:disabled, select:disabled, textarea:disabled {
   margin-top: 12px;
 }
 
+/* “Configure Provider” round-trip context: which provider the user came to
+   set up, the deliberate way back, and (after saving) the continue action. */
+.setup-context {
+  border: 1px solid var(--cn-border);
+  background: var(--cn-primary-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .setup-list { display: flex; flex-direction: column; gap: 8px; padding: 0; margin: 10px 0 0; list-style: none; }
 
 .setup-row {

@@ -413,7 +413,7 @@ export default function App() {
             </div>
           )}
           {active === 'Settings' ? (
-            <SettingsPage />
+            <SettingsPage onGoToCloudAccounts={() => setActive('Cloud Accounts')} />
           ) : active === 'Cloud Accounts' ? (
             <CloudAccountsPage onGoToSettings={() => setActive('Settings')} />
           ) : active === 'Uploads' ? (
