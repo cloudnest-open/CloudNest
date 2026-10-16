@@ -338,6 +338,10 @@ export const appJa: AppStrings = {
     dropzone: 'ここにファイルをドラッグ＆ドロップ',
     dropzoneOr: 'またはクリックしてデバイスからファイルを選択',
     keepHint: 'ファイルはこのデバイスに残り、チャンクのみが送信されます。',
+    tierLabel: 'ストレージ層',
+    tierPersonal: 'パーソナル',
+    tierBusiness: 'ビジネス',
+    tierNote: 'ビジネス層のアップロードは S3 互換バケットのみに、パーソナル層は OAuth アカウントのみに保存されます。',
     maxChunkSize: '最大チャンクサイズ',
     maxChunkNote: '各アップロードチャンクの最大サイズです。最後のチャンクは小さくなる場合があります。',
     planPreview: {
@@ -527,6 +531,7 @@ export const appJa: AppStrings = {
       title: 'プロバイダーを選択',
       setup: '設定：{status}',
       megaNote: 'メールアドレスとパスワードで接続 — 実験的機能で、OAuth ではありません。',
+      s3Note: 'アクセスキーとシークレットで接続します — ビジネス層、アプリ設定は不要です。',
       connect: '{provider} に接続',
       experimental: '実験的',
     },
@@ -558,6 +563,29 @@ export const appJa: AppStrings = {
       badCredentials: 'MEGA がその認証情報を拒否しました。',
       failed: 'MEGA への接続に失敗しました。',
       reauthNotice: 'MEGA の認証情報をもう一度入力してください。',
+    },
+    tabs: {
+      aria: 'ストレージ層',
+      personal: 'パーソナル',
+      business: 'ビジネス',
+    },
+    s3: {
+      title: 'S3互換ストレージを接続',
+      note:
+        'ビジネス層：Cloudflare R2・Backblaze B2・AWS S3 などの S3 互換バケットを接続します。キーはローカルの CloudNest サーバーにのみ送信され、暗号化して保存されます。CloudNest が扱うのは下のプレフィックス配下のオブジェクトだけです。',
+      endpoint: 'エンドポイント URL',
+      region: 'リージョン',
+      accessKey: 'アクセスキー ID',
+      secretKey: 'シークレットアクセスキー',
+      bucket: 'バケット',
+      prefix: 'プレフィックス',
+      cap: '容量上限',
+      capHint:
+        'このバケットのうち CloudNest が使える容量を決めます。S3 にクォータ API はないため、この上限と CloudNest 自身のバイト集計が唯一のクォータです。',
+      submit: 'バケットを接続',
+      connected: 'S3 互換バケットを接続しました（ビジネス層）。',
+      failed: 'S3 接続に失敗しました。',
+      testNote: '接続時に HeadBucket でキーを検証します。',
     },
     list: {
       title: 'アカウント',

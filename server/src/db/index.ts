@@ -82,7 +82,7 @@ export interface AppliedMigration {
  */
 export function runMigrations(
   db: Database.Database,
-  migrations: ReadonlyArray<{ version: number; name: string; up: (db: Database.Database) => void }>,
+  migrations: ReadonlyArray<{ version: number; name: string; up: (db: Database.Database) => void; requiresForeignKeysOff?: boolean }>,
 ): AppliedMigration[] {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -102,13 +102,31 @@ export function runMigrations(
   const sorted = [...migrations].sort((a, b) => a.version - b.version);
   for (const migration of sorted) {
     if (alreadyApplied.has(migration.version)) continue;
-    const tx = db.transaction(() => {
-      migration.up(db);
-      db.prepare(
-        'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)',
-      ).run(migration.version, migration.name, new Date().toISOString());
-    });
-    tx(); // throws -> rolled back -> startup fails; no half-applied schema
+    if (migration.requiresForeignKeysOff === true) {
+      // the one documented exception: a parent-table rebuild that RESTRICT
+      // children make impossible inside a transaction (see Migration docs).
+      // The migration itself verifies foreign_key_check before re-enabling.
+      db.pragma('foreign_keys = OFF');
+      try {
+        migration.up(db);
+        db.prepare(
+          'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)',
+        ).run(migration.version, migration.name, new Date().toISOString());
+      } finally {
+        db.pragma('foreign_keys = ON');
+      }
+      if ((db.pragma('foreign_keys', { simple: true }) as number) !== 1) {
+        throw new Error('SQLite foreign_keys could not be re-enabled after the migration.');
+      }
+    } else {
+      const tx = db.transaction(() => {
+        migration.up(db);
+        db.prepare(
+          'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)',
+        ).run(migration.version, migration.name, new Date().toISOString());
+      });
+      tx(); // throws -> rolled back -> startup fails; no half-applied schema
+    }
     applied.push({
       version: migration.version,
       name: migration.name,

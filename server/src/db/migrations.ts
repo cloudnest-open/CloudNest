@@ -10,6 +10,18 @@ export interface Migration {
   version: number;
   name: string;
   up: (db: Database.Database) => void;
+  /**
+   * Set ONLY when SQLite physically cannot perform the change inside a
+   * transaction — rebuilding a parent table whose children reference it with
+   * ON DELETE RESTRICT is the canonical case: RESTRICT is enforced
+   * immediately even under defer_foreign_keys, and PRAGMA foreign_keys is a
+   * no-op inside a transaction. A migration with this flag runs WITHOUT the
+   * transactional wrapper and MUST manage its own safety: disable foreign
+   * keys first, rebuild, then verify `foreign_key_check` before re-enabling
+   * (the documented procedure in sqlite.org/lang_altertable.html §7). Every
+   * other migration stays fully transactional.
+   */
+  requiresForeignKeysOff?: boolean;
 }
 
 const M0001_INFRASTRUCTURE: Migration = {
@@ -675,6 +687,91 @@ const M0011_QUOTA_SCOPE_AND_RECONCILE: Migration = {
   },
 };
 
+const M0012_S3_BUSINESS_TIER: Migration = {
+  version: 12,
+  name: '0012-s3-business-tier',
+  // The provider CHECK must widen to accept 's3', which SQLite cannot do in
+  // place: provider_accounts must be rebuilt. Eight child tables reference it
+  // with ON DELETE RESTRICT, whose enforcement is immediate even under
+  // defer_foreign_keys, so this rebuild can only run with foreign keys
+  // disabled — the documented altertable procedure, outside a transaction.
+  requiresForeignKeysOff: true,
+  up: (db) => {
+    // Roadmap Phase 1 (two tiers, one engine):
+    // - provider_accounts.tier: personal (the five OAuth connectors) vs
+    //   business (S3-compatible). Routing policy sends a file only to its own
+    //   tier's pool, so business files never land on personal accounts.
+    // - provider_accounts.capacity_cap_bytes: the owner-set per-bucket cap
+    //   for S3-compatible accounts. S3 exposes no quota API, so this cap plus
+    //   CloudNest-tracked byte sums is the only honest quota; NULL for
+    //   provider-reported-quota accounts.
+    // - files.tier records the tier a file was planned for, keeping the
+    //   routing constraint checkable and auditable after the fact.
+    // retry safety: a previous interrupted run can only have left the staging
+    // table behind; every other statement is part of the checked sequence
+    db.exec('DROP TABLE IF EXISTS provider_accounts_new;');
+    db.exec(`
+      CREATE TABLE provider_accounts_new (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL CHECK(provider IN ('google_drive','dropbox','pcloud','mega','onedrive','s3')),
+        display_label TEXT NOT NULL,
+        account_identifier TEXT,
+        status TEXT NOT NULL CHECK(status IN ('connected','needs_reauth','disconnected','error')),
+        tier TEXT NOT NULL DEFAULT 'personal' CHECK(tier IN ('personal','business')),
+        quota_total_bytes INTEGER CHECK(quota_total_bytes IS NULL OR quota_total_bytes >= 0),
+        used_bytes INTEGER CHECK(used_bytes IS NULL OR used_bytes >= 0),
+        quota_status TEXT NOT NULL DEFAULT 'unknown' CHECK(quota_status IN ('current','stale','unknown')),
+        quota_unlimited INTEGER NOT NULL DEFAULT 0 CHECK(quota_unlimited IN (0,1)),
+        quota_scope TEXT,
+        capacity_cap_bytes INTEGER CHECK(capacity_cap_bytes IS NULL OR capacity_cap_bytes > 0),
+        reserve_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserve_bytes >= 0),
+        reserved_inflight_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserved_inflight_bytes >= 0),
+        last_quota_check_at TEXT,
+        last_quota_error_code TEXT,
+        last_quota_error_at TEXT,
+        last_error_code TEXT,
+        last_error_at TEXT,
+        credential_ciphertext BLOB,
+        credential_nonce BLOB,
+        credential_auth_tag BLOB,
+        credential_key_version INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    // every existing account is personal by definition (only OAuth existed so far)
+    db.exec(`
+      INSERT INTO provider_accounts_new
+        (id, provider, display_label, account_identifier, status, tier,
+         quota_total_bytes, used_bytes, quota_status, quota_unlimited, quota_scope, capacity_cap_bytes,
+         reserve_bytes, reserved_inflight_bytes, last_quota_check_at,
+         last_quota_error_code, last_quota_error_at, last_error_code, last_error_at,
+         credential_ciphertext, credential_nonce, credential_auth_tag, credential_key_version,
+         created_at, updated_at)
+      SELECT id, provider, display_label, account_identifier, status, 'personal',
+         quota_total_bytes, used_bytes, quota_status, quota_unlimited, quota_scope, NULL,
+         reserve_bytes, reserved_inflight_bytes, last_quota_check_at,
+         last_quota_error_code, last_quota_error_at, last_error_code, last_error_at,
+         credential_ciphertext, credential_nonce, credential_auth_tag, credential_key_version,
+         created_at, updated_at
+      FROM provider_accounts;
+    `);
+    db.exec('DROP TABLE provider_accounts;');
+    db.exec('ALTER TABLE provider_accounts_new RENAME TO provider_accounts;');
+    db.exec('CREATE INDEX idx_provider_accounts_provider_status ON provider_accounts(provider, status);');
+    db.exec('CREATE UNIQUE INDEX idx_provider_accounts_identity ON provider_accounts(provider, account_identifier) WHERE account_identifier IS NOT NULL;');
+    db.exec('CREATE INDEX idx_provider_accounts_quota_scope ON provider_accounts(quota_scope) WHERE quota_scope IS NOT NULL;');
+    db.exec('CREATE INDEX idx_provider_accounts_tier ON provider_accounts(tier);');
+    db.exec(
+      `ALTER TABLE files ADD COLUMN tier TEXT NOT NULL DEFAULT 'personal' CHECK(tier IN ('personal','business'));`,
+    );
+    const violations = db.pragma('foreign_key_check', { simple: true });
+    if (violations) {
+      throw new Error('foreign_key_check failed after the S3 business-tier migration');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -687,4 +784,5 @@ export const allMigrations: readonly Migration[] = [
   M0009_SHARE_LINKS,
   M0010_SHARE_UNLOCK_GRANTS,
   M0011_QUOTA_SCOPE_AND_RECONCILE,
+  M0012_S3_BUSINESS_TIER,
 ];

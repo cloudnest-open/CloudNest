@@ -63,12 +63,26 @@ function MegaMark({ size }: { size: number }) {
   );
 }
 
+function S3Mark({ size }: { size: number }) {
+  // neutral storage-bucket glyph: S3-compatible endpoints have no single brand
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="11" fill="#5B6472" />
+      <path
+        fill="#fff"
+        d="M6.2 8.2 12 6l5.8 2.2v7.6L12 18l-5.8-2.2V8.2zm1.7.55v5.9L12 15.9l4.1-1.25v-5.9L12 7.85 7.9 8.75zM12 9.1l2.6.8-2.6.8-2.6-.8 2.6-.8z"
+      />
+    </svg>
+  );
+}
+
 const MARKS: Record<string, ComponentType<{ size: number }>> = {
   google_drive: GoogleDriveMark,
   dropbox: DropboxMark,
   onedrive: OneDriveMark,
   pcloud: PCloudMark,
   mega: MegaMark,
+  s3: S3Mark,
 };
 
 export function ProviderLogo({ provider, size = 24 }: { provider: string; size?: number }) {

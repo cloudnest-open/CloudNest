@@ -274,12 +274,21 @@ export function uploadsRouter(deps: {
       const chunkSizeMiB = body['chunkSizeMiB'] === undefined
         ? deps.settings.effectiveChunkSizeMiB()
         : assertAllowedChunkSizeMiB(body['chunkSizeMiB']);
+      // roadmap Phase 1: the storage tier chooses the pool (personal OAuth vs
+      // business S3); anything but the two documented values is refused.
+      const tierBody = body['tier'];
+      const tier = tierBody === undefined ? 'personal' : tierBody;
+      if (tier !== 'personal' && tier !== 'business') {
+        res.status(400).json({ error: 'invalid_upload_metadata', code: 'invalid_upload_metadata' });
+        return;
+      }
       const plan: PlanRequest = {
         originalName: body['originalName'] as string,
         sizeBytes: Number(body['sizeBytes']),
         chunkSizeMiB,
         mimeType: typeof body['mimeType'] === 'string' ? (body['mimeType'] as string) : null,
         idempotencyKey,
+        tier,
         routingStrategy: deps.settings.get('upload.spaceAwareRouting') ? 'capacity-aware' : 'balanced',
       };
       const result = deps.uploads.plan(plan);

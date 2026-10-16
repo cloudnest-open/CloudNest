@@ -19,7 +19,7 @@ export function callbackUri(appBaseUrl: string, provider: ProviderId): string {
   return `${appBaseUrl}/api/providers/${provider}/oauth/callback`;
 }
 
-export function oauthEndpoints(provider: Exclude<ProviderId, 'mega'>, config: DecryptedProviderAppConfig): OAuthEndpoints {
+export function oauthEndpoints(provider: Exclude<ProviderId, 'mega' | 's3'>, config: DecryptedProviderAppConfig): OAuthEndpoints {
   switch (provider) {
     case 'google_drive':
       return {

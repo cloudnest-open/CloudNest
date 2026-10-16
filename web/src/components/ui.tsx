@@ -29,6 +29,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   onedrive: 'OneDrive',
   pcloud: 'pCloud',
   mega: 'MEGA',
+  s3: 'S3-compatible',
 };
 
 /** Brand colour is used ONLY inside the small identity tile (spec §5). */

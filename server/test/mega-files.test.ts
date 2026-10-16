@@ -31,8 +31,8 @@ test('upload routing can exclude MEGA while every other connector stays eligible
   assert.ok(!eligible.includes('mega'), 'MEGA is excluded from upload placement');
   assert.deepEqual(
     eligible.sort(),
-    ['dropbox', 'google_drive', 'onedrive', 'pcloud'],
-    'the four other connectors keep working',
+    ['dropbox', 'google_drive', 'onedrive', 'pcloud', 's3'],
+    'the other connectors (now including the S3-compatible adapter) keep working',
   );
 });
 

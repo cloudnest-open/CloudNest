@@ -4,14 +4,16 @@ import { dropboxAdapter } from './dropbox.js';
 import { pcloudAdapter } from './pcloud.js';
 import { onedriveAdapter } from './onedrive.js';
 import { megaAdapter } from './mega.js';
+import { s3Adapter } from './s3.js';
 
-/** Small static map of five known provider adapters. No dynamic plugin loader. */
+/** Small static map of six known provider adapters. No dynamic plugin loader. */
 export const providerRegistry: Readonly<Record<ProviderId, ProviderAdapter>> = Object.freeze({
   google_drive: googleDriveAdapter,
   dropbox: dropboxAdapter,
   pcloud: pcloudAdapter,
   onedrive: onedriveAdapter,
   mega: megaAdapter,
+  s3: s3Adapter,
 });
 
 /**

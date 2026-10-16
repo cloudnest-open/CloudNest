@@ -11,9 +11,10 @@ import { PROVIDER_IDS, OAUTH_PROVIDER_IDS, ProviderError, type ProviderId, type 
 import { callbackUri, oauthEndpoints, validatePcloudHost } from '../providers/oauth-endpoints.js';
 import { startOAuthFlow, consumeOAuthState, makePkcePair } from '../providers/oauth-state.js';
 import { providerFetch } from '../providers/types.js';
+import { s3EndpointOrigin } from '../providers/s3-files.js';
 
-/** MEGA has no OAuth app config; every other provider does. */
-function isOAuthProvider(value: string): value is Exclude<ProviderId, 'mega'> {
+/** MEGA and S3 have no OAuth app config; the four OAuth connectors do. */
+function isOAuthProvider(value: string): value is Exclude<ProviderId, 'mega' | 's3'> {
   return (OAUTH_PROVIDER_IDS as readonly string[]).includes(value);
 }
 
@@ -244,6 +245,76 @@ export function providersRouter(deps: {
       const code = err instanceof ProviderError ? err.safeCode : 'provider_unavailable';
       queries.recordAudit('provider_oauth_callback', false, code);
       return redirectTo(code);
+    }
+  });
+
+  // ---- S3-compatible (business tier) connect — roadmap Phase 1 ----
+  // Owner-only by design: business buckets are owner-controlled infrastructure
+  // (§6 decision 1, applied via the owner's recorded fallback).
+  router.post('/api/providers/s3/credentials', adminOnly, csrf.doubleCsrfProtection, connectLimiter, async (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const endpoint = typeof body['endpoint'] === 'string' ? (body['endpoint'] as string).trim() : '';
+    const region = typeof body['region'] === 'string' && (body['region'] as string).trim() ? (body['region'] as string).trim() : 'auto';
+    const accessKeyId = typeof body['accessKeyId'] === 'string' ? (body['accessKeyId'] as string).trim() : '';
+    const secretAccessKey = typeof body['secretAccessKey'] === 'string' ? (body['secretAccessKey'] as string) : '';
+    const bucket = typeof body['bucket'] === 'string' ? (body['bucket'] as string).trim() : '';
+    const prefixRaw = typeof body['prefix'] === 'string' && (body['prefix'] as string).trim() ? (body['prefix'] as string).trim() : 'cloudnest';
+    const prefix = `${prefixRaw.replace(/\/+$/, '')}/`;
+    const capBody = body['capacityCapBytes'];
+    const capacityCapBytes = typeof capBody === 'number' && Number.isInteger(capBody) && capBody > 0 ? capBody : null;
+
+    if (!accessKeyId || !secretAccessKey) {
+      res.status(400).json({ error: 'Access key and secret key are required.', code: 'invalid_credentials' });
+      return;
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,253}[A-Za-z0-9]$/.test(bucket)) {
+      res.status(400).json({ error: 'Bucket name looks invalid.', code: 'invalid_request' });
+      return;
+    }
+    try {
+      s3EndpointOrigin(endpoint);
+    } catch (err) {
+      const message = err instanceof ProviderError && err.httpStatus === 400 ? 'Endpoint must be an https origin like https://s3.example.com.' : 'Endpoint is invalid.';
+      res.status(400).json({ error: message, code: 'invalid_request' });
+      return;
+    }
+
+    const bundle: ProviderCredentialBundle = { schemaVersion: 1, provider: 's3', endpoint, region, accessKeyId, secretAccessKey, bucket, prefix };
+    try {
+      const adapter = getAdapter('s3')!;
+      // HeadBucket: proves the keys sign correctly AND the bucket is reachable
+      const identity = await adapter.connectAndReadAccount(bundle);
+      const quota = capacityCapBytes !== null
+        ? { totalBytes: capacityCapBytes, usedBytes: 0, status: 'current' as const }
+        : identity.quota;
+      const { row } = accounts.upsertConnection({
+        provider: 's3',
+        account: { ...identity, quota },
+        bundle,
+        tier: 'business',
+        capacityCapBytes,
+      });
+      queries.recordAudit('provider_s3_connect', true, bucket, { accountId: row.id });
+      res.status(201).json({ ok: true, accountId: row.id });
+    } catch (err) {
+      const code = err instanceof ProviderError ? err.safeCode : 'provider_unavailable';
+      queries.recordAudit('provider_s3_connect', false, code, { bucket });
+      const httpStatus = err instanceof ProviderError
+        ? (err.safeCode === 'invalid_request' ? 400
+          : err.safeCode === 'invalid_credentials' ? 401
+          : err.safeCode === 'provider_object_missing' ? 404
+          : err.safeCode === 'provider_rate_limited' ? 429
+          : 502)
+        : 502;
+      const message = err instanceof ProviderError && err.safeCode === 'provider_object_missing'
+        ? 'The bucket does not exist at this endpoint.'
+        : err instanceof ProviderError && err.safeCode === 'invalid_credentials'
+          ? 'The endpoint rejected these keys (signature or permission error).'
+          : 'Could not reach the S3-compatible endpoint.';
+      res.status(httpStatus).json({ error: message, code });
+    } finally {
+      // ensure no plaintext reference lingers longer than needed
+      (req.body as Record<string, unknown>)['secretAccessKey'] = undefined;
     }
   });
 

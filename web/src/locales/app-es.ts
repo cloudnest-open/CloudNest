@@ -343,6 +343,10 @@ export const appEs: AppStrings = {
     dropzone: 'Arrastra y suelta un archivo aquí',
     dropzoneOr: 'o haz clic para elegir un archivo de tu dispositivo',
     keepHint: 'El archivo permanece en este dispositivo; solo se envían sus fragmentos.',
+    tierLabel: 'Nivel de almacenamiento',
+    tierPersonal: 'Personal',
+    tierBusiness: 'Empresarial',
+    tierNote: 'Las subidas empresariales se guardan solo en buckets compatibles con S3; las personales, solo en tus cuentas OAuth.',
     maxChunkSize: 'Tamaño máximo del fragmento',
     maxChunkNote: 'Define el tamaño máximo de cada fragmento. El último puede ser más pequeño.',
     planPreview: {
@@ -537,6 +541,7 @@ export const appEs: AppStrings = {
       title: 'Elige un proveedor',
       setup: 'Configuración: {status}',
       megaNote: 'Se conecta con correo y contraseña: experimental, sin OAuth.',
+      s3Note: 'Se conecta con clave de acceso y clave secreta — nivel empresarial, sin configuración de app.',
       connect: 'Conectar {provider}',
       experimental: 'Experimental',
     },
@@ -568,6 +573,29 @@ export const appEs: AppStrings = {
       badCredentials: 'MEGA rechazó esas credenciales.',
       failed: 'Falló la conexión con MEGA.',
       reauthNotice: 'Introduce tus credenciales de MEGA de nuevo.',
+    },
+    tabs: {
+      aria: 'Nivel de almacenamiento',
+      personal: 'Personal',
+      business: 'Empresarial',
+    },
+    s3: {
+      title: 'Conectar almacenamiento compatible con S3',
+      note:
+        'Nivel empresarial: conecta un bucket de Cloudflare R2, Backblaze B2, AWS S3 u otro compatible con S3. Las claves se envían solo a tu servidor local de CloudNest y se guardan cifradas. CloudNest solo toca objetos bajo el prefijo indicado abajo.',
+      endpoint: 'URL del endpoint',
+      region: 'Región',
+      accessKey: 'ID de clave de acceso',
+      secretKey: 'Clave secreta de acceso',
+      bucket: 'Bucket',
+      prefix: 'Prefijo',
+      cap: 'Límite de capacidad',
+      capHint:
+        'Tú decides cuánto de este bucket puede usar CloudNest. S3 no tiene API de cuota: este límite y la contabilidad de bytes de CloudNest son la única cuota.',
+      submit: 'Conectar bucket',
+      connected: 'Bucket compatible con S3 conectado (nivel empresarial).',
+      failed: 'Falló la conexión S3.',
+      testNote: 'Al conectar se verifican las claves con una comprobación HeadBucket.',
     },
     list: {
       title: 'Cuentas',

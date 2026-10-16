@@ -84,6 +84,8 @@ export function UploadsPage() {
   const [jobs, setJobs] = useState<JobView[]>([]);
   const [selected, setSelected] = useState<File | null>(null);
   const [chunkMiB, setChunkMiB] = useState<number>(DEFAULT_CHUNK_MIB);
+  // roadmap Phase 1: the storage tier picks the pool (personal OAuth vs business S3)
+  const [tier, setTier] = useState<'personal' | 'business'>('personal');
   const [plannedChunks, setPlannedChunks] = useState<ChunkPlanEntry[] | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   /** FE-01: the job picked from Recent uploads for a restart resume. */
@@ -162,6 +164,7 @@ export function UploadsPage() {
           sizeBytes: selected.size,
           chunkSizeMiB: chunkMiB,
           mimeType: selected.type || null,
+          tier,
         },
         crypto.randomUUID(),
       );
@@ -568,6 +571,16 @@ export function UploadsPage() {
           ) : (
             <p className="muted small dropzone-hint">{t.uploads.keepHint}</p>
           )}
+          <label htmlFor="upload-tier">{t.uploads.tierLabel}</label>
+          <select
+            id="upload-tier"
+            value={tier}
+            onChange={(e) => setTier(e.target.value as 'personal' | 'business')}
+            disabled={Boolean(plannedChunks) || Boolean(resumeTarget) || uploading}
+          >
+            <option value="personal">{t.uploads.tierPersonal}</option>
+            <option value="business">{t.uploads.tierBusiness}</option>
+          </select>
           <label htmlFor="upload-chunk-size">{t.uploads.maxChunkSize}</label>
           <select
             id="upload-chunk-size"
@@ -579,6 +592,7 @@ export function UploadsPage() {
               <option key={size} value={size}>{size} MiB</option>
             ))}
           </select>
+          <p className="muted small upload-chunk-note">{t.uploads.tierNote}</p>
           <p className="muted small upload-chunk-note">{t.uploads.maxChunkNote}</p>
         </div>
 

@@ -21,9 +21,9 @@ test('provider catalog requires admin and never returns secrets', async () => {
     assert.equal(res.status, 200);
     const body = res.body;
     const providers = (body as { providers: Array<Record<string, unknown>> }).providers;
-    assert.equal(providers.length, 5);
+    assert.equal(providers.length, 6);
     const ids = providers.map((p) => p['id']).sort();
-    assert.deepEqual(ids, ['dropbox', 'google_drive', 'mega', 'onedrive', 'pcloud']);
+    assert.deepEqual(ids, ['dropbox', 'google_drive', 'mega', 'onedrive', 'pcloud', 's3']);
     // no secret fields of any kind
     const text = JSON.stringify(body);
     assert.ok(!text.includes('clientSecret'));

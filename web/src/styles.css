@@ -2342,3 +2342,17 @@ input:disabled, select:disabled, textarea:disabled {
 .scope-member-list { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
 .scope-member { display: flex; align-items: center; gap: 8px; }
 .scope-member input[type='checkbox'] { width: 20px; height: 20px; }
+
+/* Roadmap Phase 1: Personal/Business tier tabs on Cloud Accounts. */
+.account-tier-tabs {
+  margin: 0 0 12px;
+}
+
+.tier-count {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-muted, rgba(127, 127, 127, 0.18));
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}

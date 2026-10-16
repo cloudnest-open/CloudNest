@@ -59,6 +59,8 @@ export interface AccountInfo {
   displayLabel: string;
   accountIdentifier: string | null;
   status: 'connected' | 'needs_reauth' | 'disconnected' | 'error';
+  /** Storage tier (roadmap Phase 1): personal OAuth pools vs business S3 pools. */
+  tier: 'personal' | 'business';
   quota: {
     totalBytes: number | null;
     usedBytes: number | null;
@@ -72,6 +74,8 @@ export interface AccountInfo {
   reservedInflightBytes: number;
   /** Owner-confirmed shared-pool key (§6.2); null = independent quota scope. */
   quotaScopeKey: string | null;
+  /** Owner-set per-bucket cap (S3-compatible accounts); null elsewhere. */
+  capacityCapBytes: number | null;
   lastErrorCode: string | null;
   lastErrorAt: string | null;
   hasCredentials: boolean;
@@ -97,6 +101,10 @@ export const api = {
   oauthStart: (provider: string) => request('POST', `/api/providers/${provider}/oauth/start`),
   megaConnect: (email: string, password: string) =>
     request('POST', '/api/providers/mega/credentials', { email, password }),
+  connectS3: (body: {
+    endpoint: string; region: string; accessKeyId: string; secretAccessKey: string;
+    bucket: string; prefix: string; capacityCapBytes: number | null;
+  }) => request('POST', '/api/providers/s3/credentials', body),
   accounts: () => request('GET', '/api/provider-accounts'),
   refreshQuota: (id: string) => request('POST', `/api/provider-accounts/${id}/refresh-quota`),
   refreshAllQuotas: () => request('POST', '/api/provider-accounts/refresh-quotas'),
@@ -112,7 +120,7 @@ export const api = {
   dashboardSummary: () => request('GET', '/api/dashboard/summary'),
   listFiles: (limit = 50, offset = 0, search = '') =>
     request('GET', `/api/files?limit=${limit}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ''}`),
-  planUpload: (body: { originalName: string; sizeBytes: number; chunkSizeMiB: number; mimeType: string | null }, idempotencyKey: string) =>
+  planUpload: (body: { originalName: string; sizeBytes: number; chunkSizeMiB: number; mimeType: string | null; tier?: 'personal' | 'business' }, idempotencyKey: string) =>
     request('POST', '/api/uploads/plan', body, { 'idempotency-key': idempotencyKey }),
   listUploads: () => request('GET', '/api/uploads'),
   getUploadJob: (jobId: string) => request('GET', `/api/uploads/${jobId}`),

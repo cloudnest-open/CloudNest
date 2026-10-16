@@ -28,6 +28,8 @@ function toPublic(row: ProviderAccountRow) {
     displayLabel: row.display_label,
     accountIdentifier: row.account_identifier,
     status: row.status,
+    /** Storage tier (roadmap Phase 1): personal OAuth pools vs business S3 pools. */
+    tier: row.tier ?? 'personal',
     quota: {
       totalBytes: total,
       usedBytes: used,
@@ -41,6 +43,8 @@ function toPublic(row: ProviderAccountRow) {
     },
     /** Owner-confirmed shared-pool key (§6.2); null = independent quota. */
     quotaScopeKey: row.quota_scope,
+    /** Owner-set per-bucket cap (S3-compatible accounts); null elsewhere. */
+    capacityCapBytes: row.capacity_cap_bytes,
     reserveBytes: row.reserve_bytes,
     reservedInflightBytes: row.reserved_inflight_bytes,
     lastErrorCode: row.last_error_code,
@@ -91,6 +95,17 @@ export function providerAccountsRouter(deps: {
   });
 
   async function refreshOne(row: ProviderAccountRow) {
+    // S3-compatible accounts have no provider quota API: the truthful numbers
+    // are the owner-set cap plus CloudNest-tracked placement bytes, computed
+    // locally (roadmap Phase 1). Adapter refresh simply does not apply.
+    if (row.provider === 's3') {
+      const tracked = accounts.s3QuotaOverrides().get(row.id);
+      const quota = tracked && tracked.totalBytes !== null
+        ? { totalBytes: tracked.totalBytes, usedBytes: tracked.usedBytes ?? 0, status: 'current' as const }
+        : { totalBytes: null, usedBytes: null, status: 'unknown' as const, safeErrorCode: 'quota_unavailable' as const };
+      accounts.applyQuotaResult(row.id, quota);
+      return { id: row.id, ok: quota.status === 'current', status: quota.status, code: quota.safeErrorCode ?? null };
+    }
     const adapter = getAdapter(row.provider);
     if (!adapter) return { id: row.id, ok: false, code: 'provider_unavailable' };
     try {
@@ -194,6 +209,10 @@ export function providerAccountsRouter(deps: {
     }
     if (row.provider === 'mega') {
       res.json({ mode: 'credentials', message: 'Enter the MEGA account password again to reconnect.' });
+      return;
+    }
+    if (row.provider === 's3') {
+      res.json({ mode: 'credentials', message: 'Enter the S3-compatible access keys again to reconnect.' });
       return;
     }
     const cfg = store.getConfig(row.provider);

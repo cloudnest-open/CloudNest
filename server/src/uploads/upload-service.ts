@@ -6,7 +6,7 @@ import { planChunks, chunkBounds, sanitizeDisplayName, generateObjectKey, ChunkM
 import { preflight, allocateChunks, assessAccountCapacity, outstandingReservationBytes, suggestSmallerChunkSizeMiB, UNLIMITED_USABLE_BYTES, type AccountCapacityInput, type AccountCapacity, type RoutingStrategy } from './capacity.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
 import { getAdapter } from '../providers/registry.js';
-import { ProviderError } from '../providers/types.js';
+import { ProviderError, type AccountTier } from '../providers/types.js';
 import { drainAndHash, HashingCounter } from './streaming.js';
 
 /**
@@ -49,7 +49,7 @@ export class CapacityInsufficientError extends UploadError {
   }
 }
 
-const PROVIDER_UPLOAD_READY = new Set(['google_drive', 'dropbox', 'onedrive', 'pcloud']);
+const PROVIDER_UPLOAD_READY = new Set(['google_drive', 'dropbox', 'onedrive', 'pcloud', 's3']);
 
 /** §9: approved Step-4 per-account cap for chunks in flight (global cap is client-side). */
 export const MAX_PER_ACCOUNT_INFLIGHT = 2;
@@ -81,6 +81,14 @@ export interface PlanRequest {
   chunkSizeMiB: ChunkSizeMiB;
   mimeType?: string | null;
   idempotencyKey: string;
+  /**
+   * Storage tier (roadmap Phase 1). A file may only draw capacity from its own
+   * tier's pool: personal files never land on business (S3) accounts and
+   * business files never land on personal OAuth accounts. Defaults to
+   * 'personal'; part of the idempotency fingerprint so the same key cannot
+   * silently switch tiers.
+   */
+  tier?: AccountTier;
   /**
    * M12.a `upload.spaceAwareRouting`. Defaults to 'capacity-aware', which is the
    * exact V1 behaviour, so a caller that does not pass it is unaffected.
@@ -138,33 +146,86 @@ export class UploadService {
         s: req.sizeBytes,
         c: req.chunkSizeMiB,
         m: req.mimeType ?? null,
+        // tier is part of the plan contract: the same key must not silently
+        // move an upload to a different storage pool (roadmap Phase 1)
+        t: req.tier ?? 'personal',
       }))
       .digest('hex');
   }
 
   /** Eligible capacity per connected account, from real quota + reservations. */
-  private capacityInputs(): AccountCapacityInput[] {
+  /**
+   * CloudNest-tracked bytes per S3-compatible account: the sum of bytes in
+   * active placements. S3 exposes no quota API, so this local sum plus the
+   * owner-set cap is the account's only truthful usage number — and because
+   * it is derived live from placements, a committed chunk is accounted for
+   * immediately (no refresh step can lag the truth).
+   */
+  private s3QuotaOverrides(): Map<string, { totalBytes: number | null; usedBytes: number | null }> {
+    const rows = this.db.prepare(
+      `SELECT p.provider_account_id AS accountId, COALESCE(SUM(fc.size_bytes), 0) AS bytes
+       FROM chunk_placements p
+       JOIN file_chunks fc ON fc.id = p.chunk_id
+       WHERE p.is_active = 1
+       GROUP BY p.provider_account_id`,
+    ).all() as Array<{ accountId: string; bytes: number }>;
+    const tracked = new Map(rows.map((r) => [r.accountId, r.bytes]));
     const accounts = this.providerQ.listAccounts.all() as Array<{
-      id: string; provider: string; display_label: string; status: string;
+      id: string; provider: string; capacity_cap_bytes: number | null;
+    }>;
+    const map = new Map<string, { totalBytes: number | null; usedBytes: number | null }>();
+    for (const a of accounts) {
+      if (a.provider !== 's3') continue;
+      map.set(a.id, {
+        totalBytes: a.capacity_cap_bytes !== null && a.capacity_cap_bytes > 0 ? a.capacity_cap_bytes : null,
+        usedBytes: tracked.get(a.id) ?? 0,
+      });
+    }
+    return map;
+  }
+
+  private capacityInputs(tier: AccountTier): AccountCapacityInput[] {
+    const accounts = this.providerQ.listAccounts.all() as Array<{
+      id: string; provider: string; display_label: string; status: string; tier: AccountTier;
       quota_status: string; quota_total_bytes: number | null; used_bytes: number | null;
       quota_unlimited: 0 | 1; quota_scope: string | null; reserve_bytes: number;
     }>;
     const active = this.q.listAllActiveAllocations.all() as Array<{ provider_account_id: string; size_bytes: number; state: string }>;
-    return accounts
+    // roadmap Phase 1: a file draws capacity ONLY from its own tier's pool —
+    // business files never land on personal OAuth accounts, nor the reverse.
+    const tierAccounts = accounts.filter((a) => (a.tier ?? 'personal') === tier);
+    const s3Quotas = this.s3QuotaOverrides();
+    return tierAccounts
       .filter((a) => PROVIDER_UPLOAD_READY.has(a.provider))
-      .map((a) => ({
-        accountId: a.id,
-        provider: a.provider,
-        displayLabel: a.display_label,
-        status: a.status,
-        quotaStatus: a.quota_status as 'current' | 'stale' | 'unknown',
-        quotaTotalBytes: a.quota_total_bytes,
-        quotaUsedBytes: a.used_bytes,
-        quotaUnlimited: a.quota_unlimited === 1,
-        quotaScopeKey: a.quota_scope,
-        reserveBytes: a.reserve_bytes,
-        outstandingReservationBytes: outstandingReservationBytes(active, a.id),
-      }));
+      .map((a) => {
+        // S3-compatible accounts have no provider quota API: the owner-set cap
+        // plus CloudNest-tracked placement bytes is the only honest accounting.
+        const s3 = s3Quotas.get(a.id);
+        const quotaTotalBytes = a.provider === 's3' ? (s3?.totalBytes ?? null) : a.quota_total_bytes;
+        const quotaUsedBytes = a.provider === 's3' ? (s3?.usedBytes ?? null) : a.used_bytes;
+        // uploaded_pending_quota bytes are already inside the tracked placement
+        // sum for S3, so they must not ALSO count as outstanding reservations
+        const pendingQuotaBytes = a.provider === 's3'
+          ? active
+            .filter((row) => row.provider_account_id === a.id && row.state === 'uploaded_pending_quota')
+            .reduce((sum, row) => sum + row.size_bytes, 0)
+          : 0;
+        return {
+          accountId: a.id,
+          provider: a.provider,
+          displayLabel: a.display_label,
+          status: a.status,
+          quotaStatus: a.provider === 's3'
+            ? (quotaTotalBytes !== null ? 'current' as const : 'unknown' as const)
+            : a.quota_status as 'current' | 'stale' | 'unknown',
+          quotaTotalBytes,
+          quotaUsedBytes,
+          quotaUnlimited: a.quota_unlimited === 1,
+          quotaScopeKey: a.quota_scope,
+          reserveBytes: a.reserve_bytes,
+          outstandingReservationBytes: outstandingReservationBytes(active, a.id) - pendingQuotaBytes,
+        };
+      });
   }
 
   /**
@@ -212,7 +273,7 @@ export class UploadService {
       return this.createEmptyFile(name, req, fingerprint, plan.chunkSizeBytes);
     }
 
-    const capacity = preflight(this.capacityInputs(), plan.fileSizeBytes);
+    const capacity = preflight(this.capacityInputs(req.tier ?? 'personal'), plan.fileSizeBytes);
     const chunkDescriptors: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number }> = [];
     for (let i = 0; i < plan.chunkCount; i++) {
       const b = chunkBounds(plan, i);
@@ -226,7 +287,7 @@ export class UploadService {
       // total pool is sufficient but this chunk size cannot be placed (pure
       // fragmentation). A real shortfall is not helped by smaller chunks.
       const suggested = capacity.canProceed && !assignments
-        ? suggestSmallerChunkSizeMiB(plan.fileSizeBytes, req.chunkSizeMiB, this.capacityInputs(), req.routingStrategy ?? 'capacity-aware')
+        ? suggestSmallerChunkSizeMiB(plan.fileSizeBytes, req.chunkSizeMiB, this.capacityInputs(req.tier ?? 'personal'), req.routingStrategy ?? 'capacity-aware')
         : null;
       throw new CapacityInsufficientError({
         totalUsableBytes: capacity.totalUsableBytes === UNLIMITED_USABLE_BYTES ? null : capacity.totalUsableBytes,
@@ -253,6 +314,7 @@ export class UploadService {
         chunk_size_bytes: plan.chunkSizeBytes,
         chunk_count: plan.chunkCount,
         state: 'uploading',
+        tier: req.tier ?? 'personal',
         created_at: now,
       });
       this.q.insertJob.run({
@@ -304,7 +366,7 @@ export class UploadService {
     const txn = this.db.transaction(() => {
       this.q.insertFile.run({
         id: fileId, original_name: name, size_bytes: 0, mime_type: req.mimeType ?? null,
-        chunk_size_bytes: chunkSizeBytes, chunk_count: 0, state: 'completed', created_at: now,
+        chunk_size_bytes: chunkSizeBytes, chunk_count: 0, state: 'completed', tier: req.tier ?? 'personal', created_at: now,
       });
       this.q.insertJob.run({
         id: jobId, file_id: fileId, state: 'completed', chunks_total: 0,
@@ -626,7 +688,12 @@ export class UploadService {
   reassignChunk(jobId: string, chunkIndex: number): { accountId: string } | null {
     const allocation = this.q.getAllocation.get(jobId, chunkIndex) as AllocationRow | undefined;
     if (!allocation) return null;
-    const capacity = this.capacityInputs().filter((a) => a.accountId !== allocation.provider_account_id);
+    // re-routing stays inside the file's own tier: a business file can only
+    // move to another business account, a personal file to another personal one
+    const job = this.q.getJob.get(jobId) as { file_id: string | null } | undefined;
+    const fileRow = job?.file_id ? (this.q.getFile.get(job.file_id) as FileRow | undefined) : undefined;
+    const fileTier = fileRow?.tier ?? 'personal';
+    const capacity = this.capacityInputs(fileTier).filter((a) => a.accountId !== allocation.provider_account_id);
     const assessed = preflight(capacity, allocation.size_bytes);
     const target = assessed.assessment.eligible.find((a) => a.usableBytes >= allocation.size_bytes);
     if (!target) return null;
@@ -1006,6 +1073,7 @@ export class UploadService {
     id: string; originalName: string; sizeBytes: number; mimeType: string | null;
     chunkCount: number; chunkSizeBytes: number; state: string; storedAcross: string[];
     storageHealth: FileStorageHealth;
+    tier: 'personal' | 'business';
     createdAt: string; completedAt: string | null;
   } | null {
     return this.publicFiles([fileId]).get(fileId) ?? null;
@@ -1021,12 +1089,14 @@ export class UploadService {
     id: string; originalName: string; sizeBytes: number; mimeType: string | null;
     chunkCount: number; chunkSizeBytes: number; state: string; storedAcross: string[];
     storageHealth: FileStorageHealth;
+    tier: 'personal' | 'business';
     createdAt: string; completedAt: string | null;
   }> {
     const out = new Map<string, {
       id: string; originalName: string; sizeBytes: number; mimeType: string | null;
       chunkCount: number; chunkSizeBytes: number; state: string; storedAcross: string[];
       storageHealth: FileStorageHealth;
+      tier: 'personal' | 'business';
       createdAt: string; completedAt: string | null;
     }>();
     if (fileIds.length === 0) return out;
@@ -1072,6 +1142,7 @@ export class UploadService {
         state: file.state,
         storedAcross: entry.storedAcross,
         storageHealth: storageHealthOf(entry.unavailable),
+        tier: file.tier ?? 'personal',
         createdAt: file.created_at,
         completedAt: file.completed_at,
       });
@@ -1129,11 +1200,22 @@ export class UploadService {
     const activeAllocations = this.q.listAllActiveAllocations.all() as Array<{
       provider_account_id: string; size_bytes: number; state: string;
     }>;
+    const s3Quotas = this.s3QuotaOverrides();
     const accountsDetailed = rows.map((a) => {
-      const outstandingBytes = outstandingReservationBytes(activeAllocations, a.id);
+      const pendingQuotaBytes = a.provider === 's3'
+        ? activeAllocations
+          .filter((row) => row.provider_account_id === a.id && row.state === 'uploaded_pending_quota')
+          .reduce((sum, row) => sum + row.size_bytes, 0)
+        : 0;
+      const outstandingBytes = outstandingReservationBytes(activeAllocations, a.id) - pendingQuotaBytes;
+      const s3 = s3Quotas.get(a.id);
+      const quotaTotalBytes = a.provider === 's3' ? (s3?.totalBytes ?? null) : a.quota_total_bytes;
+      const quotaUsedBytes = a.provider === 's3' ? (s3?.usedBytes ?? null) : a.used_bytes;
       const quotaKnown =
         a.status === 'connected' &&
-        a.quota_status === 'current' &&
+        (a.provider === 's3'
+          ? quotaTotalBytes !== null // S3: owner-set cap + tracked bytes is the honest evidence
+          : a.quota_status === 'current') &&
         // an experimental/not-ready provider must never be presented as usable
         // space, even when its quota is current
         PROVIDER_UPLOAD_READY.has(a.provider);
@@ -1142,9 +1224,11 @@ export class UploadService {
         provider: a.provider,
         displayLabel: a.display_label,
         status: a.status,
-        quotaStatus: a.quota_status as 'current' | 'stale' | 'unknown',
-        quotaTotalBytes: a.quota_total_bytes,
-        quotaUsedBytes: a.used_bytes,
+        quotaStatus: a.provider === 's3'
+          ? (quotaTotalBytes !== null ? 'current' as const : 'unknown' as const)
+          : a.quota_status as 'current' | 'stale' | 'unknown',
+        quotaTotalBytes,
+        quotaUsedBytes,
         quotaUnlimited: a.quota_unlimited === 1,
         quotaScopeKey: a.quota_scope,
         reserveBytes: a.reserve_bytes,
@@ -1155,9 +1239,9 @@ export class UploadService {
         provider: a.provider,
         displayLabel: a.display_label,
         status: a.status,
-        quotaStatus: a.quota_status,
-        quotaTotalBytes: a.quota_total_bytes,
-        quotaUsedBytes: a.used_bytes,
+        quotaStatus: a.provider === 's3' ? (quotaTotalBytes !== null ? 'current' : 'unknown') : a.quota_status,
+        quotaTotalBytes,
+        quotaUsedBytes,
         quotaUnlimited: a.quota_unlimited === 1,
         quotaScopeKey: a.quota_scope,
         reserveBytes: a.reserve_bytes,

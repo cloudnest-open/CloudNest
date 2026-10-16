@@ -331,6 +331,10 @@ export const appZhCn: AppStrings = {
     dropzone: '将文件拖放到此处',
     dropzoneOr: '或点击从设备中选择文件',
     keepHint: '文件保留在此设备上；只发送其分块。',
+    tierLabel: '存储层级',
+    tierPersonal: '个人',
+    tierBusiness: '企业',
+    tierNote: '企业层上传只存入 S3 兼容存储桶；个人层只存入您的 OAuth 账户。',
     maxChunkSize: '最大分块大小',
     maxChunkNote: '这是每个上传分块的最大大小。最后一个分块可能更小。',
     planPreview: {
@@ -508,6 +512,7 @@ export const appZhCn: AppStrings = {
       title: '选择提供商',
       setup: '配置：{status}',
       megaNote: '通过电子邮件和密码连接——实验性功能，非 OAuth。',
+      s3Note: '使用访问密钥和私有密钥连接 — 业务层，无需应用配置。',
       connect: '连接 {provider}',
       experimental: '实验性',
     },
@@ -536,6 +541,29 @@ export const appZhCn: AppStrings = {
       badCredentials: 'MEGA 拒绝了这些凭据。',
       failed: 'MEGA 连接失败。',
       reauthNotice: '请重新输入你的 MEGA 凭据。',
+    },
+    tabs: {
+      aria: '存储层级',
+      personal: '个人',
+      business: '企业',
+    },
+    s3: {
+      title: '连接 S3 兼容存储',
+      note:
+        '企业层：连接 Cloudflare R2、Backblaze B2、AWS S3 或其他 S3 兼容存储桶。密钥只会发送到您的本地 CloudNest 服务器并加密保存。CloudNest 只会操作下方前缀下的对象。',
+      endpoint: '端点 URL',
+      region: '区域',
+      accessKey: '访问密钥 ID',
+      secretKey: '私有访问密钥',
+      bucket: '存储桶',
+      prefix: '前缀',
+      cap: '容量上限',
+      capHint:
+        '由您决定 CloudNest 可使用该存储桶的多少空间。S3 没有配额 API——这个上限加上 CloudNest 自己的字节统计就是唯一的配额。',
+      submit: '连接存储桶',
+      connected: '已连接 S3 兼容存储桶（企业层）。',
+      failed: 'S3 连接失败。',
+      testNote: '连接时会通过 HeadBucket 验证密钥。',
     },
     list: {
       title: '账户',

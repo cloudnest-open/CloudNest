@@ -346,6 +346,10 @@ export const appPtBr: AppStrings = {
     dropzone: 'Arraste e solte um arquivo aqui',
     dropzoneOr: 'ou clique para escolher um arquivo do seu dispositivo',
     keepHint: 'O arquivo permanece neste dispositivo; apenas seus chunks são enviados.',
+    tierLabel: 'Nível de armazenamento',
+    tierPersonal: 'Pessoal',
+    tierBusiness: 'Empresarial',
+    tierNote: 'Envios empresariais vão apenas para buckets compatíveis com S3; pessoais apenas para suas contas OAuth.',
     maxChunkSize: 'Tamanho máximo do bloco',
     maxChunkNote: 'Define o tamanho máximo de cada bloco. O último pode ser menor.',
     planPreview: {
@@ -542,6 +546,7 @@ export const appPtBr: AppStrings = {
       title: 'Escolha um provedor',
       setup: 'Configuração: {status}',
       megaNote: 'Conecta com e-mail e senha — experimental, sem OAuth.',
+      s3Note: 'Conecta com chave de acesso e segredo — nível empresarial, sem configuração de app.',
       connect: 'Conectar {provider}',
       experimental: 'Experimental',
     },
@@ -573,6 +578,29 @@ export const appPtBr: AppStrings = {
       badCredentials: 'O MEGA rejeitou essas credenciais.',
       failed: 'Falha na conexão com o MEGA.',
       reauthNotice: 'Digite suas credenciais do MEGA novamente.',
+    },
+    tabs: {
+      aria: 'Nível de armazenamento',
+      personal: 'Pessoal',
+      business: 'Empresarial',
+    },
+    s3: {
+      title: 'Conectar armazenamento compatível com S3',
+      note:
+        'Nível empresarial: conecte um bucket Cloudflare R2, Backblaze B2, AWS S3 ou outro compatível com S3. As chaves são enviadas apenas ao seu servidor CloudNest local e armazenadas criptografadas. O CloudNest só toca em objetos sob o prefixo abaixo.',
+      endpoint: 'URL do endpoint',
+      region: 'Região',
+      accessKey: 'ID da chave de acesso',
+      secretKey: 'Chave secreta de acesso',
+      bucket: 'Bucket',
+      prefix: 'Prefixo',
+      cap: 'Limite de capacidade',
+      capHint:
+        'Você decide quanto deste bucket o CloudNest pode usar. O S3 não tem API de cota — este limite e a contabilidade de bytes do próprio CloudNest são a única cota.',
+      submit: 'Conectar bucket',
+      connected: 'Bucket compatível com S3 conectado (nível empresarial).',
+      failed: 'Falha na conexão S3.',
+      testNote: 'Ao conectar, as chaves são verificadas com um HeadBucket.',
     },
     list: {
       title: 'Contas',

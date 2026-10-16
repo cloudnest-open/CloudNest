@@ -59,6 +59,7 @@ export interface FileRow {
   whole_sha256: string | null;
   manifest_hash: string | null;
   state: string;
+  tier: 'personal' | 'business';
   created_at: string;
   completed_at: string | null;
 }
@@ -87,8 +88,8 @@ export function makeUploadQueries(db: Database.Database) {
     // ---- files ----
     insertFile: db.prepare(
       `INSERT INTO files (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, whole_sha256,
-        manifest_hash, state, created_at, completed_at)
-       VALUES (@id, @original_name, @size_bytes, @mime_type, @chunk_size_bytes, @chunk_count, NULL, NULL, @state, @created_at, NULL)`,
+        manifest_hash, state, tier, created_at, completed_at)
+       VALUES (@id, @original_name, @size_bytes, @mime_type, @chunk_size_bytes, @chunk_count, NULL, NULL, @state, @tier, @created_at, NULL)`,
     ),
     getFile: db.prepare('SELECT * FROM files WHERE id = ?'),
     listFiles: db.prepare('SELECT * FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?'),

@@ -4,7 +4,7 @@ import type { CredentialsStore } from '../providers/credentials-store.js';
 import type { ProviderQueries, ProviderAccountRow } from '../db/provider-queries.js';
 import { reconcileUploadedPendingQuota } from '../db/upload-queries.js';
 import { getAdapter } from '../providers/registry.js';
-import { ProviderError, type ProviderCredentialBundle, type NormalizedAccount, type NormalizedQuota, type ProviderId } from '../providers/types.js';
+import { ProviderError, type ProviderCredentialBundle, type NormalizedAccount, type NormalizedQuota, type ProviderId, type AccountTier } from '../providers/types.js';
 import { encrypt } from '../providers/encryption.js';
 
 /**
@@ -16,6 +16,10 @@ export interface UpsertConnectionInput {
   provider: ProviderId;
   account: NormalizedAccount;
   bundle: ProviderCredentialBundle;
+  /** Storage tier (roadmap Phase 1); defaults to personal. */
+  tier?: AccountTier;
+  /** Owner-set capacity cap for S3-compatible accounts (bytes); null elsewhere. */
+  capacityCapBytes?: number | null;
 }
 
 export class ProviderAccountService {
@@ -40,10 +44,12 @@ export class ProviderAccountService {
         id: existing.id,
         display_label: label,
         status: 'connected',
+        tier: input.tier ?? existing.tier ?? 'personal',
         quota_total_bytes: input.account.quota.totalBytes,
         used_bytes: input.account.quota.usedBytes,
         quota_status: input.account.quota.status,
         quota_unlimited: input.account.quota.unlimited === true ? 1 : 0,
+        capacity_cap_bytes: input.capacityCapBytes !== undefined ? input.capacityCapBytes : existing.capacity_cap_bytes,
         last_quota_check_at: input.account.quota.status === 'unknown' ? existing.last_quota_check_at : now,
         last_error_code: input.account.safeErrorCode ?? null,
         last_error_at: input.account.safeErrorCode ? now : null,
@@ -61,10 +67,12 @@ export class ProviderAccountService {
       display_label: input.account.displayLabel,
       account_identifier: input.account.providerAccountId,
       status: input.account.safeErrorCode === 'refresh_token_missing' ? 'needs_reauth' : 'connected',
+      tier: input.tier ?? 'personal',
       quota_total_bytes: input.account.quota.totalBytes,
       used_bytes: input.account.quota.usedBytes,
       quota_status: input.account.quota.status,
       quota_unlimited: input.account.quota.unlimited === true ? 1 : 0,
+      capacity_cap_bytes: input.capacityCapBytes ?? null,
       last_quota_check_at: input.account.quota.status === 'unknown' ? null : now,
       last_error_code: input.account.safeErrorCode ?? null,
       last_error_at: input.account.safeErrorCode ? now : null,
@@ -191,6 +199,57 @@ export class ProviderAccountService {
   updateReserve(id: string, reserveBytes: number): ProviderAccountRow {
     this.queries.updateReserve.run({ id, reserve_bytes: reserveBytes, updated_at: new Date().toISOString() });
     return this.queries.getAccount.get(id) as ProviderAccountRow;
+  }
+
+  /** Update the owner-set capacity cap (S3-compatible accounts only). */
+  setCapacityCap(id: string, capBytes: number | null): ProviderAccountRow {
+    this.queries.setCapacityCap.run({ id, capacity_cap_bytes: capBytes, updated_at: new Date().toISOString() });
+    return this.queries.getAccount.get(id) as ProviderAccountRow;
+  }
+
+  /**
+   * CloudNest-tracked bytes per S3-compatible account: the sum of bytes in
+   * ACTIVE placements. S3 exposes no quota API, so this local sum plus the
+   * owner-set cap is the only honest accounting — never an invented number.
+   */
+  trackedPlacementBytes(): Map<string, number> {
+    const rows = this.db.prepare(
+      `SELECT p.provider_account_id AS accountId, COALESCE(SUM(fc.size_bytes), 0) AS bytes
+       FROM chunk_placements p
+       JOIN file_chunks fc ON fc.id = p.chunk_id
+       WHERE p.is_active = 1
+       GROUP BY p.provider_account_id`,
+    ).all() as Array<{ accountId: string; bytes: number }>;
+    return new Map(rows.map((r) => [r.accountId, r.bytes]));
+  }
+
+  /**
+   * Truthful quota for one S3-compatible account: total = the owner-set cap,
+   * used = CloudNest-tracked placement bytes. Unknown (never zero) when the
+   * cap is unset, so an uncapped bucket stays out of automatic placement.
+   */
+  s3QuotaFor(row: ProviderAccountRow, trackedBytes: Map<string, number>): NormalizedQuota {
+    if (row.provider !== 's3') throw new ProviderError('identity_validation_failed', 400, 'not an S3-compatible account');
+    const cap = row.capacity_cap_bytes;
+    if (cap === null || cap === undefined || cap <= 0) {
+      return { totalBytes: null, usedBytes: null, status: 'unknown', safeErrorCode: 'quota_unavailable' };
+    }
+    return { totalBytes: cap, usedBytes: trackedBytes.get(row.id) ?? 0, status: 'current' };
+  }
+
+  /** Cap/tracked-byte overrides for every S3-compatible account (capacity + display). */
+  s3QuotaOverrides(): Map<string, { totalBytes: number | null; usedBytes: number | null }> {
+    const tracked = this.trackedPlacementBytes();
+    const map = new Map<string, { totalBytes: number | null; usedBytes: number | null }>();
+    for (const row of this.list()) {
+      if (row.provider !== 's3') continue;
+      const cap = row.capacity_cap_bytes;
+      map.set(row.id, {
+        totalBytes: cap !== null && cap > 0 ? cap : null,
+        usedBytes: tracked.get(row.id) ?? 0,
+      });
+    }
+    return map;
   }
 
   /** Best-effort revoke, then erase local credentials; row + metadata preserved. */

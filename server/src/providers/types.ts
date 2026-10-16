@@ -1,16 +1,26 @@
 /** Provider adapter contract (Step 3). One small typed contract, no plugin framework. */
 
-export type ProviderId = 'google_drive' | 'dropbox' | 'pcloud' | 'mega' | 'onedrive';
-export const PROVIDER_IDS: readonly ProviderId[] = ['google_drive', 'dropbox', 'pcloud', 'mega', 'onedrive'];
+export type ProviderId = 'google_drive' | 'dropbox' | 'pcloud' | 'mega' | 'onedrive' | 's3';
+export const PROVIDER_IDS: readonly ProviderId[] = ['google_drive', 'dropbox', 'pcloud', 'mega', 'onedrive', 's3'];
 
 export const OAUTH_PROVIDER_IDS: readonly ProviderId[] = ['google_drive', 'dropbox', 'pcloud', 'onedrive'];
+
+/** Storage tier (roadmap Phase 1): personal OAuth pools vs business S3 pools. */
+export type AccountTier = 'personal' | 'business';
 
 export type ProviderCredentialBundle =
   | { schemaVersion: 1; provider: 'google_drive'; accessToken: string; refreshToken?: string; accessTokenExpiresAtMs?: number; grantedScopes: string[] }
   | { schemaVersion: 1; provider: 'dropbox'; accessToken: string; refreshToken?: string; accessTokenExpiresAtMs?: number; grantedScopes: string[] }
   | { schemaVersion: 1; provider: 'pcloud'; accessToken: string; apiHost: 'api.pcloud.com' | 'eapi.pcloud.com'; userId: string }
   | { schemaVersion: 1; provider: 'mega'; email: string; password: string }
-  | { schemaVersion: 1; provider: 'onedrive'; accessToken: string; refreshToken?: string; accessTokenExpiresAtMs?: number; authority: string; grantedScopes: string[] };
+  | { schemaVersion: 1; provider: 'onedrive'; accessToken: string; refreshToken?: string; accessTokenExpiresAtMs?: number; authority: string; grantedScopes: string[] }
+  /**
+   * S3-compatible (R2/B2/AWS) static keys. Path-style URLs are always used so
+   * every compatible endpoint behaves identically. The prefix is the
+   * CloudNest-owned namespace inside the bucket (default `cloudnest/`); the
+   * connector never lists or touches keys outside it.
+   */
+  | { schemaVersion: 1; provider: 's3'; endpoint: string; region: string; accessKeyId: string; secretAccessKey: string; bucket: string; prefix: string };
 
 export interface NormalizedQuota {
   totalBytes: number | null;
@@ -35,7 +45,7 @@ export interface NormalizedAccount {
 }
 
 export interface DecryptedProviderAppConfig {
-  provider: Exclude<ProviderId, 'mega'>;
+  provider: Exclude<ProviderId, 'mega' | 's3'>;
   clientId: string;
   clientSecret: string;
   extra?: Record<string, string>; // e.g. Microsoft authority

@@ -347,6 +347,10 @@ export const appDe: AppStrings = {
     dropzone: 'Datei hierher ziehen',
     dropzoneOr: 'oder klicken, um eine Datei vom Gerät zu wählen',
     keepHint: 'Die Datei bleibt auf diesem Gerät; nur ihre Chunks werden gesendet.',
+    tierLabel: 'Speicher-Tier',
+    tierPersonal: 'Persönlich',
+    tierBusiness: 'Geschäftlich',
+    tierNote: 'Geschäftliche Uploads landen nur auf S3-kompatiblen Buckets; persönliche nur auf Ihren OAuth-Konten.',
     maxChunkSize: 'Maximale Chunk-Größe',
     maxChunkNote: 'Legt die maximale Größe jedes Upload-Teils fest. Das letzte Teil kann kleiner sein.',
     planPreview: {
@@ -543,6 +547,7 @@ export const appDe: AppStrings = {
       title: 'Anbieter wählen',
       setup: 'Einrichtung: {status}',
       megaNote: 'Verbindet sich mit E-Mail und Passwort — experimentell, kein OAuth.',
+      s3Note: 'Verbindet mit Access-Key und Secret — Business-Tier, kein App-Setup.',
       connect: '{provider} verbinden',
       experimental: 'Experimentell',
     },
@@ -574,6 +579,29 @@ export const appDe: AppStrings = {
       badCredentials: 'MEGA hat diese Zugangsdaten abgelehnt.',
       failed: 'Die MEGA-Verbindung ist fehlgeschlagen.',
       reauthNotice: 'Gib deine MEGA-Zugangsdaten erneut ein.',
+    },
+    tabs: {
+      aria: 'Speicher-Tier',
+      personal: 'Persönlich',
+      business: 'Geschäftlich',
+    },
+    s3: {
+      title: 'S3-kompatiblen Speicher verbinden',
+      note:
+        'Business-Tier: verbindet einen Cloudflare-R2-, Backblaze-B2-, AWS-S3- oder anderen S3-kompatiblen Bucket. Schlüssel werden nur an Ihren lokalen CloudNest-Server gesendet und verschlüsselt gespeichert. CloudNest fasst nur Objekte unter dem unten angegebenen Präfix an.',
+      endpoint: 'Endpoint-URL',
+      region: 'Region',
+      accessKey: 'Access-Key-ID',
+      secretKey: 'Secret Access Key',
+      bucket: 'Bucket',
+      prefix: 'Präfix',
+      cap: 'Kapazitätslimit',
+      capHint:
+        'Sie legen fest, wie viel von diesem Bucket CloudNest nutzen darf. S3 hat keine Quota-API — dieses Limit und CloudNests eigene Byte-Buchhaltung sind die einzige Quote.',
+      submit: 'Bucket verbinden',
+      connected: 'S3-kompatibler Bucket verbunden (Business-Tier).',
+      failed: 'S3-Verbindung fehlgeschlagen.',
+      testNote: 'Beim Verbinden werden die Schlüssel per HeadBucket geprüft.',
     },
     list: {
       title: 'Konten',

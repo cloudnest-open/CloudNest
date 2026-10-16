@@ -58,6 +58,17 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   const [megaOpen, setMegaOpen] = useState(false);
   const [megaEmail, setMegaEmail] = useState('');
   const [megaPassword, setMegaPassword] = useState('');
+  // Roadmap Phase 1: two tiers, one engine — the list is filtered by the
+  // selected tier tab, and S3-compatible buckets connect through the form below.
+  const [tierTab, setTierTab] = useState<'personal' | 'business'>('personal');
+  const [s3Open, setS3Open] = useState(false);
+  const [s3Endpoint, setS3Endpoint] = useState('');
+  const [s3Region, setS3Region] = useState('');
+  const [s3AccessKey, setS3AccessKey] = useState('');
+  const [s3Secret, setS3Secret] = useState('');
+  const [s3Bucket, setS3Bucket] = useState('');
+  const [s3Prefix, setS3Prefix] = useState('');
+  const [s3Cap, setS3Cap] = useState('');
   // The connect picker stays open across navigation so a user who followed the
   // explicit "Configure Provider" jump into Settings returns to their context.
   const [pickerOpen, setPickerOpen] = useState(() => {
@@ -127,6 +138,11 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       setMegaOpen(true);
       return;
     }
+    if (p.id === 's3') {
+      // Business tier: S3-compatible buckets connect through the keys form.
+      setS3Open(true);
+      return;
+    }
     const res = await api.oauthStart(p.id);
     if (res.status === 200) {
       const url = (res.data as { authorizationUrl: string }).authorizationUrl;
@@ -192,7 +208,8 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
         return;
       }
       if (data.mode === 'credentials') {
-        setMegaOpen(true);
+        if (account.provider === 's3') setS3Open(true);
+        else setMegaOpen(true);
         setNotice(data.message ?? t.accounts.mega.reauthNotice);
         return;
       }
@@ -265,6 +282,32 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     }
   }
 
+  async function submitS3(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const capBytes = s3Cap.trim() ? Number(s3Cap.trim()) : null;
+    const res = await api.connectS3({
+      endpoint: s3Endpoint.trim(),
+      region: s3Region.trim() || 'auto',
+      accessKeyId: s3AccessKey.trim(),
+      secretAccessKey: s3Secret,
+      bucket: s3Bucket.trim(),
+      prefix: s3Prefix.trim() || 'cloudnest',
+      capacityCapBytes: capBytes !== null && Number.isInteger(capBytes) && capBytes > 0 ? capBytes : null,
+    });
+    setS3Secret('');
+    if (res.status === 201) {
+      setS3Open(false);
+      setS3Endpoint(''); setS3Region(''); setS3AccessKey(''); setS3Bucket(''); setS3Prefix(''); setS3Cap('');
+      setTierTab('business');
+      setNotice(t.accounts.s3.connected);
+      await reload();
+    } else {
+      const data = res.data as { error?: string; code?: string };
+      setError(data.code === 'invalid_credentials' ? t.accounts.s3.failed : data.error ?? t.accounts.s3.failed);
+    }
+  }
+
   const setupSummary = (provider: ProviderInfo): { text: string; tone: string } => {
     if (!provider.requiresAppConfig) return { text: t.accounts.setupStatus.experimental, tone: 'warn' };
     if (provider.verificationStatus === 'verified') return { text: t.accounts.setupStatus.verified, tone: 'ok' };
@@ -317,7 +360,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                   </div>
                   <p className={`setup-state setup-${s.tone}`}>{tf(t.accounts.picker.setup, { status: s.text })}</p>
                   {!p.requiresAppConfig && (
-                    <p className="muted small">{t.accounts.picker.megaNote}</p>
+                    <p className="muted small">{p.id === 's3' ? t.accounts.picker.s3Note : t.accounts.picker.megaNote}</p>
                   )}
                   {/* The real connection action always lives here. If the
                       instance lacks the app configuration, Connect explains
@@ -379,6 +422,35 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
         </section>
       )}
 
+      {s3Open && (
+        <section className="card">
+          <h2>{t.accounts.s3.title}</h2>
+          <p className="muted">{t.accounts.s3.note}</p>
+          <form onSubmit={submitS3} className="password-form">
+            <label htmlFor="s3-endpoint">{t.accounts.s3.endpoint}</label>
+            <input id="s3-endpoint" type="url" placeholder="https://acc123.r2.cloudflarestorage.com" value={s3Endpoint} onChange={(e) => setS3Endpoint(e.target.value)} required />
+            <label htmlFor="s3-region">{t.accounts.s3.region}</label>
+            <input id="s3-region" type="text" placeholder="auto" value={s3Region} onChange={(e) => setS3Region(e.target.value)} />
+            <label htmlFor="s3-access-key">{t.accounts.s3.accessKey}</label>
+            <input id="s3-access-key" type="text" value={s3AccessKey} onChange={(e) => setS3AccessKey(e.target.value)} required autoComplete="off" />
+            <label htmlFor="s3-secret">{t.accounts.s3.secretKey}</label>
+            <input id="s3-secret" type="password" value={s3Secret} onChange={(e) => setS3Secret(e.target.value)} required autoComplete="new-password" />
+            <label htmlFor="s3-bucket">{t.accounts.s3.bucket}</label>
+            <input id="s3-bucket" type="text" value={s3Bucket} onChange={(e) => setS3Bucket(e.target.value)} required />
+            <label htmlFor="s3-prefix">{t.accounts.s3.prefix}</label>
+            <input id="s3-prefix" type="text" placeholder="cloudnest" value={s3Prefix} onChange={(e) => setS3Prefix(e.target.value)} />
+            <label htmlFor="s3-cap">{t.accounts.s3.cap}</label>
+            <input id="s3-cap" type="number" min="1" step="1" inputMode="numeric" value={s3Cap} onChange={(e) => setS3Cap(e.target.value)} />
+            <p className="muted small">{t.accounts.s3.capHint}</p>
+            <p className="muted small">{t.accounts.s3.testNote}</p>
+            <button type="submit" className="btn-primary">{t.accounts.s3.submit}</button>
+            <button type="button" className="btn-secondary" onClick={() => { setS3Open(false); setS3Secret(''); }}>
+              {t.dialog.cancel}
+            </button>
+          </form>
+        </section>
+      )}
+
       <section className="card">
         <div className="page-head">
           <h2>{t.accounts.list.title}</h2>
@@ -387,6 +459,21 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
               {busyId === '__all__' ? t.accounts.list.refreshing : t.accounts.list.refreshAll}
             </button>
           )}
+        </div>
+        <div className="tabs account-tier-tabs" role="tablist" aria-label={t.accounts.tabs.aria}>
+          {(['personal', 'business'] as const).map((tier) => (
+            <button
+              key={tier}
+              type="button"
+              role="tab"
+              aria-selected={tierTab === tier}
+              className={`tab${tierTab === tier ? ' active' : ''}`}
+              onClick={() => setTierTab(tier)}
+            >
+              {tier === 'personal' ? t.accounts.tabs.personal : t.accounts.tabs.business}
+              <span className="tier-count">{accounts.filter((a) => (a.tier ?? 'personal') === tier).length}</span>
+            </button>
+          ))}
         </div>
         {loading ? (
           <p className="muted">{t.common.loading}</p>
@@ -405,7 +492,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
               </tr>
             </thead>
             <tbody>
-              {accounts.map((a) => {
+              {accounts.filter((a) => (a.tier ?? 'personal') === tierTab).map((a) => {
                 const s = accountStatus(a);
                 return (
                   <tr key={a.id}>
