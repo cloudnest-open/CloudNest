@@ -10,6 +10,7 @@ import type { CsrfBundle } from '../auth/csrf.js';
 import { requireAdmin } from '../middleware/require-admin.js';
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
+import { isS3Bundle, presignUploadUrl } from '../providers/s3-files.js';
 
 /**
  * Upload API (M9).
@@ -27,6 +28,16 @@ const MAX_CHUNK_BYTES = mibToBytes(64);
  * with the attempt's app-generated key before recording the failure.
  */
 const AMBIGUOUS_UPLOAD_CODES = new Set(['provider_unavailable', 'upload_aborted']);
+
+/**
+ * Phase 2: safe codes a direct-transfer client may report on the fail route.
+ * Anything else degrades to the generic upload_failed — a client never gets
+ * to write arbitrary strings into the job's error column.
+ */
+const DIRECT_FAIL_CODES = new Set(['provider_rate_limited', 'provider_unavailable', 'upload_aborted', 'upload_failed']);
+
+/** A client-reported digest must at least look like a SHA-256 hex string. */
+const SHA256_HEX = /^[0-9a-f]{64}$/i;
 
 function uploadErrorResponse(res: Response, err: unknown): void {
   if (err instanceof CapacityInsufficientError) {
@@ -195,6 +206,7 @@ export function rawChunkRouter(deps: {
           jobId, chunkIndex, accountId: allocation.provider_account_id, objectKey,
           remoteObjectId: ref.remoteObjectId, sha256, sizeBytes: bytes,
           providerChecksumType: ref.providerChecksum?.type,
+          providerChecksumValue: ref.providerChecksum?.value,
         });
         void attemptId;
         res.json({
@@ -338,6 +350,194 @@ export function uploadsRouter(deps: {
       uploadErrorResponse(res, err);
     }
   });
+
+  // ---- Roadmap Phase 2: presigned direct transfer ----
+  // The browser asks where one chunk should go. S3-compatible accounts get a
+  // one-object, one-hour presigned PUT URL and the bytes never pass through
+  // CloudNest; every other provider keeps the proxy PUT. The client never
+  // learns an account id, a credential, or which provider serves the chunk.
+  const directLimiter = rateLimit({
+    windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-8', legacyHeaders: false,
+    message: { error: 'provider_rate_limited' },
+  });
+
+  router.post(
+    '/api/uploads/:jobId/chunks/:chunkIndex/begin',
+    adminOnly,
+    deps.csrf.doubleCsrfProtection,
+    directLimiter,
+    async (req: Request, res: Response) => {
+      res.set('Cache-Control', 'no-store');
+      const jobId = String(req.params['jobId']);
+      const chunkIndex = Number(String(req.params['chunkIndex']));
+      if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
+        res.status(400).json({ error: 'invalid_upload_metadata', code: 'invalid_upload_metadata' });
+        return;
+      }
+      // durable-state tracking so a begun attempt is never left unresolved
+      let attemptObjectKey: string | null = null;
+      let attemptAccountId: string | null = null;
+      try {
+        const job = deps.uploads.getJob(jobId);
+        if (!job) throw new UploadError('job_not_found', 404);
+        if (job.state === 'cancelled' || job.state === 'completed') throw new UploadError('job_not_resumable', 409);
+        if (job.state === 'paused') throw new UploadError('job_paused', 409);
+        const allocation = deps.uploads.listAllocations(jobId).find((a) => a.chunk_index === chunkIndex);
+        if (!allocation) throw new UploadError('invalid_upload_metadata', 400);
+        const accountRow = deps.uploads.getAccountForUpload(allocation.provider_account_id);
+        if (!accountRow) throw new UploadError('account_needs_reauth', 409);
+        // attempt row FIRST (crash-recovery anchor, same as the proxy path);
+        // a 429 account_busy is thrown before any durable state changes
+        const begun = deps.uploads.beginAttempt({
+          jobId, chunkIndex, accountId: allocation.provider_account_id,
+        });
+        attemptObjectKey = begun.objectKey;
+        attemptAccountId = allocation.provider_account_id;
+        if (accountRow.provider !== 's3') {
+          res.json({ mode: 'proxy' });
+          return;
+        }
+        const rootId = await deps.uploads.ensureOrCreateRoot(accountRow.id);
+        const bundle = deps.uploads.loadBundleFor(accountRow.id);
+        if (!isS3Bundle(bundle)) throw new UploadError('account_needs_reauth', 409);
+        const presigned = presignUploadUrl(bundle, rootId, begun.objectKey);
+        res.json({
+          mode: 'direct',
+          attemptId: begun.attemptId,
+          objectKey: begun.objectKey,
+          url: presigned.url,
+          expiresAt: presigned.expiresAt,
+        });
+      } catch (err) {
+        if (attemptObjectKey && attemptAccountId) {
+          deps.uploads.recordFailure({
+            jobId, chunkIndex, accountId: attemptAccountId, objectKey: attemptObjectKey,
+            safeCode: err instanceof UploadError || err instanceof ProviderError ? err.safeCode : 'upload_failed',
+            bytesReceived: 0, remoteObjectId: null,
+          });
+        }
+        if (err instanceof UploadError && err.safeCode === 'account_busy') {
+          res.set('Retry-After', '2');
+        }
+        uploadErrorResponse(res, err);
+      }
+    },
+  );
+
+  router.post(
+    '/api/uploads/:jobId/chunks/:chunkIndex/complete',
+    adminOnly,
+    deps.csrf.doubleCsrfProtection,
+    directLimiter,
+    async (req: Request, res: Response) => {
+      res.set('Cache-Control', 'no-store');
+      const jobId = String(req.params['jobId']);
+      const chunkIndex = Number(String(req.params['chunkIndex']));
+      const body = (req.body ?? {}) as { attemptId?: unknown; sha256?: unknown; etag?: unknown };
+      const attemptId = typeof body.attemptId === 'string' ? body.attemptId : '';
+      const sha256 = typeof body.sha256 === 'string' ? body.sha256 : '';
+      if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || !attemptId || !SHA256_HEX.test(sha256)) {
+        res.status(400).json({ error: 'invalid_upload_metadata', code: 'invalid_upload_metadata' });
+        return;
+      }
+      try {
+        const job = deps.uploads.getJob(jobId);
+        if (!job) throw new UploadError('job_not_found', 404);
+        if (job.state === 'cancelled' || job.state === 'completed') throw new UploadError('job_not_resumable', 409);
+        if (job.state === 'paused') throw new UploadError('job_paused', 409);
+        const allocation = deps.uploads.listAllocations(jobId).find((a) => a.chunk_index === chunkIndex);
+        if (!allocation) throw new UploadError('invalid_upload_metadata', 400);
+        const attempt = deps.uploads.getAttemptForChunk(jobId, chunkIndex, attemptId);
+        if (!attempt || attempt.provider_account_id !== allocation.provider_account_id) {
+          throw new UploadError('invalid_upload_metadata', 400);
+        }
+        const accountRow = deps.uploads.getAccountForUpload(allocation.provider_account_id);
+        if (!accountRow) throw new UploadError('account_needs_reauth', 409);
+        // complete exists for the direct flow only; OAuth chunks go through
+        // the proxy PUT, which commits by itself
+        if (accountRow.provider !== 's3') throw new UploadError('invalid_upload_metadata', 400);
+        // the browser's receipt is never trusted for size: the server asks the
+        // provider itself (HeadObject) before anything is committed
+        const adapter = getAdapter('s3');
+        if (!adapter?.findAppObjectByKey) throw new UploadError('provider_unavailable', 502);
+        const rootId = deps.uploads.ensureRootFor(accountRow.id);
+        const bundle = deps.uploads.loadBundleFor(accountRow.id);
+        if (!isS3Bundle(bundle)) throw new UploadError('account_needs_reauth', 409);
+        const found = await adapter.findAppObjectByKey(bundle, rootId, attempt.object_key, undefined);
+        if (!found) {
+          // nothing landed remotely: an honest failure, and no cleanup
+          // obligation because no object id was ever observed
+          deps.uploads.recordFailure({
+            jobId, chunkIndex, accountId: allocation.provider_account_id, objectKey: attempt.object_key,
+            safeCode: 'provider_object_missing', bytesReceived: 0, remoteObjectId: null,
+          });
+          throw new UploadError('provider_object_missing', 409);
+        }
+        if (found.sizeBytes !== allocation.size_bytes) {
+          // a wrong-size object exists: it must be deleted, not committed —
+          // recordFailure keeps it as a durable cleanup obligation (UL-3)
+          deps.uploads.recordFailure({
+            jobId, chunkIndex, accountId: allocation.provider_account_id, objectKey: attempt.object_key,
+            safeCode: 'chunk_size_mismatch', bytesReceived: found.sizeBytes, remoteObjectId: found.remoteObjectId,
+          });
+          throw new UploadError('chunk_size_mismatch', 400);
+        }
+        // sha256 is client-reported (the browser hashed its own slice); the
+        // placement is recorded 'uploaded', never 'verified', and the download
+        // engine re-verifies every stored digest when the file is streamed
+        const result = deps.uploads.commitChunk({
+          jobId, chunkIndex, accountId: allocation.provider_account_id, objectKey: attempt.object_key,
+          remoteObjectId: found.remoteObjectId, sha256, sizeBytes: allocation.size_bytes,
+          providerChecksumType: 'etag',
+        });
+        res.json({
+          ok: true,
+          chunkIndex,
+          sha256,
+          bytes: allocation.size_bytes,
+          chunksCompleted: result.chunksCompleted,
+          bytesCompleted: result.bytesCompleted,
+          fileCompleted: result.fileCompleted,
+        });
+      } catch (err) {
+        uploadErrorResponse(res, err);
+      }
+    },
+  );
+
+  // The client reports a direct PUT it could not finish, so the attempt stops
+  // counting as in-flight and the per-account slot frees immediately.
+  router.post(
+    '/api/uploads/:jobId/chunks/:chunkIndex/fail',
+    adminOnly,
+    deps.csrf.doubleCsrfProtection,
+    directLimiter,
+    (req: Request, res: Response) => {
+      res.set('Cache-Control', 'no-store');
+      const jobId = String(req.params['jobId']);
+      const chunkIndex = Number(String(req.params['chunkIndex']));
+      const body = (req.body ?? {}) as { attemptId?: unknown; code?: unknown };
+      const attemptId = typeof body.attemptId === 'string' ? body.attemptId : '';
+      if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || !attemptId) {
+        res.status(400).json({ error: 'invalid_upload_metadata', code: 'invalid_upload_metadata' });
+        return;
+      }
+      try {
+        if (!deps.uploads.getJob(jobId)) throw new UploadError('job_not_found', 404);
+        const attempt = deps.uploads.getAttemptForChunk(jobId, chunkIndex, attemptId);
+        if (!attempt) throw new UploadError('invalid_upload_metadata', 400);
+        const reported = typeof body.code === 'string' ? body.code : '';
+        deps.uploads.recordFailure({
+          jobId, chunkIndex, accountId: attempt.provider_account_id, objectKey: attempt.object_key,
+          safeCode: DIRECT_FAIL_CODES.has(reported) ? reported : 'upload_failed',
+          bytesReceived: 0, remoteObjectId: null,
+        });
+        res.json({ ok: true });
+      } catch (err) {
+        uploadErrorResponse(res, err);
+      }
+    },
+  );
 
   router.get('/api/dashboard/summary', adminOnly, (_req, res) => {
     res.set('Cache-Control', 'no-store');

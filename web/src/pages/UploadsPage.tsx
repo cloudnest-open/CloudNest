@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudUpload, Pause, Play, RotateCcw, X } from 'lucide-react';
-import { api } from '../api.js';
+import { api, presignedPut } from '../api.js';
 import { formatBytes, formatDateTime } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
 
@@ -29,8 +29,15 @@ const DEFAULT_CHUNK_MIB = 64;
  * clamped client-side; this constant only covers a request that failed.
  */
 const DEFAULT_GLOBAL_WORKERS = 4;
-/** At most two chunks in flight per provider account (server-enforced: a third PUT answers 429 account_busy). */
+/** At most two chunks in flight per OAuth provider account (server-enforced: a third PUT answers 429 account_busy). */
 const MAX_PER_ACCOUNT_WORKERS = 2;
+/**
+ * Roadmap Phase 2: business-tier chunks take the presigned direct path, where
+ * the server's per-account window is 32 and the browser pool widens to 16 —
+ * the server, not this page, remains the authority on both bounds.
+ */
+const DIRECT_WORKER_POOL = 16;
+const MAX_PER_ACCOUNT_S3 = 32;
 const OBJECT_COUNT_WARN_THRESHOLD = 1000;
 /**
  * §9: transient chunk failures get bounded exponential backoff with jitter,
@@ -115,6 +122,12 @@ export function UploadsPage() {
     const code = body.code ?? body.error ?? '';
     const help = (t.errors.upload as Record<string, string | undefined>)[code];
     return { code, text: help ? `${help}${code ? ` (${code})` : ''}` : fallback };
+  }
+
+  /** Same remedy for a bare safe code already extracted by the chunk flow. */
+  function describeCode(code: string, fallback: string): { code: string; text: string } {
+    const help = (t.errors.upload as Record<string, string | undefined>)[code];
+    return { code, text: help ? `${help} (${code})` : fallback };
   }
 
   const loadSummary = useCallback(async () => {
@@ -255,7 +268,8 @@ export function UploadsPage() {
         setError(t.uploads.manifestFailed);
         return;
       }
-      const persistedChunkSizeBytes = (fileRes.data as { file: { chunkSizeBytes: number } }).file.chunkSizeBytes;
+      const fileMeta = (fileRes.data as { file: { chunkSizeBytes: number; tier?: 'personal' | 'business' } }).file;
+      const persistedChunkSizeBytes = fileMeta.chunkSizeBytes;
       if (!Number.isSafeInteger(persistedChunkSizeBytes) || persistedChunkSizeBytes <= 0) {
         setError(t.uploads.manifestFailed);
         return;
@@ -285,39 +299,112 @@ export function UploadsPage() {
       };
 
       let cursor = 0;
-      const workerCount = Math.min(workerLimit, Math.max(1, indices.length));
+      // Phase 2: business-tier chunks ride presigned direct PUTs to S3, so the
+      // browser pool can be much wider than the polite OAuth worker limit; the
+      // server still enforces its own per-account window on every begin.
+      const directTier = fileMeta.tier === 'business';
+      const workerCount = Math.min(directTier ? DIRECT_WORKER_POOL : workerLimit, Math.max(1, indices.length));
+      /** §9: bounded exponential backoff with jitter, honouring Retry-After. */
+      const backoff = async (attempt: number, retryAfterMs: number | null | undefined): Promise<void> => {
+        const delayMs = retryAfterMs ?? Math.min(8000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      };
+      /**
+       * Send one chunk over whichever path the server assigns it. Every attempt
+       * starts with `begin`, so the durable attempt row and the per-account
+       * in-flight slot exist for exactly the bytes in flight. Permanent errors
+       * stop immediately with their safe code; transient ones back off and
+       * begin again.
+       */
+      const sendChunk = async (chunkIndex: number, geo: { offsetBytes: number; sizeBytes: number }): Promise<'done' | 'paused' | string> => {
+        const slice = selected.slice(geo.offsetBytes, geo.offsetBytes + geo.sizeBytes);
+        for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt++) {
+          if (abortRef.current?.signal.aborted || pauseRequestedRef.current) return 'paused';
+          const begin = await api.beginChunkDirect(id, chunkIndex);
+          if (begin.status !== 200) {
+            const code = ((begin.data ?? {}) as { code?: string }).code ?? '';
+            if (code === 'job_paused') return 'paused';
+            const transient = begin.status === 429 || begin.status >= 500 || TRANSIENT_UPLOAD_CODES.has(code);
+            if (!transient) return code || 'upload_failed';
+            await backoff(attempt, begin.retryAfterMs);
+            continue;
+          }
+          const info = begin.data as { mode: 'proxy' | 'direct'; attemptId?: string; url?: string };
+          if (info.mode === 'direct' && info.url && info.attemptId) {
+            // hash the slice locally, then hand the bytes straight to the
+            // bucket — CloudNest carries none of them
+            const digest = await sha256Hex(await slice.arrayBuffer());
+            let put: { ok: boolean; status: number; etag: string | null };
+            try {
+              put = await presignedPut(info.url, slice);
+            } catch {
+              // a blocked or refused direct transfer (CORS, DNS, offline)
+              void api.failChunkDirect(id, chunkIndex, info.attemptId, 'provider_unavailable');
+              await backoff(attempt, null);
+              continue;
+            }
+            if (!put.ok) {
+              void api.failChunkDirect(id, chunkIndex, info.attemptId, 'provider_unavailable');
+              await backoff(attempt, null);
+              continue;
+            }
+            const receipt = { attemptId: info.attemptId, sha256: digest, etag: put.etag };
+            let lastRetryAfter: number | null | undefined = null;
+            // the object may exist even when the receipt round-trip hiccups;
+            // only the server's complete can confirm it, so the same attempt
+            // gets a few confirm tries before it is abandoned
+            for (let confirm = 0; confirm < 3; confirm++) {
+              if (confirm > 0) await backoff(confirm, lastRetryAfter);
+              if (abortRef.current?.signal.aborted || pauseRequestedRef.current) return 'paused';
+              const complete = await api.completeChunkDirect(id, chunkIndex, receipt);
+              if (complete.status === 200) return 'done';
+              const code = ((complete.data ?? {}) as { code?: string }).code ?? '';
+              if (code === 'job_paused') return 'paused';
+              lastRetryAfter = complete.retryAfterMs;
+              const transient = complete.status === 429 || complete.status >= 500 || TRANSIENT_UPLOAD_CODES.has(code);
+              // permanent codes (size mismatch, missing object) were already
+              // recorded by the server's complete handler — report and stop
+              if (!transient) return code || 'upload_failed';
+            }
+            // the receipt never landed: report the attempt failed so the
+            // in-flight slot frees; recovery reconciles the server side
+            void api.failChunkDirect(id, chunkIndex, info.attemptId, 'provider_unavailable');
+            await backoff(attempt, lastRetryAfter);
+            continue;
+          }
+          // proxy mode: the polite OAuth path, byte-for-byte the old contract
+          const res = await api.uploadChunkRaw(id, chunkIndex, slice);
+          if (res.status === 200) return 'done';
+          const code = ((res.data ?? {}) as { code?: string }).code ?? '';
+          if (code === 'job_paused') return 'paused';
+          const transient = res.status === 429 || res.status >= 500 || TRANSIENT_UPLOAD_CODES.has(code);
+          if (!transient) return code || 'upload_failed';
+          await backoff(attempt, res.retryAfterMs);
+        }
+        return 'upload_failed';
+      };
+
       const workers = Array.from({ length: workerCount }, async () => {
         while (cursor < indices.length) {
           if (abortRef.current?.signal.aborted || pauseRequestedRef.current) return;
           const chunkIndex = indices[cursor++] as number;
-          // the server enforces the per-account in-flight cap: a third
-          // concurrent PUT on one account answers 429 `account_busy` with
-          // Retry-After, and this loop backs off and re-PUTs the same chunk
           const geo = geometry.get(chunkIndex) ?? fallbackGeometry(chunkIndex);
           if (geo.sizeBytes <= 0 || geo.offsetBytes >= selected.size) continue;
-          const slice = selected.slice(geo.offsetBytes, geo.offsetBytes + geo.sizeBytes);
-          // §9: bounded exponential backoff with jitter for transient errors;
-          // permanent errors break out immediately with their safe code
-          let res = await api.uploadChunkRaw(id, chunkIndex, slice);
-          for (let attempt = 1; res.status !== 200 && attempt < MAX_CHUNK_ATTEMPTS && !pauseRequestedRef.current; attempt++) {
-            const code = ((res.data ?? {}) as { code?: string }).code ?? '';
-            if (code === 'job_paused') return;
-            const transient = res.status === 429 || res.status >= 500 || TRANSIENT_UPLOAD_CODES.has(code);
-            if (!transient || abortRef.current?.signal.aborted) break;
-            const delayMs = res.retryAfterMs ?? Math.min(8000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-            if (abortRef.current?.signal.aborted || pauseRequestedRef.current) return;
-            res = await api.uploadChunkRaw(id, chunkIndex, slice);
+          let outcome: 'done' | 'paused' | string;
+          try {
+            outcome = await sendChunk(chunkIndex, geo);
+          } catch {
+            outcome = 'upload_failed';
           }
-          if (res.status !== 200) {
-            const code = ((res.data ?? {}) as { code?: string }).code ?? '';
-            if (code === 'job_paused' || pauseRequestedRef.current) return;
-            const described = describeError(res.data, t.uploads.chunkFailed);
-            setError(described.text);
-            setErrorCode(described.code || null);
-            return;
+          if (outcome === 'done') {
+            await refreshJob(id);
+            continue;
           }
-          await refreshJob(id);
+          if (outcome === 'paused') return;
+          const described = describeCode(outcome, t.uploads.chunkFailed);
+          setError(described.text);
+          setErrorCode(described.code || null);
+          return;
         }
       });
       await Promise.all(workers);
@@ -643,8 +730,8 @@ export function UploadsPage() {
           <h2>{t.uploads.ready}</h2>
           <p className="muted">
             {plural(t.uploads.readyDetail, plannedChunks.length, {
-              workers: workerLimit,
-              perAccount: MAX_PER_ACCOUNT_WORKERS,
+              workers: tier === 'business' ? DIRECT_WORKER_POOL : workerLimit,
+              perAccount: tier === 'business' ? MAX_PER_ACCOUNT_S3 : MAX_PER_ACCOUNT_WORKERS,
             })}
           </p>
           <div className="actions">

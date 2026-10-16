@@ -55,6 +55,14 @@ const PROVIDER_UPLOAD_READY = new Set(['google_drive', 'dropbox', 'onedrive', 'p
 export const MAX_PER_ACCOUNT_INFLIGHT = 2;
 
 /**
+ * Roadmap Phase 2: S3-compatible accounts receive browser-direct presigned
+ * PUTs — plain single-object writes with none of the consumer-provider rate
+ * budgets — so the same durable in-flight gate allows the roadmap's direct
+ * window (8–32) for them and keeps the polite cap of 2 for OAuth accounts.
+ */
+export const MAX_PER_ACCOUNT_INFLIGHT_S3 = 32;
+
+/**
  * Provider checksum algorithms that are the SAME function as our own SHA-256,
  * so a provider value may be compared byte-for-byte. A provider checksum with a
  * DIFFERENT algorithm (Dropbox content_hash, OneDrive quickXorHash) is never
@@ -457,7 +465,11 @@ export class UploadService {
    */
   private assertAccountCanAccept(accountId: string, allocationId: string): void {
     const row = this.q.countUploadingForAccount.get(accountId, allocationId) as { n: number };
-    if (row.n >= MAX_PER_ACCOUNT_INFLIGHT) {
+    const account = this.providerQ.getAccount.get(accountId) as { provider: string } | undefined;
+    // OAuth accounts keep the polite 2-in-flight cap; S3-compatible accounts
+    // take browser-direct presigned PUTs and get the wider Phase-2 window.
+    const cap = account?.provider === 's3' ? MAX_PER_ACCOUNT_INFLIGHT_S3 : MAX_PER_ACCOUNT_INFLIGHT;
+    if (row.n >= cap) {
       throw new UploadError('account_busy', 429);
     }
   }
@@ -502,6 +514,8 @@ export class UploadService {
     sha256: string;
     sizeBytes: number;
     providerChecksumType?: string;
+    /** Raw provider checksum value; only a SHA-256-comparable match earns 'verified'. */
+    providerChecksumValue?: string;
   }): { chunksCompleted: number; bytesCompleted: number; fileCompleted: boolean } {
     const job = this.q.getJob.get(input.jobId) as JobRow | undefined;
     if (!job?.file_id) throw new UploadError('job_not_found', 404);
@@ -550,6 +564,19 @@ export class UploadService {
         remote_object_id: input.remoteObjectId, remote_object_key: input.objectKey,
         provider_checksum_type: input.providerChecksumType ?? null,
         confirmed_size_bytes: input.sizeBytes, created_at: now, updated_at: now,
+        // B6 honesty: 'verified' only when the provider returned a checksum
+        // whose algorithm is genuinely SHA-256 AND it matches our digest. An
+        // opaque S3 ETag or a digest the server never observed (the Phase-2
+        // direct path stores the client-reported SHA-256) stays 'uploaded'.
+        state:
+          compareProviderChecksum(
+            input.providerChecksumType && input.providerChecksumValue
+              ? { type: input.providerChecksumType, value: input.providerChecksumValue }
+              : null,
+            input.sha256,
+          ) === 'match'
+            ? 'verified'
+            : 'uploaded',
       });
       if (attempt) this.q.markAttemptCommitted.run(now, attempt.id);
       this.q.markAllocationUploadedPendingQuota.run(now, allocation.id);
@@ -679,6 +706,23 @@ export class UploadService {
     });
     txn();
     return { attemptId, objectKey };
+  }
+
+  /**
+   * The attempt a Phase-2 direct-transfer receipt refers to: it must exist and
+   * belong to exactly this job and chunk. The direct begin/complete/fail
+   * routes validate their client-supplied attemptId through this gate, so a
+   * client can never name a foreign job's attempt, an object key, or an
+   * account — those all come from durable rows.
+   */
+  getAttemptForChunk(jobId: string, chunkIndex: number, attemptId: string): {
+    id: string; job_id: string; chunk_index: number; provider_account_id: string; object_key: string; state: string;
+  } | undefined {
+    const attempt = this.q.getAttempt.get(attemptId) as
+      | { id: string; job_id: string; chunk_index: number; provider_account_id: string; object_key: string; state: string }
+      | undefined;
+    if (!attempt || attempt.job_id !== jobId || attempt.chunk_index !== chunkIndex) return undefined;
+    return attempt;
   }
 
   /**

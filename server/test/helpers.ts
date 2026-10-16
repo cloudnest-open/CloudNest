@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import type Database from 'better-sqlite3';
 import { createApp } from '../src/app.js';
 import { openDatabase, runMigrations } from '../src/db/index.js';
 import { allMigrations } from '../src/db/migrations.js';
@@ -12,6 +13,8 @@ export interface TestApp {
   close: () => Promise<void>;
   dbPath: string;
   dataDir: string;
+  /** The temp database handle, for row-level assertions (closed by close()). */
+  db: Database.Database;
   destroyAllSessions: () => void;
 }
 
@@ -40,6 +43,7 @@ export async function startTestApp(): Promise<TestApp> {
     url: `http://127.0.0.1:${port}`,
     dbPath,
     dataDir,
+    db,
     close: async () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       close();

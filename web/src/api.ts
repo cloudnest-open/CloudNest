@@ -138,6 +138,17 @@ export const api = {
   uploadChunkRaw: (jobId: string, chunkIndex: number, body: Blob) =>
     request('PUT', `/api/uploads/${jobId}/chunks/${chunkIndex}`, body),
 
+  // ---- presigned direct transfer (roadmap Phase 2, business tier) ----
+  /** Ask the server where one chunk goes: a presigned URL or the proxy path. */
+  beginChunkDirect: (jobId: string, chunkIndex: number) =>
+    request('POST', `/api/uploads/${jobId}/chunks/${chunkIndex}/begin`, {}),
+  /** Report a finished direct PUT; the server re-verifies the size at the provider. */
+  completeChunkDirect: (jobId: string, chunkIndex: number, body: { attemptId: string; sha256: string; etag: string | null }) =>
+    request('POST', `/api/uploads/${jobId}/chunks/${chunkIndex}/complete`, body),
+  /** Report a direct PUT that failed, so the server-side in-flight slot frees. */
+  failChunkDirect: (jobId: string, chunkIndex: number, attemptId: string, code: string | null) =>
+    request('POST', `/api/uploads/${jobId}/chunks/${chunkIndex}/fail`, { attemptId, code }),
+
   // ---- downloads + rename (Step 5 / M10) ----
   fileDetails: (fileId: string) => request('GET', `/api/files/${fileId}`),
   renameFile: (fileId: string, name: string) => request('POST', `/api/files/${fileId}/rename`, { name }),
@@ -182,3 +193,26 @@ export const api = {
   /** Internal: expose the CSRF token flow for raw-body uploads. */
   refreshCsrf: refreshCsrfToken,
 };
+
+/**
+ * One chunk straight to the provider with a presigned URL (roadmap Phase 2):
+ * no cookies, no CSRF token and no CloudNest server in the path — the URL's
+ * own query-string signature is the whole authorization. Returns the provider
+ * ETag when the response exposes it (bucket CORS permitting); the server
+ * never trusts it as a verification claim.
+ */
+export async function presignedPut(url: string, body: Blob): Promise<{ ok: boolean; status: number; etag: string | null }> {
+  const res = await fetch(url, {
+    method: 'PUT',
+    body,
+    credentials: 'omit',
+    headers: { 'content-type': 'application/octet-stream' },
+  });
+  let etag: string | null = null;
+  try {
+    etag = res.headers.get('etag');
+  } catch {
+    etag = null;
+  }
+  return { ok: res.ok, status: res.status, etag };
+}

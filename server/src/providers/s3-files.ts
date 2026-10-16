@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import { ProviderError, type ProviderCredentialBundle, type RemoteObjectRef, type UploadObjectStreamParams, type EnsureAppRootResult } from './types.js';
-import { sha256Hex, signS3Request } from './s3-signature.js';
+import { sha256Hex, signS3Request, presignS3Request } from './s3-signature.js';
 
 /**
  * S3-compatible file-object primitives (roadmap Phase 1).
@@ -310,4 +310,30 @@ export async function headBucketImpl(bundle: ProviderCredentialBundle): Promise<
   if (res.status === 404) throw new ProviderError('provider_object_missing', 404, 'bucket does not exist');
   if (!res.ok) throw await errorFromResponse(res);
   void res.text().catch(() => undefined);
+}
+
+/** One hour: long enough for a slow chunk PUT, short enough to be useless replay material. */
+export const PRESIGN_EXPIRES_SECONDS = 3600;
+
+/**
+ * Presigned single-PUT URL for one logical chunk (roadmap Phase 2): the
+ * browser transfers the bytes directly to the bucket and CloudNest never
+ * carries them. The URL is scoped to exactly one object key, one PUT verb and
+ * one hour; it carries the SigV4 signature in its query string and no other
+ * secret — the access key id is public by design, the secret key never leaves
+ * the server.
+ */
+export function presignUploadUrl(
+  bundle: ProviderCredentialBundle,
+  rootId: string,
+  objectKey: string,
+  expiresInSeconds = PRESIGN_EXPIRES_SECONDS,
+): { url: string; expiresAt: string } {
+  if (!isS3Bundle(bundle)) throw new ProviderError('identity_validation_failed', 400);
+  return presignS3Request({
+    method: 'PUT',
+    url: objectUrl(bundle, rootId, objectKey),
+    credentials: { accessKeyId: bundle.accessKeyId, secretAccessKey: bundle.secretAccessKey, region: bundle.region },
+    expiresInSeconds,
+  });
 }

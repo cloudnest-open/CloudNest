@@ -10,6 +10,7 @@ import {
   buildStringToSign,
   deriveSigningKey,
   signS3Request,
+  presignS3Request,
 } from '../src/providers/s3-signature.js';
 
 /**
@@ -120,4 +121,59 @@ test('signS3Request output is internally consistent: the authorization header ca
   const key = deriveSigningKey('test-secret', '20150830', 'auto');
   const recomputed = crypto.createHmac('sha256', key).update(sts, 'utf8').digest('hex');
   assert.equal(recomputed, sigMatch[1]!);
+});
+
+test('presigned PUT URL carries the five SigV4 query parameters and no secret', () => {
+  const presigned = presignS3Request({
+    method: 'PUT',
+    url: new URL('https://acc123.r2.cloudflarestorage.com/fx-bucket/cloudnest/cn-f1-c0-a1'),
+    credentials: { accessKeyId: 'test-key', secretAccessKey: 'test-secret', region: 'auto' },
+    expiresInSeconds: 3600,
+    now: SUITE_DATE,
+  });
+  const u = new URL(presigned.url);
+  assert.equal(u.searchParams.get('X-Amz-Algorithm'), 'AWS4-HMAC-SHA256');
+  assert.equal(u.searchParams.get('X-Amz-Credential'), 'test-key/20150830/auto/s3/aws4_request');
+  assert.equal(u.searchParams.get('X-Amz-Date'), '20150830T123600Z');
+  assert.equal(u.searchParams.get('X-Amz-Expires'), '3600');
+  assert.equal(u.searchParams.get('X-Amz-SignedHeaders'), 'host');
+  assert.match(u.searchParams.get('X-Amz-Signature') ?? '', /^[0-9a-f]{64}$/);
+  assert.equal(presigned.expiresAt, '2015-08-30T13:36:00.000Z');
+  // the secret key never appears anywhere in the URL
+  assert.ok(!presigned.url.includes('test-secret'));
+});
+
+test('the presigned signature is reproducible from its own parameters and breaks when tampered', () => {
+  const presigned = presignS3Request({
+    method: 'PUT',
+    url: new URL('https://acc123.r2.cloudflarestorage.com/fx-bucket/cloudnest/cn-f1-c0-a1'),
+    credentials: { accessKeyId: 'test-key', secretAccessKey: 'test-secret', region: 'auto' },
+    expiresInSeconds: 3600,
+    now: SUITE_DATE,
+  });
+  const recompute = (target: URL): string => {
+    const five = new URLSearchParams();
+    for (const [k, v] of target.searchParams) {
+      if (k !== 'X-Amz-Signature') five.set(k, v);
+    }
+    const { canonicalRequest } = buildCanonicalRequest({
+      method: 'PUT',
+      pathname: target.pathname,
+      query: five,
+      headers: { host: target.host },
+      payloadHash: 'UNSIGNED-PAYLOAD',
+    });
+    const sts = buildStringToSign(canonicalRequest, SUITE_DATE, 'auto');
+    const key = deriveSigningKey('test-secret', '20150830', 'auto');
+    return crypto.createHmac('sha256', key).update(sts, 'utf8').digest('hex');
+  };
+  const original = new URL(presigned.url);
+  assert.equal(recompute(original), original.searchParams.get('X-Amz-Signature'));
+  // changing ANY signed parameter invalidates the signature
+  const tampered = new URL(presigned.url);
+  tampered.searchParams.set('X-Amz-Expires', '7200');
+  assert.notEqual(recompute(tampered), tampered.searchParams.get('X-Amz-Signature'));
+  const renamed = new URL(presigned.url);
+  renamed.pathname = '/fx-bucket/cloudnest/cn-f1-c0-a2';
+  assert.notEqual(recompute(renamed), renamed.searchParams.get('X-Amz-Signature'));
 });

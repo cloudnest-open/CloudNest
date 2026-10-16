@@ -156,3 +156,57 @@ export function signS3Request(input: {
       `SignedHeaders=${signedHeaders}, Signature=${signature}`,
   };
 }
+
+export interface PresignedUrl {
+  /** The fully signed URL: the browser calls it directly, no extra headers. */
+  url: string;
+  /** ISO instant after which the provider will refuse the URL. */
+  expiresAt: string;
+}
+
+/**
+ * Query-string presign (roadmap Phase 2): the browser PUTs one chunk straight
+ * to S3 with these query parameters instead of an Authorization header, so the
+ * bytes never pass through CloudNest. Exactly `host` is signed — the browser
+ * cannot reproduce our header set, so every other header must stay unsigned —
+ * and the payload is UNSIGNED-PAYLOAD because the browser streams bytes it
+ * does not hash for us. The signature is computed over the five query
+ * parameters alone; X-Amz-Signature is appended afterwards and is itself never
+ * part of the canonical request (per the SigV4 query-auth spec).
+ */
+export function presignS3Request(input: {
+  method: string;
+  url: URL;
+  credentials: SigV4Credentials;
+  /** Seconds the URL stays valid; S3 caps this at 604800 (7 days). */
+  expiresInSeconds: number;
+  now?: Date;
+}): PresignedUrl {
+  const date = input.now ?? new Date();
+  const expires = Math.max(1, Math.floor(input.expiresInSeconds));
+  const query: Record<string, string> = {
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+    'X-Amz-Credential': `${input.credentials.accessKeyId}/${scopeDate(date)}/${input.credentials.region}/s3/aws4_request`,
+    'X-Amz-Date': amzDate(date),
+    'X-Amz-Expires': String(expires),
+    'X-Amz-SignedHeaders': 'host',
+  };
+  const canonicalRequest = [
+    input.method.toUpperCase(),
+    input.url.pathname,
+    canonicalQuery(query),
+    `host:${input.url.host}\n`,
+    'host',
+    'UNSIGNED-PAYLOAD',
+  ].join('\n');
+  const stringToSign = buildStringToSign(canonicalRequest, date, input.credentials.region);
+  const key = deriveSigningKey(input.credentials.secretAccessKey, scopeDate(date), input.credentials.region);
+  const signature = crypto.createHmac('sha256', key).update(stringToSign, 'utf8').digest('hex');
+  const queryString = [...Object.entries(query), ['X-Amz-Signature', signature] as const]
+    .map(([k, v]) => `${uriEncode(k)}=${uriEncode(v)}`)
+    .join('&');
+  return {
+    url: `${input.url.origin}${input.url.pathname}?${queryString}`,
+    expiresAt: new Date(date.getTime() + expires * 1000).toISOString(),
+  };
+}

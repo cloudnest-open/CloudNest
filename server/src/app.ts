@@ -75,6 +75,33 @@ export function createApp(options: {
     }),
   );
 
+  // 1c. Roadmap Phase 2: the browser PUTs business-tier chunks straight to the
+  //     connected S3-compatible endpoint with a presigned URL, so the document
+  //     CSP must allow connect-src for exactly the admin-configured endpoint
+  //     hosts. The list comes from the accounts table (identifier `bucket@host`),
+  //     never from request data; with no S3 account the CSP stays untouched.
+  const s3OriginStatement = options.db.prepare(
+    "SELECT account_identifier FROM provider_accounts WHERE provider = 's3'",
+  );
+  app.use((_req, res, next) => {
+    const csp = res.getHeader('Content-Security-Policy');
+    if (typeof csp === 'string' && csp.includes("connect-src 'self'")) {
+      const origins = new Set<string>();
+      for (const row of s3OriginStatement.all() as Array<{ account_identifier: string | null }>) {
+        const id = row.account_identifier ?? '';
+        const host = id.slice(id.lastIndexOf('@') + 1);
+        if (host && /^[A-Za-z0-9.\-:]+$/.test(host)) origins.add(`https://${host}`);
+      }
+      if (origins.size > 0) {
+        res.setHeader(
+          'Content-Security-Policy',
+          csp.replace("connect-src 'self'", `connect-src 'self' ${[...origins].join(' ')}`),
+        );
+      }
+    }
+    next();
+  });
+
 
   const credentialsStore = new CredentialsStore(options.db, options.dataDir);
   const accountService = new ProviderAccountService(options.db, makeProviderQueries(options.db), credentialsStore);

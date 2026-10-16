@@ -185,10 +185,12 @@ export function makeUploadQueries(db: Database.Database) {
     ),
     getChunk: db.prepare('SELECT * FROM file_chunks WHERE file_id = ? AND chunk_index = ?'),
     listChunks: db.prepare('SELECT * FROM file_chunks WHERE file_id = ? ORDER BY chunk_index'),
+    // the caller decides the placement state: 'verified' only for a
+    // SHA-256-comparable provider checksum that actually matched (B6 honesty)
     insertPlacement: db.prepare(
       `INSERT INTO chunk_placements (id, chunk_id, provider_account_id, remote_object_id, remote_object_key, state, is_active,
         provider_checksum_type, confirmed_size_bytes, last_safe_error_code, created_at, updated_at)
-       VALUES (@id, @chunk_id, @provider_account_id, @remote_object_id, @remote_object_key, 'verified', 1,
+       VALUES (@id, @chunk_id, @provider_account_id, @remote_object_id, @remote_object_key, @state, 1,
         @provider_checksum_type, @confirmed_size_bytes, NULL, @created_at, @updated_at)`,
     ),
     deactivatePlacements: db.prepare(
