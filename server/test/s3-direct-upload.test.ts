@@ -157,6 +157,12 @@ test('a business chunk flows begin → direct PUT → complete with an honest pl
 
     const jobRes = await client.get(`/api/uploads/${plan.jobId}`);
     assert.equal((jobRes.body as { job: { state: string } }).job.state, 'completed');
+
+    // once an S3 account exists, the document CSP widens its connect-src to
+    // exactly the configured endpoint origin so the browser can PUT there
+    const health = await client.get('/api/health');
+    const csp = health.headers.get('content-security-policy') ?? '';
+    assert.ok(csp.includes("connect-src 'self' https://acc123.r2.cloudflarestorage.com"), csp);
   });
 });
 
@@ -260,6 +266,12 @@ test('OAuth accounts stay on the proxy path and keep the 2-in-flight cap', async
     assert.equal(begin2.status, 429);
     assert.equal((begin2.body as { code?: string }).code, 'account_busy');
     assert.equal(begin2.headers.get('retry-after'), '2');
+
+    // without any S3 account the CSP stays exactly as before
+    const health = await client.get('/api/health');
+    const csp = health.headers.get('content-security-policy') ?? '';
+    assert.ok(csp.includes("connect-src 'self'"), csp);
+    assert.ok(!csp.includes('acc123'), csp);
   });
 });
 
