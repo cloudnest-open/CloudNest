@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
-  Cloud, House, Folder, CloudUpload, Download, Link, Settings as SettingsIcon,
-  Sun, Moon, LogOut, Search, ChevronDown, Bell, Menu, X, UserRound, UsersRound,
+  AlertTriangle, Bell, CheckCircle2, ChevronDown, Cloud, CloudUpload, Download, Folder, House,
+  Link, LogOut, Menu, Moon, Search, Settings as SettingsIcon, Sun, UserRound, UsersRound, X,
 } from 'lucide-react';
 import { api, refreshCsrfToken } from './api.js';
+import { TransferDock, type DownloadDockJob, type UploadDockJob } from './components/TransferDock.js';
 import { FirstRunPage, LoginPage } from './pages/EntryPage.js';
 import { ChangePasswordPanel } from './pages/AuthPages.js';
 import { CloudAccountsPage } from './pages/CloudAccountsPage.js';
@@ -13,7 +14,7 @@ import { DashboardPage } from './pages/DashboardPage.js';
 import { DownloadsPage } from './pages/DownloadsPage.js';
 import { SharedLinksPage } from './pages/SharedLinksPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
-import { Dialog, EmptyState, ToastProvider } from './components/ui.js';
+import { Dialog, EmptyState, ToastProvider, formatDateTime } from './components/ui.js';
 import { FileActionsProvider } from './components/FileActionsProvider.js';
 import { LanguageMenu } from './components/LanguageMenu.js';
 import { useI18n } from './i18n-context.js';
@@ -90,9 +91,16 @@ export default function App() {
   const [principal, setPrincipal] = useState<PrincipalInfo | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<'general' | 'users'>('general');
-  // Notification bell: a real toggle whose panel truthfully reports the
-  // (currently empty) notification list — never a decorative icon.
+  // Notification bell: a real toggle whose panel shows the server's real
+  // per-principal feed (roadmap Phase 4) — never a decorative icon.
   const [bellOpen, setBellOpen] = useState(false);
+  interface FeedItem { id: string; kind: string; payload: Record<string, unknown>; readAt: string | null; createdAt: string }
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  // Roadmap Phase 4: live transfer snapshot for the topbar icon and the dock —
+  // durable server rows only.
+  const [dockUploads, setDockUploads] = useState<UploadDockJob[]>([]);
+  const [dockDownloads, setDockDownloads] = useState<DownloadDockJob[]>([]);
   // Global search over CloudNest-managed files (real data; never a fake index).
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -191,6 +199,63 @@ export default function App() {
       .catch(() => undefined);
     return () => {
       cancelled = true;
+    };
+  }, [authState]);
+
+  // Roadmap Phase 4: the bell's feed — fetched on sign-in, then every minute
+  // and whenever the panel opens. Only the principal's own rows exist.
+  useEffect(() => {
+    if (authState !== 'ready') return;
+    let cancelled = false;
+    const loadFeed = async (): Promise<void> => {
+      try {
+        const res = await api.listNotifications();
+        if (cancelled || res.status !== 200) return;
+        const data = res.data as { notifications?: FeedItem[]; unreadCount?: number };
+        setFeed(data.notifications ?? []);
+        setUnreadCount(data.unreadCount ?? 0);
+      } catch {
+        // the panel keeps its last honest state; the next poll retries
+      }
+    };
+    void loadFeed();
+    const timer = window.setInterval(() => void loadFeed(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [authState, bellOpen]);
+
+  // Roadmap Phase 4: live transfer snapshot for the topbar icon and the dock —
+  // durable rows only, polled modestly.
+  useEffect(() => {
+    if (authState !== 'ready') return;
+    let cancelled = false;
+    const loadTransfers = async (): Promise<void> => {
+      try {
+        const [uploadsRes, downloadsRes] = await Promise.all([api.listUploads(), api.listDownloads(50)]);
+        if (cancelled) return;
+        if (uploadsRes.status === 200) {
+          const jobs = (uploadsRes.data as { jobs?: Array<{ jobId: string; originalName: string | null; state: string; bytesCompleted: number; sizeBytes: number }> }).jobs ?? [];
+          setDockUploads(jobs
+            .filter((j) => j.state === 'queued' || j.state === 'running' || j.state === 'paused')
+            .map((j) => ({ jobId: j.jobId, fileName: j.originalName, state: j.state, bytesCompleted: j.bytesCompleted, sizeBytes: j.sizeBytes })));
+        }
+        if (downloadsRes.status === 200) {
+          const jobs = (downloadsRes.data as { jobs?: Array<{ jobId: string; fileId: string | null; state: string; requestedBytes: number | null; bytesCompleted: number }> }).jobs ?? [];
+          setDockDownloads(jobs
+            .filter((j) => j.state === 'queued' || j.state === 'running' || j.state === 'paused')
+            .map((j) => ({ jobId: j.jobId, fileId: j.fileId, state: j.state, requestedBytes: j.requestedBytes, bytesCompleted: j.bytesCompleted })));
+        }
+      } catch {
+        // a missed poll keeps the last snapshot; the next one retries
+      }
+    };
+    void loadTransfers();
+    const timer = window.setInterval(() => void loadTransfers(), 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
     };
   }, [authState]);
 
@@ -426,17 +491,34 @@ export default function App() {
           <div className="shell-lang-wrap">
             <LanguageMenu variant="shell" />
           </div>
+          {/* Roadmap Phase 4 (§4.2): a small live-transfer indicator next to
+              the bell, fed by the same durable rows as the dock. */}
+          {(dockUploads.length > 0 || dockDownloads.length > 0) && (
+            <button
+              type="button"
+              className="transfer-indicator"
+              aria-label={tf(t.shell.transfers.activeAria, { count: dockUploads.length + dockDownloads.length })}
+              title={tf(t.shell.transfers.activeAria, { count: dockUploads.length + dockDownloads.length })}
+              onClick={() => setActive('Uploads')}
+            >
+              <CloudUpload size={15} aria-hidden="true" />
+              <span className="transfer-count">{dockUploads.length + dockDownloads.length}</span>
+            </button>
+          )}
           <div className="bell-menu">
             <button
               type="button"
               className="bell-btn"
               aria-haspopup="dialog"
               aria-expanded={bellOpen}
-              aria-label={t.shell.bell.label}
+              aria-label={unreadCount > 0 ? tf(t.shell.bell.unreadAria, { count: unreadCount }) : t.shell.bell.label}
               title={t.shell.bell.label}
               onClick={() => setBellOpen((open) => !open)}
             >
               <Bell size={17} aria-hidden="true" />
+              {unreadCount > 0 && (
+                <span className="bell-badge" aria-hidden="true">{unreadCount > 9 ? '9+' : unreadCount}</span>
+              )}
             </button>
             {bellOpen && (
               <>
@@ -448,11 +530,57 @@ export default function App() {
                   onClick={() => setBellOpen(false)}
                 />
                 <div className="account-dropdown bell-dropdown" role="dialog" aria-label={t.shell.bell.label}>
-                  <EmptyState
-                    icon={Bell}
-                    title={t.shell.bell.emptyTitle}
-                    body={t.shell.bell.emptyBody}
-                  />
+                  {feed.length === 0 ? (
+                    <EmptyState
+                      icon={Bell}
+                      title={t.shell.bell.emptyTitle}
+                      body={t.shell.bell.emptyBody}
+                    />
+                  ) : (
+                    <>
+                      <div className="bell-head">
+                        <span className="muted small">{t.shell.bell.title}</span>
+                        {unreadCount > 0 && (
+                          <button
+                            type="button"
+                            className="btn-inline"
+                            onClick={() => {
+                              void api.markAllNotificationsRead().then(() => {
+                                setUnreadCount(0);
+                                setFeed((prev) => prev.map((item) => ({ ...item, readAt: item.readAt ?? new Date().toISOString() })));
+                              }).catch(() => undefined);
+                            }}
+                          >
+                            {t.shell.bell.markAllRead}
+                          </button>
+                        )}
+                      </div>
+                      <ul className="bell-feed">
+                        {feed.map((item) => (
+                          <li key={item.id} className={`bell-item${item.readAt === null ? ' unread' : ''}`}>
+                            <span className="bell-item-icon" aria-hidden="true">
+                              {item.kind === 'upload_completed' && <CheckCircle2 size={15} />}
+                              {item.kind === 'share_used' && <Link size={15} />}
+                              {item.kind === 'quota_stale' && <AlertTriangle size={15} />}
+                            </span>
+                            <span className="bell-item-text">
+                              {item.kind === 'upload_completed' && tf(t.shell.bell.itemUpload, {
+                                name: String(item.payload['fileName'] ?? t.fileTypes.file),
+                              })}
+                              {item.kind === 'share_used' && tf(t.shell.bell.itemShare, {
+                                name: String(item.payload['fileName'] ?? t.fileTypes.file),
+                                downloads: Number(item.payload['downloads'] ?? 0),
+                              })}
+                              {item.kind === 'quota_stale' && tf(t.shell.bell.itemQuota, {
+                                account: String(item.payload['accountLabel'] ?? ''),
+                              })}
+                              <span className="muted small">{formatDateTime(item.createdAt)}</span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                 </div>
               </>
             )}
@@ -588,6 +716,13 @@ export default function App() {
       </Dialog>
     )}
     <ConfirmHost />
+    {/* Roadmap Phase 4 (§4.2): the transfer dock follows every page. */}
+    <TransferDock
+      uploads={dockUploads}
+      downloads={dockDownloads}
+      onOpenUploads={() => setActive('Uploads')}
+      onOpenDownloads={() => setActive('Downloads')}
+    />
     </FileActionsProvider>
     </ToastProvider>
   );

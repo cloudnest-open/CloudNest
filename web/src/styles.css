@@ -2377,3 +2377,274 @@ input:disabled, select:disabled, textarea:disabled {
   font-size: 12px;
   user-select: all;
 }
+
+/* ---- Roadmap Phase 4: files tabs, breadcrumb, folders, trash ---- */
+.files-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--cn-border);
+}
+
+.files-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--cn-text-muted);
+  font: inherit;
+  font-weight: 500;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.files-tab:hover { color: var(--cn-text); }
+
+.files-tab.active {
+  color: var(--cn-primary);
+  border-bottom-color: var(--cn-primary);
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 0 10px;
+  font-size: 14px;
+}
+
+.crumb-segment { display: inline-flex; align-items: center; }
+
+.crumb {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--cn-text-muted);
+  font: inherit;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  max-width: 220px;
+}
+
+.crumb:hover { background: var(--cn-row-hover); color: var(--cn-text); }
+
+.crumb.active {
+  color: var(--cn-text);
+  font-weight: 600;
+}
+
+.folder-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.folder-row:hover { background: var(--cn-row-hover); }
+
+.folder-open {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--cn-text);
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.folder-open:hover { background: var(--cn-surface-muted); }
+
+.folder-option {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cn-text);
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.folder-option:hover { background: var(--cn-row-hover); }
+
+.folder-option.active {
+  background: var(--cn-primary-soft);
+  border-color: var(--cn-primary);
+}
+
+.upload-toggle-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.upload-toggle-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.upload-folder-btn { margin-top: 8px; align-self: flex-start; }
+
+.queue-path { word-break: break-all; }
+.queue-message { word-break: break-all; }
+
+/* ---- Roadmap Phase 4: transfer dock + topbar indicator ---- */
+.transfer-indicator {
+  position: relative;
+  appearance: none;
+  border: 1px solid var(--cn-border);
+  background: var(--cn-surface);
+  color: var(--cn-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.transfer-indicator:hover { background: var(--cn-primary-soft); }
+
+.transfer-count { font-size: 12px; }
+
+.transfer-dock {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: min(340px, calc(100vw - 32px));
+  background: var(--cn-surface);
+  border: 1px solid var(--cn-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(23, 43, 77, 0.14);
+  padding: 10px 12px;
+  z-index: 60;
+}
+
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--cn-text);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--cn-border);
+}
+
+.dock-rows {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.dock-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dock-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dock-row-name { font-size: 12px; color: var(--cn-text); }
+
+.dock-progress { height: 6px; }
+
+.dock-links {
+  display: flex;
+  gap: 10px;
+  border-top: 1px solid var(--cn-border);
+  padding-top: 6px;
+}
+
+/* ---- Roadmap Phase 4: bell feed ---- */
+.bell-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #EF4444;
+  color: #FFFFFF;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.bell-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid var(--cn-border);
+}
+
+.bell-feed {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.bell-item {
+  display: flex;
+  gap: 9px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--cn-border);
+  font-size: 13px;
+  color: var(--cn-text);
+}
+
+.bell-item:last-child { border-bottom: none; }
+
+.bell-item.unread { background: var(--cn-primary-soft); }
+
+.bell-item-icon { color: var(--cn-primary); display: inline-flex; margin-top: 1px; }
+
+.bell-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}

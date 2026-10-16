@@ -28,6 +28,11 @@ import { gatedPublicSharesRouter } from './routes/public-shares.js';
 import { publicSharesRouter } from './routes/shares.js';
 import { ShareService } from './shares/share-service.js';
 import { DeletionService } from './deletions/deletion-service.js';
+import { FolderService } from './files/folder-service.js';
+import { TrashService } from './files/trash-service.js';
+import { NotificationService } from './notifications/notification-service.js';
+import type { NotificationKind } from './notifications/notification-service.js';
+import { filesRouter } from './routes/files.js';
 import { contentDisposition } from './downloads/range.js';
 import { settingsRouter } from './routes/settings.js';
 import { maintenanceRouter } from './routes/maintenance.js';
@@ -194,7 +199,14 @@ export function createApp(options: {
   // 3b. RAW CHUNK UPLOAD — mounted here (after sessions/CSRF, before any body
   //     parser) so nothing buffers a chunk body. The plan forbids express.raw
   //     and multer memory storage for this route.
-  const uploads = new UploadService(options.db, credentialsStore);
+  // Roadmap Phase 4: the notification feed exists before the services that
+  // emit into it; null user means "every active admin" (account events).
+  const notifications = new NotificationService(options.db);
+  app.set('notifications', notifications);
+  const uploads = new UploadService(options.db, credentialsStore, (kind: NotificationKind, userId: string | null, payload: Record<string, unknown>) => {
+    if (userId === null) notifications.pushToAdmins(kind, payload);
+    else notifications.push(userId, kind, payload);
+  });
   app.use(rawChunkRouter({ queries, csrf, uploads, store: credentialsStore, settings }));
   app.set('uploads', uploads);
 
@@ -208,7 +220,10 @@ export function createApp(options: {
 
   // 2b. JSON upload routes (plan/status/control) — these need a parsed body, so
   //     they are mounted after the JSON parser and never see raw chunk bytes.
-  app.use(uploadsRouter({ queries, csrf, uploads, settings }));
+  // Roadmap Phase 4: the folder tree is read by the files filter and mutated
+  // by the dedicated files router — one shared service instance.
+  const folders = new FolderService(options.db);
+  app.use(uploadsRouter({ queries, csrf, uploads, settings, folders }));
 
   // 4. public setup/auth routes (unsafe methods are CSRF-protected inside)
   //    `/api/health` is one of the explicitly allow-listed public routes: the
@@ -240,9 +255,16 @@ export function createApp(options: {
   //     never inherit the admin gate; they authorize by token + one-time session.
   //     SH-1: the gate-aware router is mounted first so unlock issues grants and
   //     download-session issuance on gated links requires a live grant.
-  const shares = new ShareService(options.db);
+  const shares = new ShareService(options.db, (kind: NotificationKind, userId: string | null, payload: Record<string, unknown>) => {
+    if (userId === null) notifications.pushToAdmins(kind, payload);
+    else notifications.push(userId, kind, payload);
+  });
   const deletions = new DeletionService(options.db, credentialsStore, shares);
-  app.use(sharesRouter({ queries, csrf, shares, deletions, appBaseUrl: options.appBaseUrl, db: options.db }));
+  // Roadmap Phase 4: DELETE moves to trash; only a purge hands the file to the
+  // durable deletion engine (per file, empty-trash, or the expired sweep).
+  const trash = new TrashService(options.db, (fileId) => deletions.enqueue(fileId), (fileId) => shares.revokeLinksForFile(fileId));
+  app.set('trash', trash);
+  app.use(sharesRouter({ queries, csrf, shares, deletions, trash, appBaseUrl: options.appBaseUrl, db: options.db }));
   app.use(gatedPublicSharesRouter({ db: options.db, shares, csrf, tunnelRunning: tunnelActive }));
   app.use(
     publicSharesRouter({
@@ -268,6 +290,10 @@ export function createApp(options: {
   );
   app.set('shares', shares);
   app.set('deletions', deletions);
+
+  // Roadmap Phase 4: folders, trash and the bell's feed (principal-scoped;
+  // mutations CSRF-protected inside the router).
+  app.use(filesRouter({ queries, csrf, folders, trash, notifications, uploads }));
 
   // 4e. backup/restore, diagnostics and the optional tunnel (settings and the
   //     tunnel service itself are created above so the upload path and the

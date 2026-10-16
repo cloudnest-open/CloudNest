@@ -62,6 +62,10 @@ export interface FileRow {
   manifest_hash: string | null;
   state: string;
   tier: 'personal' | 'business';
+  /** Roadmap Phase 4: the folder this file lives in (NULL = the owner's root). */
+  parent_id: string | null;
+  /** Roadmap Phase 4: set when the file moved to trash; NULL = not trashed. */
+  trashed_at: string | null;
   created_at: string;
   completed_at: string | null;
 }
@@ -94,32 +98,52 @@ export function makeUploadQueries(db: Database.Database) {
     // ---- files ----
     insertFile: db.prepare(
       `INSERT INTO files (id, user_id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, whole_sha256,
-        manifest_hash, state, tier, created_at, completed_at)
-       VALUES (@id, @user_id, @original_name, @size_bytes, @mime_type, @chunk_size_bytes, @chunk_count, NULL, NULL, @state, @tier, @created_at, NULL)`,
+        manifest_hash, state, tier, parent_id, created_at, completed_at)
+       VALUES (@id, @user_id, @original_name, @size_bytes, @mime_type, @chunk_size_bytes, @chunk_count, NULL, NULL, @state, @tier, @parent_id, @created_at, NULL)`,
     ),
     getFile: db.prepare('SELECT * FROM files WHERE id = ?'),
-    listFiles: db.prepare('SELECT * FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?'),
+    // Phase 4: the main lists and the dashboard counts never show trashed
+    // files — those live behind /api/trash until they are restored or purged.
+    listFiles: db.prepare("SELECT * FROM files WHERE trashed_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?"),
     // FE-02: the search filter runs in SQL BEFORE pagination, so a query sees
     // the whole library instead of only the newest page of rows.
     searchFiles: db.prepare(
-      "SELECT * FROM files WHERE lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+      "SELECT * FROM files WHERE trashed_at IS NULL AND lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
     ),
     countSearchedFiles: db.prepare(
-      "SELECT COUNT(*) AS n FROM files WHERE lower(original_name) LIKE '%' || ? || '%'",
+      "SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL AND lower(original_name) LIKE '%' || ? || '%'",
     ),
-    countFiles: db.prepare('SELECT COUNT(*) AS n FROM files'),
+    countFiles: db.prepare("SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL"),
     // Phase 3: member-scoped variants of the same listing queries — ownership
     // filtering happens in SQL, never in the client.
     listFilesForUser: db.prepare(
-      'SELECT * FROM files WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      'SELECT * FROM files WHERE user_id = ? AND trashed_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?',
     ),
     searchFilesForUser: db.prepare(
-      "SELECT * FROM files WHERE user_id = ? AND lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+      "SELECT * FROM files WHERE user_id = ? AND trashed_at IS NULL AND lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
     ),
     countSearchedFilesForUser: db.prepare(
-      "SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND lower(original_name) LIKE '%' || ? || '%'",
+      "SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND trashed_at IS NULL AND lower(original_name) LIKE '%' || ? || '%'",
     ),
-    countFilesForUser: db.prepare('SELECT COUNT(*) AS n FROM files WHERE user_id = ?'),
+    countFilesForUser: db.prepare("SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND trashed_at IS NULL"),
+    // Phase 4: folder-scoped listings (root = parent_id IS NULL); the same
+    // ownership and trash rules as the flat lists apply.
+    listFilesInRoot: db.prepare(
+      `SELECT * FROM files WHERE trashed_at IS NULL AND parent_id IS NULL
+         AND (? IS NULL OR user_id = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    ),
+    listFilesInFolder: db.prepare(
+      `SELECT * FROM files WHERE trashed_at IS NULL AND parent_id = ?
+         AND (? IS NULL OR user_id = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    ),
+    countFilesInRoot: db.prepare(
+      `SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL AND parent_id IS NULL
+         AND (? IS NULL OR user_id = ?)`,
+    ),
+    countFilesInFolder: db.prepare(
+      `SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL AND parent_id = ?
+         AND (? IS NULL OR user_id = ?)`,
+    ),
     /** Ownership check for a transfer job: the file's owner, via one join. */
     getJobOwnerUserId: db.prepare(
       'SELECT f.user_id AS user_id FROM transfer_jobs j JOIN files f ON f.id = j.file_id WHERE j.id = ?',

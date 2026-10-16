@@ -870,6 +870,57 @@ const M0013_MULTI_USER: Migration = {
   },
 };
 
+const M0014_FOLDERS_TRASH_NOTIFICATIONS: Migration = {
+  version: 14,
+  name: '0014-folders-trash-notifications',
+  // Roadmap Phase 4 (Full-feel UX):
+  // - folders: the folder tree. Every principal owns a separate tree; files
+  //   attach to folders through files.parent_id (NULL = that owner's root).
+  //   parent_id is self-referencing on folders and nullable on files, so both
+  //   are plain ADD COLUMN / CREATE TABLE statements — no table rebuild, no
+  //   foreign_keysOff exception, and foreign_key_check still runs after.
+  // - files.trashed_at: the restore window. A trashed file keeps its state,
+  //   chunks and placements untouched; only the real purge (which goes through
+  //   the durable deletion engine) removes anything remote. NULL = not trashed.
+  // - notifications: the per-principal feed behind the bell (upload finished,
+  //   share used, quota warning). payload is a JSON string; kind is closed.
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE folders (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        parent_id TEXT REFERENCES folders(id),
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX idx_folders_unique_name ON folders(user_id, COALESCE(parent_id, ''), name);
+      CREATE INDEX idx_folders_user_parent ON folders(user_id, parent_id);
+
+      ALTER TABLE files ADD COLUMN parent_id TEXT REFERENCES folders(id);
+      CREATE INDEX idx_files_parent ON files(parent_id) WHERE parent_id IS NOT NULL;
+
+      ALTER TABLE files ADD COLUMN trashed_at TEXT;
+      CREATE INDEX idx_files_trashed ON files(trashed_at) WHERE trashed_at IS NOT NULL;
+
+      CREATE TABLE notifications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK(kind IN ('upload_completed','share_used','quota_stale')),
+        payload TEXT NOT NULL,
+        read_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_notifications_user ON notifications(user_id, created_at);
+      CREATE INDEX idx_notifications_unread ON notifications(user_id, read_at) WHERE read_at IS NULL;
+    `);
+    const violations = db.pragma('foreign_key_check', { simple: true });
+    if (violations) {
+      throw new Error('foreign_key_check failed after the folders/trash/notifications migration');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -884,4 +935,5 @@ export const allMigrations: readonly Migration[] = [
   M0011_QUOTA_SCOPE_AND_RECONCILE,
   M0012_S3_BUSINESS_TIER,
   M0013_MULTI_USER,
+  M0014_FOLDERS_TRASH_NOTIFICATIONS,
 ];

@@ -46,7 +46,10 @@ export interface ShareLinkRow {
 }
 
 export class ShareService {
-  constructor(private readonly db: Database.Database) {}
+  constructor(
+    private readonly db: Database.Database,
+    private readonly notify?: (kind: 'upload_completed' | 'share_used' | 'quota_stale', userId: string | null, payload: Record<string, unknown>) => void,
+  ) {}
 
   /** Create a link for one or more complete files; returns the raw URL once.
    * Phase 3: `createdBy` records the owning principal (routes always pass the
@@ -213,8 +216,8 @@ export class ShareService {
       'SELECT 1 AS present FROM share_link_items WHERE share_link_id = ? AND file_id = ?',
     ).get(link.id, fileId) as { present: number } | undefined;
     if (!membership) throw new ShareError('file_not_found', 404);
-    const file = this.db.prepare('SELECT id, state FROM files WHERE id = ?').get(fileId) as
-      | { id: string; state: string }
+    const file = this.db.prepare('SELECT id, state, original_name FROM files WHERE id = ?').get(fileId) as
+      | { id: string; state: string; original_name: string }
       | undefined;
     if (!file || file.state !== 'completed') throw new ShareError('file_not_complete', 409);
 
@@ -229,6 +232,16 @@ export class ShareService {
         ).run(now, link.id);
     if (info.changes === 0) {
       throw new ShareError('share_download_limit_reached', 429);
+    }
+
+    // Roadmap Phase 4: a used share is a real event for its creator. Only the
+    // successful counter bump reports — refused attempts are not feed noise.
+    if (link.created_by && this.notify) {
+      this.notify('share_used', link.created_by, {
+        fileName: file.original_name,
+        linkId: link.id,
+        downloads: link.download_count + 1,
+      });
     }
 
     const rawSession = crypto.randomBytes(32).toString('base64url');

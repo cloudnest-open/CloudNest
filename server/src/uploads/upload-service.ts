@@ -113,6 +113,12 @@ export interface PlanRequest {
    * exact V1 behaviour, so a caller that does not pass it is unaffected.
    */
   routingStrategy?: RoutingStrategy;
+  /**
+   * Roadmap Phase 4: the folder the upload lands in (null = the owner's root).
+   * The folder must belong to the SAME principal (tree purity); part of the
+   * idempotency fingerprint like every other placement decision.
+   */
+  parentId?: string | null;
 }
 
 /** Why a plan was refused: the user's own allowance, plainly stated. */
@@ -172,6 +178,7 @@ export class UploadService {
   constructor(
     private readonly db: Database.Database,
     private readonly store: CredentialsStore,
+    private readonly notify?: (kind: 'upload_completed' | 'share_used' | 'quota_stale', userId: string | null, payload: Record<string, unknown>) => void,
   ) {
     this.q = makeUploadQueries(db);
     this.providerQ = makeProviderQueries(db);
@@ -192,6 +199,13 @@ export class UploadService {
         // the owner is part of the contract too (roadmap Phase 3): two
         // accounts must never share one idempotency key's reservation
         u: req.userId ?? ADMIN_USER_ID,
+        // and the routing strategy is part of it (roadmap Phase 4): the
+        // auto-spread toggle changes WHERE chunks are planned, so the same
+        // key cannot silently switch placement behaviour
+        r: req.routingStrategy ?? 'capacity-aware',
+        // the target folder is part of the contract too (Phase 4): a retried
+        // plan must never quietly relocate the file to another folder
+        p: req.parentId ?? null,
       }))
       .digest('hex');
   }
@@ -351,6 +365,16 @@ export class UploadService {
     const now = new Date().toISOString();
     const fileId = this.q.newId();
     const jobId = this.q.newId();
+    // Roadmap Phase 4: the target folder must belong to the SAME principal —
+    // an upload may only land in the caller's own tree.
+    let parentId: string | null = null;
+    if (req.parentId != null && req.parentId !== '') {
+      const folder = this.db.prepare('SELECT user_id FROM folders WHERE id = ?')
+        .get(req.parentId) as { user_id: string } | undefined;
+      if (!folder) throw new UploadError('folder_not_found', 404);
+      if (folder.user_id !== ownerUserId) throw new UploadError('folder_not_found', 404);
+      parentId = req.parentId;
+    }
     const txn = this.db.transaction(() => {
       const allowanceRow = this.db.prepare('SELECT allowance_bytes FROM users WHERE id = ?')
         .get(ownerUserId) as { allowance_bytes: number | null } | undefined;
@@ -382,6 +406,7 @@ export class UploadService {
         state: 'uploading',
         tier: req.tier ?? 'personal',
         created_at: now,
+        parent_id: parentId,
       });
       this.q.insertJob.run({
         id: jobId,
@@ -429,10 +454,21 @@ export class UploadService {
     const now = new Date().toISOString();
     const fileId = this.q.newId();
     const jobId = this.q.newId();
+    // the empty-file path honours the same folder contract as the chunked one
+    let parentId: string | null = null;
+    if (req.parentId != null && req.parentId !== '') {
+      const folder = this.db.prepare('SELECT user_id FROM folders WHERE id = ?')
+        .get(req.parentId) as { user_id: string } | undefined;
+      if (!folder || folder.user_id !== (req.userId ?? ADMIN_USER_ID)) {
+        throw new UploadError('folder_not_found', 404);
+      }
+      parentId = req.parentId;
+    }
     const txn = this.db.transaction(() => {
       this.q.insertFile.run({
         id: fileId, user_id: req.userId ?? ADMIN_USER_ID, original_name: name, size_bytes: 0, mime_type: req.mimeType ?? null,
         chunk_size_bytes: chunkSizeBytes, chunk_count: 0, state: 'completed', tier: req.tier ?? 'personal', created_at: now,
+        parent_id: parentId,
       });
       this.q.insertJob.run({
         id: jobId, file_id: fileId, state: 'completed', chunks_total: 0,
@@ -503,6 +539,21 @@ export class UploadService {
   countFiles(userId: string | null = null): number {
     if (userId === null) return (this.q.countFiles.get() as { n: number }).n;
     return (this.q.countFilesForUser.get(userId) as { n: number }).n;
+  }
+
+  /**
+   * Roadmap Phase 4: folder-scoped listing (root = parent_id IS NULL). The
+   * same ownership scope as the flat lists: a member sees only their own
+   * folder's files, the admin sees the whole tree.
+   */
+  listFilesInFolder(folderId: string | null, limit: number, offset: number, userId: string | null = null): FileRow[] {
+    if (folderId === null) return this.q.listFilesInRoot.all(userId, userId, limit, offset) as unknown as FileRow[];
+    return this.q.listFilesInFolder.all(folderId, userId, userId, limit, offset) as unknown as FileRow[];
+  }
+
+  countFilesInFolder(folderId: string | null, userId: string | null = null): number {
+    if (folderId === null) return (this.q.countFilesInRoot.get(userId, userId) as { n: number }).n;
+    return (this.q.countFilesInFolder.get(folderId, userId, userId) as { n: number }).n;
   }
 
   listAllocations(jobId: string): AllocationRow[] {
@@ -680,6 +731,9 @@ export class UploadService {
       const mh = manifestHash(chunks);
       this.q.completeFile.run({ id: file.id, manifest_hash: mh, completed_at: now });
       this.q.updateJobState.run({ id: input.jobId, state: 'completed', last_safe_error_code: null, updated_at: now });
+      // Roadmap Phase 4: the bell's feed is real — the owner learns their
+      // upload finished at the moment the durable state says so.
+      this.notify?.('upload_completed', file.user_id, { fileName: file.original_name, fileId: file.id });
     }
     return { chunksCompleted, bytesCompleted, fileCompleted };
   }
@@ -762,6 +816,18 @@ export class UploadService {
       `UPDATE provider_accounts SET quota_status = 'stale', last_quota_error_code = ?,
         last_quota_error_at = ?, updated_at = ? WHERE id = ?`,
     ).run(safeCode, now, now, accountId);
+    // Roadmap Phase 4: quota events belong in the feed, not only in the table.
+    // Every active admin is notified — accounts are admin knowledge (Phase 3).
+    const account = this.providerQ.getAccount.get(accountId) as
+      | { display_label: string; account_identifier: string | null } | undefined;
+    if (account && this.notify) {
+      // null user = every active admin (the wiring decides how that maps)
+      this.notify('quota_stale', null, {
+        accountLabel: account.display_label,
+        accountIdentifier: account.account_identifier,
+        reasonCode: safeCode,
+      });
+    }
   }
 
   /** Create the attempt row before any bytes are sent (crash recovery anchor). */

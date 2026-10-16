@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Info, Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
+import { FolderInput, Info, Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
 import { useFileActions } from './FileActionsProvider.js';
 import { Badge, TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS, fileTypeName, fileTypeDisplay } from './ui.js';
 import { ProviderLogo } from './ProviderLogo.js';
@@ -86,6 +86,14 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
             >
               <Trash2 size={14} aria-hidden="true" />
               {t.table.deleteSelected}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary btn-compact"
+              onClick={() => actions.move(selectedFiles, reload)}
+            >
+              <FolderInput size={14} aria-hidden="true" />
+              {t.table.moveSelected}
             </button>
             <button type="button" className="btn-secondary btn-compact" onClick={() => setSelected([])}>
               <X size={14} aria-hidden="true" />
@@ -187,6 +195,10 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                       <button type="button" className="btn-inline" onClick={() => actions.rename(file, reload)}>
                         <Pencil size={14} aria-hidden="true" />
                         {t.table.rename}
+                      </button>
+                      <button type="button" className="btn-inline" onClick={() => actions.move([file], reload)}>
+                        <FolderInput size={14} aria-hidden="true" />
+                        {t.table.move}
                       </button>
                       <button
                         type="button"

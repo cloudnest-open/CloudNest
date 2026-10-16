@@ -207,14 +207,28 @@ test('an expired link cannot issue a download session', async () => {
   }
 });
 
-test('deletion is admin+CSRF protected, queues a durable job and reports real status', async () => {
+test('deletion is admin+CSRF protected, trashes first, purges through the durable engine', async () => {
   const { app, client } = await authed();
   try {
     seedFile(app.dbPath, 'f8', 'a.txt');
     const noCsrf = await fetch(`${app.url}/api/files/f8`, { method: 'DELETE', headers: { cookie: client.jar.header() } });
     assert.equal(noCsrf.status, 403);
 
-    const queued = await client.send('DELETE', '/api/files/f8');
+    // Phase 4: DELETE moves to trash — 200, not 202; nothing is queued yet.
+    const trashed = await client.send('DELETE', '/api/files/f8');
+    assert.equal(trashed.status, 200);
+    const trashedBody = trashed.body as { trashedAt: string; purgeAfter: string };
+    assert.ok(trashedBody.trashedAt);
+    assert.ok(trashedBody.purgeAfter);
+
+    // the file leaves the normal listing but is recoverable in the trash
+    const list = await client.get('/api/files');
+    assert.equal((list.body as { files: Array<{ id: string }> }).files.some((f) => f.id === 'f8'), false);
+    const trash = await client.get('/api/trash');
+    assert.equal((trash.body as { files: Array<{ id: string }> }).files.some((f) => f.id === 'f8'), true);
+
+    // purge hands the file to the durable deletion engine
+    const queued = await client.post('/api/files/f8/purge');
     assert.equal(queued.status, 202);
     const jobId = (queued.body as { jobId: string }).jobId;
     assert.ok(jobId);
@@ -237,8 +251,10 @@ test('deleting a file revokes its links over HTTP', async () => {
     seedFile(app.dbPath, 'f9', 'a.txt');
     const created = await client.post('/api/share-links', { fileIds: ['f9'] });
     const token = (created.body as { url: string }).url.split('/s/')[1]!;
-    const queued = await client.send('DELETE', '/api/files/f9');
-    assert.equal(queued.status, 202);
+    // Phase 4: the trash is where links die — a trashed file must not stay
+    // reachable through its share link while it waits in the restore window.
+    const trashed = await client.send('DELETE', '/api/files/f9');
+    assert.equal(trashed.status, 200);
     const landing = await fetch(`${app.url}/api/public/shares/${token}`);
     assert.equal(landing.status, 410, 'the link dies with the file');
   } finally {

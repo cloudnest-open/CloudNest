@@ -153,9 +153,9 @@ export const api = {
 
   // ---- uploads (Step 4 / M9) ----
   dashboardSummary: () => request('GET', '/api/dashboard/summary'),
-  listFiles: (limit = 50, offset = 0, search = '') =>
-    request('GET', `/api/files?limit=${limit}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ''}`),
-  planUpload: (body: { originalName: string; sizeBytes: number; chunkSizeMiB: number; mimeType: string | null; tier?: 'personal' | 'business' }, idempotencyKey: string) =>
+  listFiles: (limit = 50, offset = 0, search = '', folderId?: 'root' | string) =>
+    request('GET', `/api/files?limit=${limit}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ''}${folderId !== undefined ? `&folderId=${encodeURIComponent(folderId)}` : ''}`),
+  planUpload: (body: { originalName: string; sizeBytes: number; chunkSizeMiB: number; mimeType: string | null; tier?: 'personal' | 'business'; routingStrategy?: 'balanced' | 'capacity-aware'; parentId?: string | null }, idempotencyKey: string) =>
     request('POST', '/api/uploads/plan', body, { 'idempotency-key': idempotencyKey }),
   listUploads: () => request('GET', '/api/uploads'),
   getUploadJob: (jobId: string) => request('GET', `/api/uploads/${jobId}`),
@@ -202,6 +202,20 @@ export const api = {
   deleteFile: (fileId: string) => request('DELETE', `/api/files/${fileId}`),
   deletionStatus: (jobId: string) => request('GET', `/api/deletions/${jobId}`),
   retryDeletion: (jobId: string) => request('POST', `/api/deletions/${jobId}/retry`),
+
+  // ---- folders, trash and the notification feed (roadmap Phase 4) ----
+  folderChildren: (folderId: 'root' | string) => request('GET', `/api/folders/${folderId === 'root' ? 'root' : folderId}/children`),
+  createFolder: (name: string, parentId: string | null) => request('POST', '/api/folders', { name, parentId }),
+  renameFolder: (id: string, name: string) => request('PATCH', `/api/folders/${id}`, { name }),
+  deleteFolder: (id: string) => request('DELETE', `/api/folders/${id}`),
+  moveFiles: (fileIds: string[], folderId: string | null) => request('POST', `/api/files/${fileIds[0] ?? ''}/move`, { fileIds, folderId }),
+  listTrash: (limit = 50, offset = 0) => request('GET', `/api/trash?limit=${limit}&offset=${offset}`),
+  emptyTrash: () => request('POST', '/api/trash/empty', {}),
+  restoreFile: (fileId: string) => request('POST', `/api/files/${fileId}/restore`, {}),
+  purgeFile: (fileId: string) => request('POST', `/api/files/${fileId}/purge`, {}),
+  listNotifications: (limit = 30, offset = 0) => request('GET', `/api/notifications?limit=${limit}&offset=${offset}`),
+  markNotificationRead: (id: string) => request('POST', `/api/notifications/${id}/read`, {}),
+  markAllNotificationsRead: () => request('POST', '/api/notifications/read-all', {}),
 
   // ---- settings, maintenance, tunnel (Step 6 / M12) ----
   getSettings: () => request('GET', '/api/settings'),

@@ -146,10 +146,13 @@ test('D-main: a file spans two same-provider accounts end to end — plan, uploa
       assert.ok(Buffer.concat(chunks).equals(dl.bytes), 'reconstructed bytes are identical');
       assert.deepEqual(fake.log.downloads.map((d) => d.accountKey).sort(), ['tok-A', 'tok-A', 'tok-B'], 'each chunk was fetched with its own account credentials');
 
-      // D.7: deleting the logical file cleans up objects across BOTH accounts
+      // D.7: deleting the logical file cleans up objects across BOTH accounts.
+      // Phase 4: DELETE trashes; the purge is what starts the real cleanup.
       const del = await client.send('DELETE', `/api/files/${planBody.fileId}`);
-      assert.equal(del.status, 202);
-      const delJobId = (del.body as { jobId: string }).jobId;
+      assert.equal(del.status, 200);
+      const purge = await client.post(`/api/files/${planBody.fileId}/purge`);
+      assert.equal(purge.status, 202);
+      const delJobId = (purge.body as { jobId: string }).jobId;
       const retry = await client.post(`/api/deletions/${delJobId}/retry`);
       assert.equal(retry.status, 200);
       const result = (retry.body as { result?: { state?: string; deleted?: number; failed?: number } }).result;

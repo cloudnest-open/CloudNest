@@ -10,6 +10,7 @@ import type { CredentialsStore } from '../providers/credentials-store.js';
 import type { Queries } from '../db/queries.js';
 import type { CsrfBundle } from '../auth/csrf.js';
 import { requireAdmin, requirePrincipal, type Principal } from '../middleware/require-admin.js';
+import type { FolderService } from '../files/folder-service.js';
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
 import { isS3Bundle, presignUploadUrl } from '../providers/s3-files.js';
@@ -279,6 +280,8 @@ export function uploadsRouter(deps: {
   csrf: CsrfBundle;
   uploads: UploadService;
   settings: SettingsService;
+  /** Roadmap Phase 4: folder-tree read scope for the folderId file filter. */
+  folders: FolderService;
 }): Router {
   const router = Router();
   const principalOnly = requirePrincipal(deps.queries);
@@ -312,6 +315,16 @@ export function uploadsRouter(deps: {
         res.status(400).json({ error: 'invalid_upload_metadata', code: 'invalid_upload_metadata' });
         return;
       }
+      // roadmap Phase 4 (auto-spread toggle): the client may pick the routing
+      // strategy per upload; absent a choice, the saved admin setting decides.
+      const strategyBody = body['routingStrategy'];
+      const routingStrategy = strategyBody === undefined
+        ? (deps.settings.get('upload.spaceAwareRouting') ? 'capacity-aware' : 'balanced')
+        : strategyBody;
+      if (routingStrategy !== 'capacity-aware' && routingStrategy !== 'balanced') {
+        res.status(400).json({ error: 'invalid_upload_metadata', code: 'invalid_upload_metadata' });
+        return;
+      }
       const plan: PlanRequest = {
         originalName: body['originalName'] as string,
         sizeBytes: Number(body['sizeBytes']),
@@ -321,7 +334,10 @@ export function uploadsRouter(deps: {
         // the file belongs to the authenticated principal (Phase 3)
         userId: req.principal!.id,
         tier,
-        routingStrategy: deps.settings.get('upload.spaceAwareRouting') ? 'capacity-aware' : 'balanced',
+        routingStrategy,
+        // Roadmap Phase 4: upload into a folder of the caller's own tree
+        // (the service validates ownership; null/absent = the owner's root)
+        parentId: typeof body['parentId'] === 'string' && body['parentId'] !== '' ? body['parentId'] : null,
       };
       const result = deps.uploads.plan(plan);
       res.status(result.reused ? 200 : 201).json({
@@ -348,7 +364,13 @@ export function uploadsRouter(deps: {
       .map((job) => deps.uploads.publicJob(job.id));
     // M12.a: the worker bound the UI must respect is served from settings, so
     // the client can never invent a higher limit than the admin configured.
-    res.json({ jobs, workerLimit: deps.settings.effectiveWorkerLimit() });
+    // Roadmap Phase 4: the auto-spread toggle's default rides along so the
+    // Uploads page starts from the saved admin setting, never a guess.
+    res.json({
+      jobs,
+      workerLimit: deps.settings.effectiveWorkerLimit(),
+      spaceAwareRouting: deps.settings.get('upload.spaceAwareRouting'),
+    });
   });
 
   router.get('/api/uploads/:jobId', principalOnly, (req, res) => {
@@ -598,13 +620,29 @@ export function uploadsRouter(deps: {
     const offset = Math.max(0, Number(req.query['offset'] ?? 0) || 0);
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 50) || 50));
     const search = typeof req.query['search'] === 'string' ? req.query['search'].toLowerCase() : '';
+    // Roadmap Phase 4: folder-scoped browsing. Absent a folderId the response
+    // stays the flat library (root files included); with 'root' or a folder id
+    // only that folder's children are returned. Search always stays global.
+    const folderParam = req.query['folderId'];
+    const folderId = typeof folderParam === 'string' && folderParam !== ''
+      ? (folderParam === 'root' ? null : folderParam)
+      : undefined;
+    if (folderId !== undefined && folderId !== null) {
+      // a foreign folder answers the same 404 as a missing one
+      deps.folders.scopedGet(folderId, owner);
+    }
     // FE-02: filtering happens in SQL before limit/offset, so a search sees
     // the entire (own) library; `total` reflects the same filter. The page is
     // resolved with one batched placement query (no per-file N+1).
-    const rows = deps.uploads.searchFiles(search, limit, offset, owner);
+    const rows = folderId === undefined
+      ? deps.uploads.searchFiles(search, limit, offset, owner)
+      : deps.uploads.listFilesInFolder(folderId, limit, offset, owner);
     const shaped = deps.uploads.publicFiles(rows.map((f) => f.id));
-    const files = rows.map((f) => shaped.get(f.id)!);
-    res.json({ files, total: deps.uploads.countSearchedFiles(search, owner) });
+    const files = rows.map((f) => ({ ...shaped.get(f.id)!, parentId: f.parent_id }));
+    const total = folderId === undefined
+      ? deps.uploads.countSearchedFiles(search, owner)
+      : deps.uploads.countFilesInFolder(folderId, owner);
+    res.json({ files, total });
   });
 
   for (const action of ['pause', 'resume', 'cancel', 'retry'] as const) {

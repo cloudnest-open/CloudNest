@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CloudUpload, Pause, Play, RotateCcw, X } from 'lucide-react';
+import { CloudUpload, FolderPlus, Pause, Play, RotateCcw, X } from 'lucide-react';
 import { api, presignedPut } from '../api.js';
 import { formatBytes, formatDateTime } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
@@ -46,6 +46,23 @@ const OBJECT_COUNT_WARN_THRESHOLD = 1000;
  */
 const MAX_CHUNK_ATTEMPTS = 5;
 const TRANSIENT_UPLOAD_CODES = new Set(['provider_rate_limited', 'account_busy', 'provider_unavailable', 'upload_failed']);
+
+/**
+ * Roadmap Phase 4 (§4.2): the multi-file / folder upload queue. Items wait in
+ * line and are planned + uploaded ONE at a time — the durable engine, the
+ * worker bounds and the honest plan preflight are unchanged; the queue only
+ * sequences them. Folder uploads recreate the dropped structure in the
+ * caller's own tree and send each file to its folder.
+ */
+interface QueueItem {
+  id: string;
+  file: File;
+  parentId: string | null;
+  /** The dropped folder path shown to the user (data, never translated). */
+  path: string | null;
+  status: 'waiting' | 'active' | 'done' | 'failed';
+  message?: string;
+}
 
 /** The server's §7.1 detail for a refused plan. */
 interface CapacityDetail {
@@ -115,6 +132,14 @@ export function UploadsPage() {
   // real file; the dropzone button and drop events both feed it.
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  // Roadmap Phase 4: the multi-file/folder queue and its sequential runner.
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const queueRunningRef = useRef(false);
+  const queueAbortRef = useRef(false);
+  const [queueRunning, setQueueRunning] = useState(false);
+  /** The auto-spread toggle; null until the server's saved default arrives. */
+  const [autoSpread, setAutoSpread] = useState<boolean | null>(null);
 
   /** The localized remedy for a server safe code; the raw code stays visible. */
   function describeError(data: unknown, fallback: string): { code: string; text: string } {
@@ -136,12 +161,14 @@ export function UploadsPage() {
       const [summary, list] = await Promise.all([api.dashboardSummary(), api.listUploads()]);
       if (summary.status === 200) setDashboard(summary.data as DashboardSummary);
       if (list.status === 200) {
-        const data = list.data as { jobs: JobView[]; workerLimit?: number };
+        const data = list.data as { jobs: JobView[]; workerLimit?: number; spaceAwareRouting?: boolean };
         setJobs(data.jobs ?? []);
         // the admin's configured bound wins over any client default
         if (typeof data.workerLimit === 'number' && data.workerLimit >= 1) {
           setWorkerLimit(Math.min(Math.floor(data.workerLimit), 8));
         }
+        // Roadmap Phase 4: the auto-spread toggle starts from the saved setting
+        if (typeof data.spaceAwareRouting === 'boolean') setAutoSpread(!data.spaceAwareRouting);
       }
       if (summary.status !== 200 && list.status !== 200) {
         setError(t.uploads.errorLoad);
@@ -160,9 +187,13 @@ export function UploadsPage() {
   const estimatedObjects = selected ? Math.ceil(selected.size / chunkSizeBytes) : 0;
   const shortFinalChunk = selected ? selected.size % chunkSizeBytes : 0;
 
-  /** Metadata-only plan; no file bytes are sent in this step. */
-  async function createPlan(): Promise<void> {
-    if (!selected) return;
+  /**
+   * Metadata-only plan; no file bytes are sent in this step. The queue runner
+   * passes an explicit target so a state update can never race the upload.
+   */
+  async function createPlan(target?: { file: File; parentId: string | null }): Promise<{ ok: boolean; jobId: string | null }> {
+    const file = target?.file ?? selected;
+    if (!file) return { ok: false, jobId: null };
     setBusy(true);
     setError(null);
     setErrorCode(null);
@@ -173,14 +204,18 @@ export function UploadsPage() {
     try {
       const res = await api.planUpload(
         {
-          originalName: selected.name,
-          sizeBytes: selected.size,
+          originalName: file.name,
+          sizeBytes: file.size,
           chunkSizeMiB: chunkMiB,
-          mimeType: selected.type || null,
+          mimeType: file.type || null,
           tier,
+          // Roadmap Phase 4: the auto-spread toggle picks the routing strategy
+          routingStrategy: autoSpread === false ? 'capacity-aware' : 'balanced',
+          ...(target?.parentId ? { parentId: target.parentId } : {}),
         },
         crypto.randomUUID(),
       );
+      void res;
       if (res.status === 201 || res.status === 200) {
         const data = res.data as { jobId: string; chunkCount: number; allocations: ChunkPlanEntry[] };
         setJobId(data.jobId);
@@ -190,25 +225,26 @@ export function UploadsPage() {
             ? t.uploads.emptyFile
             : plural(t.uploads.reserved, data.chunkCount),
         );
-      } else {
-        const described = describeError(res.data, t.uploads.planFailed);
-        // §7.1(7): the refusal explains itself — exact shortfall and, on pure
-        // placement fragmentation, a one-click feasible smaller chunk size.
-        if (described.code === 'capacity_insufficient') {
-          const detail = (res.data as CapacityDetail | null) ?? null;
-          if (detail && detail.shortfallBytes > 0) {
-            setError(`${described.text} ${tf(t.uploads.capacityShortfall, { bytes: formatBytes(detail.shortfallBytes) })}`);
-          } else {
-            setError(described.text);
-          }
-          if (detail?.suggestedChunkSizeMiB) {
-            setSuggestedChunkMiB(detail.suggestedChunkSizeMiB);
-          }
+        return { ok: true, jobId: data.jobId };
+      }
+      const described = describeError(res.data, t.uploads.planFailed);
+      // §7.1(7): the refusal explains itself — exact shortfall and, on pure
+      // placement fragmentation, a one-click feasible smaller chunk size.
+      if (described.code === 'capacity_insufficient') {
+        const detail = (res.data as CapacityDetail | null) ?? null;
+        if (detail && detail.shortfallBytes > 0) {
+          setError(`${described.text} ${tf(t.uploads.capacityShortfall, { bytes: formatBytes(detail.shortfallBytes) })}`);
         } else {
           setError(described.text);
         }
-        setErrorCode(described.code || null);
+        if (detail?.suggestedChunkSizeMiB) {
+          setSuggestedChunkMiB(detail.suggestedChunkSizeMiB);
+        }
+      } else {
+        setError(described.text);
       }
+      setErrorCode(described.code || null);
+      return { ok: false, jobId: null };
     } finally {
       setBusy(false);
     }
@@ -237,9 +273,12 @@ export function UploadsPage() {
   /**
    * Upload the remaining chunks with bounded concurrency.
    * `onlyIndices` restricts work to the chunks the server reported as missing.
+   * The queue runner passes the source file explicitly so a state update can
+   * never race the worker loop.
    */
-  async function runUpload(id: string, onlyIndices?: number[]): Promise<void> {
-    if (!selected) {
+  async function runUpload(id: string, onlyIndices?: number[], sourceFile?: File): Promise<void> {
+    const source = sourceFile ?? selected;
+    if (!source) {
       setError(t.uploads.selectOriginal);
       return;
     }
@@ -295,7 +334,7 @@ export function UploadsPage() {
       const indices = onlyIndices ?? Array.from({ length: job.chunksTotal }, (_, index) => index).filter((index) => !done.has(index));
       const fallbackGeometry = (index: number): { offsetBytes: number; sizeBytes: number } => {
         const offset = index * persistedChunkSizeBytes;
-        return { offsetBytes: offset, sizeBytes: Math.min(persistedChunkSizeBytes, Math.max(0, selected.size - offset)) };
+        return { offsetBytes: offset, sizeBytes: Math.min(persistedChunkSizeBytes, Math.max(0, source.size - offset)) };
       };
 
       let cursor = 0;
@@ -317,7 +356,7 @@ export function UploadsPage() {
        * begin again.
        */
       const sendChunk = async (chunkIndex: number, geo: { offsetBytes: number; sizeBytes: number }): Promise<'done' | 'paused' | string> => {
-        const slice = selected.slice(geo.offsetBytes, geo.offsetBytes + geo.sizeBytes);
+        const slice = source.slice(geo.offsetBytes, geo.offsetBytes + geo.sizeBytes);
         for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt++) {
           if (abortRef.current?.signal.aborted || pauseRequestedRef.current) return 'paused';
           const begin = await api.beginChunkDirect(id, chunkIndex);
@@ -389,7 +428,7 @@ export function UploadsPage() {
           if (abortRef.current?.signal.aborted || pauseRequestedRef.current) return;
           const chunkIndex = indices[cursor++] as number;
           const geo = geometry.get(chunkIndex) ?? fallbackGeometry(chunkIndex);
-          if (geo.sizeBytes <= 0 || geo.offsetBytes >= selected.size) continue;
+          if (geo.sizeBytes <= 0 || geo.offsetBytes >= source.size) continue;
           let outcome: 'done' | 'paused' | string;
           try {
             outcome = await sendChunk(chunkIndex, geo);
@@ -571,6 +610,138 @@ export function UploadsPage() {
     fileInputRef.current?.click();
   }
 
+  // ---- Roadmap Phase 4: the queue ----
+
+  /** Folder ids created in this session, keyed by their full path. */
+  const folderCacheRef = useRef(new Map<string, string>());
+
+  /** Recreate the dropped folder path in the caller's tree; returns its id. */
+  async function ensureFoldersFor(segments: string[]): Promise<string | null> {
+    let parent: string | null = null;
+    let pathSoFar = '';
+    for (const segment of segments) {
+      pathSoFar = pathSoFar ? `${pathSoFar}/${segment}` : segment;
+      const cached = folderCacheRef.current.get(pathSoFar);
+      if (cached !== undefined) {
+        parent = cached;
+        continue;
+      }
+      const res = await api.createFolder(segment, parent);
+      if (res.status !== 201) {
+        const code = ((res.data ?? {}) as { code?: string }).code ?? 'unknown';
+        throw new Error(code);
+      }
+      const folder = (res.data as { folder: { id: string } }).folder;
+      folderCacheRef.current.set(pathSoFar, folder.id);
+      parent = folder.id;
+    }
+    return parent;
+  }
+
+  /**
+   * Add picked/dropped files to the queue. Folder uploads carry a relative
+   * path; its segments become real folders in the caller's own tree, and the
+   * file's parentId points at the deepest one.
+   */
+  async function addFiles(fileList: Array<{ file: File; relativePath: string | null }>): Promise<void> {
+    if (fileList.length === 0) return;
+    const items: QueueItem[] = fileList.map(({ file, relativePath }) => ({
+      id: crypto.randomUUID(),
+      file,
+      parentId: null,
+      path: relativePath !== null && relativePath !== '' ? relativePath : null,
+      status: 'waiting' as const,
+    }));
+    setQueue((prev) => [...prev, ...items]);
+    // resolve folder structure outside the state updater; failures mark items
+    for (const item of items) {
+      if (item.path === null) continue;
+      const segments = item.path.split('/').slice(0, -1);
+      try {
+        const parentId = segments.length > 0 ? await ensureFoldersFor(segments) : null;
+        setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, parentId } : q)));
+      } catch (err) {
+        setQueue((prev) => prev.map((q) => (q.id === item.id
+          ? { ...q, status: 'failed' as const, message: tf(t.uploads.queue.folderFailed, { code: err instanceof Error ? err.message : 'unknown' }) }
+          : q)));
+      }
+    }
+  }
+
+  function removeFromQueue(id: string): void {
+    setQueue((prev) => prev.filter((q) => q.id !== id));
+  }
+
+  function clearFinishedFromQueue(): void {
+    setQueue((prev) => prev.filter((q) => q.status === 'waiting' || q.status === 'active'));
+  }
+
+  /**
+   * Process the queue one item at a time: plan (the honest preflight) and
+   * upload, then move on. A refused plan marks THAT item failed and keeps
+   * going — one oversized file cannot silently eat the rest of the batch.
+   */
+  async function startQueue(): Promise<void> {
+    if (queueRunningRef.current) return;
+    queueRunningRef.current = true;
+    queueAbortRef.current = false;
+    setQueueRunning(true);
+    setError(null);
+    setErrorCode(null);
+    try {
+      for (;;) {
+        if (queueAbortRef.current) break;
+        const next = await new Promise<QueueItem | null>((resolve) => {
+          setQueue((prev) => {
+            const waiting = prev.find((q) => q.status === 'waiting');
+            if (!waiting) {
+              resolve(null);
+              return prev;
+            }
+            resolve(waiting);
+            return prev.map((q) => (q.id === waiting.id ? { ...q, status: 'active' as const } : q));
+          });
+        });
+        if (!next) break;
+        setSelected(next.file);
+        const planned = await createPlan({ file: next.file, parentId: next.parentId });
+        if (!planned.ok || !planned.jobId) {
+          const code = errorCode ?? 'plan_failed';
+          setQueue((prev) => prev.map((q) => (q.id === next.id
+            ? {
+                ...q,
+                status: 'failed' as const,
+                message: ((t.errors.upload as Record<string, string | undefined>)[code] ?? t.uploads.planFailed)
+                  + (code !== 'plan_failed' ? ` (${code})` : ''),
+              }
+            : q)));
+          setPlannedChunks(null);
+          setJobId(null);
+          continue;
+        }
+        await runUpload(planned.jobId, undefined, next.file);
+        // the worker's outcome is whatever the durable job row now says
+        const finalRes = await api.getUploadJob(planned.jobId);
+        const finalState = finalRes.status === 200 ? (finalRes.data as { job: JobView }).job.state : 'unknown';
+        setQueue((prev) => prev.map((q) => (q.id === next.id
+          ? {
+              ...q,
+              status: finalState === 'completed' ? ('done' as const) : ('failed' as const),
+              message: finalState === 'completed' ? undefined : finalState,
+            }
+          : q)));
+        setPlannedChunks(null);
+        setJobId(null);
+        setSelected(null);
+        if (finalState !== 'completed') break; // a failed job stops the runner
+      }
+      await loadSummary();
+    } finally {
+      queueRunningRef.current = false;
+      setQueueRunning(false);
+    }
+  }
+
   const currentJob = jobId ? jobs.find((j) => j.jobId === jobId) ?? null : null;
   const percent =
     currentJob && currentJob.sizeBytes > 0
@@ -607,17 +778,29 @@ export function UploadsPage() {
             ref={fileInputRef}
             id="upload-file"
             type="file"
+            multiple
             className="sr-only"
             tabIndex={-1}
             aria-hidden="true"
             onChange={(e) => {
-              const file = e.currentTarget.files?.[0] ?? null;
+              const picked = Array.from(e.currentTarget.files ?? []).map((file) => ({ file, relativePath: file.webkitRelativePath || null }));
               e.currentTarget.value = '';
-              setSelected(file);
-              setPlannedChunks(null);
-              setJobId(resumeTarget?.jobId ?? null);
-              setNotice(null);
-              setResumeReport(null);
+              void addFiles(picked);
+            }}
+          />
+          <input
+            ref={folderInputRef}
+            id="upload-folder"
+            type="file"
+            multiple
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
+            {...{ webkitdirectory: 'true', directory: 'true' }}
+            onChange={(e) => {
+              const picked = Array.from(e.currentTarget.files ?? []).map((file) => ({ file, relativePath: file.webkitRelativePath || null }));
+              e.currentTarget.value = '';
+              void addFiles(picked);
             }}
           />
           <button
@@ -629,18 +812,21 @@ export function UploadsPage() {
             onDrop={(e) => {
               e.preventDefault();
               setDragOver(false);
-              const file = e.dataTransfer.files?.[0];
-              if (!file) return;
-              setSelected(file);
-              setPlannedChunks(null);
-              setJobId(resumeTarget?.jobId ?? null);
-              setNotice(null);
-              setResumeReport(null);
+              void filesFromDataTransfer(e.dataTransfer).then((picked) => void addFiles(picked));
             }}
           >
             <CloudUpload className="dropzone-icon" size={28} strokeWidth={1.6} aria-hidden="true" />
             <strong>{t.uploads.dropzone}</strong>
             <span className="muted">{t.uploads.dropzoneOr}</span>
+          </button>
+          <button
+            type="button"
+            className="btn-secondary btn-compact upload-folder-btn"
+            disabled={uploading || queueRunning}
+            onClick={() => folderInputRef.current?.click()}
+          >
+            <FolderPlus size={14} aria-hidden="true" />
+            {t.uploads.queue.uploadFolder}
           </button>
           {selected ? (
             <p className="dropzone-hint">
@@ -679,6 +865,29 @@ export function UploadsPage() {
               <option key={size} value={size}>{size} MiB</option>
             ))}
           </select>
+          {/* Roadmap Phase 4 (§4.4): the auto-spread toggle drives the routing
+              strategy sent with every plan; continuous sync stays an honest
+              placeholder until that separate, later piece of work lands. */}
+          <div className="upload-toggle-row">
+            <label htmlFor="upload-auto-spread">
+              <input
+                id="upload-auto-spread"
+                type="checkbox"
+                checked={autoSpread === true}
+                disabled={queueRunning || uploading || autoSpread === null}
+                onChange={(e) => setAutoSpread(e.target.checked)}
+              />
+              {t.uploads.queue.autoSpread}
+            </label>
+            <p className="muted small">{t.uploads.queue.autoSpreadHelp}</p>
+          </div>
+          <div className="upload-toggle-row sync-placeholder">
+            <label>
+              <input type="checkbox" disabled aria-readonly="true" />
+              {t.uploads.queue.continuousSync}
+            </label>
+            <p className="muted small">{t.uploads.queue.continuousSyncNote}</p>
+          </div>
           <p className="muted small upload-chunk-note">{t.uploads.tierNote}</p>
           <p className="muted small upload-chunk-note">{t.uploads.maxChunkNote}</p>
         </div>
@@ -714,9 +923,26 @@ export function UploadsPage() {
               </button>
             </>
           ) : (
-            <button type="button" className="btn-primary" disabled={!selected || busy || uploading} onClick={() => void createPlan()}>
-              {busy ? t.common.working : t.uploads.plan}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={queueRunning || uploading || busy || queue.every((q) => q.status !== 'waiting')}
+                onClick={() => void startQueue()}
+              >
+                {queueRunning ? t.uploads.uploading : tf(t.uploads.queue.start, { count: queue.filter((q) => q.status === 'waiting').length })}
+              </button>
+              {queueRunning && (
+                <button type="button" className="btn-secondary" onClick={() => { queueAbortRef.current = true; }}>
+                  {t.uploads.queue.stopAfter}
+                </button>
+              )}
+              {queue.some((q) => q.status === 'done' || q.status === 'failed') && (
+                <button type="button" className="btn-secondary" disabled={queueRunning} onClick={clearFinishedFromQueue}>
+                  {t.uploads.queue.clearFinished}
+                </button>
+              )}
+            </>
           )}
         </div>
         {verifiedChunks !== null && (
@@ -725,7 +951,7 @@ export function UploadsPage() {
         {resumeReport && <p className="muted small">{resumeReport}</p>}
       </section>
 
-      {plannedChunks && (
+      {plannedChunks && !queueRunning && (
         <section className="card">
           <h2>{t.uploads.ready}</h2>
           <p className="muted">
@@ -743,6 +969,62 @@ export function UploadsPage() {
             >
               {uploading ? t.uploads.uploading : t.uploads.start}
             </button>
+          </div>
+        </section>
+      )}
+
+      {queue.length > 0 && (
+        <section className="card">
+          <div className="page-head">
+            <h2>{t.uploads.queue.title}</h2>
+            <span className="muted small">
+              {tf(t.uploads.queue.summary, {
+                waiting: queue.filter((q) => q.status === 'waiting').length,
+                done: queue.filter((q) => q.status === 'done').length,
+                failed: queue.filter((q) => q.status === 'failed').length,
+              })}
+            </span>
+          </div>
+          <div className="table-scroll-container">
+            <table className="accounts-table uploads-queue-table">
+              <thead>
+                <tr>
+                  <th>{t.uploads.file}</th>
+                  <th>{t.uploads.size}</th>
+                  <th>{t.uploads.state}</th>
+                  <th>{t.common.actions}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queue.map((item) => (
+                  <tr key={item.id} className={`queue-row queue-${item.status}`}>
+                    <td className="uploads-job-name" title={item.path ?? item.file.name}>
+                      {item.file.name}
+                      {item.path !== null && item.path !== item.file.name && (
+                        <span className="muted small queue-path"> — {item.path}</span>
+                      )}
+                    </td>
+                    <td>{formatBytes(item.file.size)}</td>
+                    <td>
+                      <span className={`state state-${item.status === 'done' ? 'ok' : item.status === 'failed' ? 'bad' : 'warn'}`}>
+                        {(t.uploads.queue.states as Record<string, string | undefined>)[item.status] ?? item.status}
+                      </span>
+                      {item.message && <span className="muted small queue-message"> ({item.message})</span>}
+                    </td>
+                    <td className="actions">
+                      {(item.status === 'waiting' || item.status === 'failed') && !queueRunning && (
+                        <button type="button" className="btn-inline" aria-label={t.uploads.queue.removeAria} onClick={() => removeFromQueue(item.id)}>
+                          <X size={13} aria-hidden="true" />
+                          {t.common.remove}
+                        </button>
+                      )}
+                      {(item.status === 'done' || item.status === 'failed') && <span className="muted small">—</span>}
+                      {item.status === 'active' && <span className="muted small">{t.uploads.uploading}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       )}
@@ -882,4 +1164,52 @@ export function UploadsPage() {
 async function sha256Hex(data: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', data);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Drag-drop walker (roadmap Phase 4): dropped FOLDERS come through as
+ * filesystem entries; every file keeps its path so the queue can recreate
+ * the structure. A plain file drop falls back to the flat file list.
+ */
+async function filesFromDataTransfer(dt: DataTransfer): Promise<Array<{ file: File; relativePath: string | null }>> {
+  const picked: Array<{ file: File; relativePath: string | null }> = [];
+  const items = Array.from(dt.items ?? []);
+  const entries = items
+    .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
+    .filter((entry): entry is FileSystemEntry => entry !== null);
+  if (entries.length === 0) {
+    for (const file of Array.from(dt.files ?? [])) picked.push({ file, relativePath: null });
+    return picked;
+  }
+  const readAll = async (reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> => {
+    const all: FileSystemEntry[] = [];
+    for (;;) {
+      const batch = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+        reader.readEntries((results) => resolve(results as FileSystemEntry[]), () => reject(new Error('read_failed')));
+      });
+      if (batch.length === 0) return all;
+      all.push(...batch);
+    }
+  };
+  const walk = async (entry: FileSystemEntry, path: string): Promise<void> => {
+    if (entry.isFile) {
+      const file = await new Promise<File | null>((resolve) => {
+        (entry as FileSystemFileEntry).file(resolve, () => resolve(null));
+      });
+      if (file) picked.push({ file, relativePath: path });
+      return;
+    }
+    // depth guard: a pathological tree cannot pin the page
+    if (path.split('/').length > 12) return;
+    const children = await readAll((entry as FileSystemDirectoryEntry).createReader());
+    for (const child of children) await walk(child, `${path}/${child.name}`);
+  };
+  for (const entry of entries) {
+    try {
+      await walk(entry, entry.name);
+    } catch {
+      // one unreadable entry must not sink the whole drop
+    }
+  }
+  return picked;
 }

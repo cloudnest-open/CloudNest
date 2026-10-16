@@ -70,6 +70,23 @@ function sweepExpiredRows(): void {
   } catch {
     // cleanup is best-effort; rows remain for the next sweep
   }
+  // Roadmap Phase 4: trash past its restore window goes to the durable
+  // deletion engine; queued jobs are driven exactly like startup recovery.
+  try {
+    const trash = app.get('trash') as { purgeExpired: () => number } | undefined;
+    const purged = trash?.purgeExpired() ?? 0;
+    if (purged > 0) {
+      console.log(`[cloudnest] trash: ${purged} file(s) past the restore window, queued for deletion`);
+      const deletions = app.get('deletions') as
+        | { resumePending: () => Promise<{ attempted: number; completed: number }> }
+        | undefined;
+      void deletions?.resumePending().catch(() => {
+        // pending obligations remain recorded for the next sweep
+      });
+    }
+  } catch {
+    // best-effort; expired rows remain queued for the next sweep
+  }
 }
 sweepExpiredRows();
 const cleanupTimer = setInterval(sweepExpiredRows, CLEANUP_INTERVAL_MS);

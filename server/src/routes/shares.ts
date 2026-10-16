@@ -4,6 +4,8 @@ import type { ShareService } from '../shares/share-service.js';
 import { ShareError } from '../shares/share-service.js';
 import type { DeletionService } from '../deletions/deletion-service.js';
 import { DeletionError } from '../deletions/deletion-service.js';
+import type { TrashService } from '../files/trash-service.js';
+import { TrashError } from '../files/trash-service.js';
 import type { Queries } from '../db/queries.js';
 import type { CsrfBundle } from '../auth/csrf.js';
 import { requirePrincipal, type Principal } from '../middleware/require-admin.js';
@@ -11,6 +13,11 @@ import type { SettingsService } from '../settings/settings-service.js';
 import type Database from 'better-sqlite3';
 import { revokeGrantsForLink } from '../shares/unlock-gate.js';
 import { makeLimiterKey } from '../middleware/limiter-key.js';
+
+/** Phase 4 read/mutation scope: admins see everything, members only their own. */
+function principalOwnerOrNull(principal: Principal): string | null {
+  return principal.role === 'admin' ? null : principal.id;
+}
 
 /**
  * Share links and deletion (M11.a–d).
@@ -84,6 +91,8 @@ export function sharesRouter(deps: {
   csrf: CsrfBundle;
   shares: ShareService;
   deletions: DeletionService;
+  /** Roadmap Phase 4: DELETE moves to trash; the engine only runs on purge. */
+  trash: TrashService;
   appBaseUrl: string;
   /** Direct metadata connection, used for unlock-grant bookkeeping. */
   db: Database.Database;
@@ -224,13 +233,21 @@ export function sharesRouter(deps: {
   });
 
   // ---- deletion ----
+  // Roadmap Phase 4: DELETE moves the file to the TRASH (restorable for the
+  // retention window). Nothing remote changes here; the durable deletion
+  // engine runs only when the file is purged (per file, empty-trash, or the
+  // expired-window sweep).
   router.delete('/api/files/:fileId', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
       assertFileOwnedBy(String(req.params['fileId']), req.principal!);
-      const queued = deps.deletions.enqueue(String(req.params['fileId']));
-      res.status(202).json({ ok: true, jobId: queued.jobId, state: queued.state });
+      const trashed = deps.trash.trash(principalOwnerOrNull(req.principal!), String(req.params['fileId']));
+      res.status(200).json({ ok: true, ...trashed });
     } catch (err) {
+      if (err instanceof TrashError) {
+        res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode });
+        return;
+      }
       shareError(res, err);
     }
   });
