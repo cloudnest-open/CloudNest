@@ -19,8 +19,8 @@ function seedFile(dbPath: string, id: string, name: string, size = 100, state = 
   try {
     const now = new Date().toISOString();
     db.prepare(
-      `INSERT INTO files (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, manifest_hash, created_at, completed_at)
-       VALUES (?, ?, ?, 'text/plain', 100, 1, ?, ?, ?, ?)`,
+      `INSERT INTO files (id, user_id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, manifest_hash, created_at, completed_at)
+       VALUES (?, 'usr_admin', ?, ?, 'text/plain', 100, 1, ?, ?, ?, ?)`,
     ).run(id, name, size, state, 'a'.repeat(64), now, now);
   } finally {
     close();

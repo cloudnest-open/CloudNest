@@ -148,8 +148,8 @@ test('a backup is consistent, self-describing and excludes file bytes and the ke
   try {
     const now = new Date().toISOString();
     db.prepare(
-      `INSERT INTO files (id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
-       VALUES ('f1','a.bin',100,100,1,'completed',?)`,
+      `INSERT INTO files (id, user_id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
+       VALUES ('f1','usr_admin','a.bin',100,100,1,'completed',?)`,
     ).run(now);
     const result = maintenance.backup(dbPath, { files: 1 });
     assert.ok(fs.existsSync(result.databasePath), 'the backup database exists');
@@ -173,8 +173,8 @@ test('a backup verifies cleanly and reports orphaned chunks honestly', () => {
   try {
     const now = new Date().toISOString();
     db.prepare(
-      `INSERT INTO files (id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
-       VALUES ('f1','a.bin',100,100,1,'completed',?)`,
+      `INSERT INTO files (id, user_id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
+       VALUES ('f1','usr_admin','a.bin',100,100,1,'completed',?)`,
     ).run(now);
     // a chunk with no active placement cannot be reconstructed
     db.prepare(

@@ -8,6 +8,8 @@ import type Database from 'better-sqlite3';
 import { healthRouter } from './routes/health.js';
 import { setupRouter } from './routes/setup.js';
 import { authRouter } from './routes/auth.js';
+import { usersRouter } from './routes/users.js';
+import { UserService } from './users/user-service.js';
 import { requireAdmin } from './middleware/require-admin.js';
 import { SqliteSessionStore } from './db/session-store.js';
 import { makeCsrf } from './auth/csrf.js';
@@ -214,7 +216,11 @@ export function createApp(options: {
   //    exposes nothing beyond the version string.
   app.use(healthRouter(options.appVersion));
   app.use(setupRouter(queries, csrf, () => options.db));
-  app.use(authRouter(queries, csrf, tunnelActive));
+  // Roadmap Phase 3: user management. The service is shared with the auth
+  // router (token claims) and its own admin router below.
+  const users = new UserService(options.db);
+  app.use(authRouter(queries, csrf, tunnelActive, users));
+  app.use(usersRouter({ queries, csrf, users, appBaseUrl: options.appBaseUrl }));
 
   // 4b. provider + account management (admin session + CSRF; OAuth callback
   //     is GET and is protected by one-time session-bound state instead)

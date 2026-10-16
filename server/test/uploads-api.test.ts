@@ -309,8 +309,8 @@ test('FE-02: file search runs before pagination and sees the whole library', asy
         const now = new Date().toISOString();
         // created_at staggered so page order is deterministic
         db.prepare(
-          `INSERT INTO files (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, manifest_hash, created_at, completed_at)
-           VALUES (?, ?, 10, 'text/plain', 10, 1, 'completed', ?, ?, ?)`,
+          `INSERT INTO files (id, user_id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, manifest_hash, created_at, completed_at)
+           VALUES (?, 'usr_admin', ?, 10, 'text/plain', 10, 1, 'completed', ?, ?, ?)`,
         ).run(`fe02-${i}`, name, 'a'.repeat(64), now, now);
       } finally { close(); }
     }

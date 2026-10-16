@@ -33,8 +33,8 @@ function seedFile(dbPath: string, opts: {
       .digest('hex');
     // column order and parameter order must match exactly
     db.prepare(
-      `INSERT INTO files (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, manifest_hash, created_at, completed_at)
-       VALUES (?, ?, ?, 'text/plain', ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO files (id, user_id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, manifest_hash, created_at, completed_at)
+       VALUES (?, 'usr_admin', ?, ?, 'text/plain', ?, ?, ?, ?, ?, ?)`,
     ).run(opts.fileId, opts.name, opts.size, opts.chunkSize, opts.chunks.length, opts.state ?? 'completed', manifest, now, now);
     for (const chunk of opts.chunks) {
       db.prepare(

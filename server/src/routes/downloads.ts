@@ -4,7 +4,7 @@ import { DownloadError } from '../downloads/download-service.js';
 import { parseSingleRange, RangeError_, contentDisposition, safeContentType, etagForManifest } from '../downloads/range.js';
 import type { Queries } from '../db/queries.js';
 import type { CsrfBundle } from '../auth/csrf.js';
-import { requireAdmin } from '../middleware/require-admin.js';
+import { requirePrincipal, type Principal } from '../middleware/require-admin.js';
 import { sanitizeDisplayName, ChunkMathError } from '../uploads/chunk-math.js';
 
 /**
@@ -57,13 +57,31 @@ export function downloadsRouter(deps: {
   storageHealth: (fileId: string) => import('../uploads/upload-service.js').FileStorageHealth;
 }): Router {
   const router = Router();
-  const adminOnly = requireAdmin(deps.queries);
+  const principalOnly = requirePrincipal(deps.queries);
+
+  /**
+   * Phase 3: a member may only see, download and rename their OWN files. A
+   * foreign file answers with the SAME 404 as a missing one — existence is
+   * not disclosed across owners. The admin principal sees everything.
+   */
+  function assertFileAccess(file: { user_id: string } | null | undefined, principal: Principal): void {
+    if (principal.role === 'admin') return;
+    if (!file || file.user_id !== principal.id) throw new DownloadError('file_not_found', 404);
+  }
+
+  /** Same rule for a download job (the file it belongs to is the owner). */
+  function assertJobAccess(jobId: string, principal: Principal): void {
+    if (principal.role === 'admin') return;
+    const owner = deps.downloads.downloadJobOwnerUserId(jobId);
+    if (owner !== principal.id) throw new DownloadError('file_not_found', 404);
+  }
 
   /** Shared implementation for GET and HEAD on the download route. */
   async function handleDownload(req: Request, res: Response, headOnly: boolean): Promise<void> {
     const fileId = String(req.params['fileId']);
     try {
       const file = deps.downloads.getFile(fileId);
+      assertFileAccess(file, req.principal!);
       if (!file) throw new DownloadError('file_not_found', 404);
       const etag = etagForManifest(file.manifest_hash);
 
@@ -152,39 +170,46 @@ export function downloadsRouter(deps: {
 
   // HEAD is registered BEFORE GET: Express would otherwise serve a HEAD request
   // through the GET handler and start a real download.
-  router.head('/api/files/:fileId/download', adminOnly, (req, res) => void handleDownload(req, res, true));
-  router.get('/api/files/:fileId/download', adminOnly, (req, res) => void handleDownload(req, res, false));
+  router.head('/api/files/:fileId/download', principalOnly, (req, res) => void handleDownload(req, res, true));
+  router.get('/api/files/:fileId/download', principalOnly, (req, res) => void handleDownload(req, res, false));
 
-  router.get('/api/files/:fileId', adminOnly, (req, res) => {
+  router.get('/api/files/:fileId', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
-    const file = deps.downloads.getFile(String(req.params['fileId']));
-    if (!file) {
-      res.status(404).json({ error: 'file_not_found', code: 'file_not_found' });
-      return;
+    try {
+      const file = deps.downloads.getFile(String(req.params['fileId']));
+      assertFileAccess(file, req.principal!);
+      if (!file) {
+        res.status(404).json({ error: 'file_not_found', code: 'file_not_found' });
+        return;
+      }
+      const chunks = deps.downloads.listChunks(file.id);
+      // availability is derived from real placements, never from a stored flag alone
+      res.json({
+        file: {
+          id: file.id,
+          originalName: file.original_name,
+          sizeBytes: file.size_bytes,
+          mimeType: file.mime_type,
+          chunkCount: file.chunk_count,
+          chunkSizeBytes: file.chunk_size_bytes,
+          state: file.state,
+          manifestHash: file.manifest_hash,
+          chunksPresent: chunks.length,
+          // task §5.B: which accounts currently make this file not fully usable
+          storageHealth: deps.storageHealth(file.id),
+        },
+      });
+    } catch (err) {
+      errorResponse(res, err);
     }
-    const chunks = deps.downloads.listChunks(file.id);
-    // availability is derived from real placements, never from a stored flag alone
-    res.json({
-      file: {
-        id: file.id,
-        originalName: file.original_name,
-        sizeBytes: file.size_bytes,
-        mimeType: file.mime_type,
-        chunkCount: file.chunk_count,
-        chunkSizeBytes: file.chunk_size_bytes,
-        state: file.state,
-        manifestHash: file.manifest_hash,
-        chunksPresent: chunks.length,
-        // task §5.B: which accounts currently make this file not fully usable
-        storageHealth: deps.storageHealth(file.id),
-      },
-    });
   });
 
-  router.post('/api/files/:fileId/rename', adminOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
+  router.post('/api/files/:fileId/rename', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
     res.set('Cache-Control', 'no-store');
     const body = (req.body ?? {}) as { name?: unknown };
     try {
+      const file = deps.downloads.getFile(String(req.params['fileId']));
+      assertFileAccess(file, req.principal!);
       const name = sanitizeDisplayName(body.name);
       const result = deps.downloads.renameFile(String(req.params['fileId']), name);
       res.json({ ok: true, file: result });
@@ -193,11 +218,13 @@ export function downloadsRouter(deps: {
     }
   });
 
-  router.get('/api/downloads', adminOnly, (req, res) => {
+  router.get('/api/downloads', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
+    const principal = req.principal!;
+    const owner = principal.role === 'admin' ? null : principal.id;
     const offset = Math.max(0, Number(req.query['offset'] ?? 0) || 0);
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 50) || 50));
-    const jobs = deps.downloads.listDownloadJobs(limit, offset).map((job) => ({
+    const jobs = deps.downloads.listDownloadJobs(limit, offset, owner).map((job) => ({
       jobId: job.id,
       fileId: job.file_id,
       state: job.state,
@@ -211,35 +238,41 @@ export function downloadsRouter(deps: {
       createdAt: job.created_at,
       updatedAt: job.updated_at,
     }));
-    res.json({ downloads: jobs, total: deps.downloads.countDownloadJobs() });
+    res.json({ downloads: jobs, total: deps.downloads.countDownloadJobs(owner) });
   });
 
-  router.get('/api/downloads/:jobId', adminOnly, (req, res) => {
-    res.set('Cache-Control', 'no-store');
-    const job = deps.downloads.publicDownloadJob(String(req.params['jobId']));
-    if (!job) {
-      res.status(404).json({ error: 'file_not_found', code: 'file_not_found' });
-      return;
-    }
-    res.json({
-      download: {
-        jobId: job.id,
-        fileId: job.file_id,
-        state: job.state,
-        requestedBytes: job.requested_bytes,
-        rangeStart: job.requested_range_start_bytes,
-        rangeEnd: job.requested_range_end_bytes,
-        chunksCompleted: job.chunks_completed,
-        chunksTotal: job.chunks_total,
-        bytesCompleted: job.bytes_completed,
-        safeErrorCode: job.last_safe_error_code,
-      },
-    });
-  });
-
-  router.post('/api/downloads/:jobId/cancel', adminOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
+  router.get('/api/downloads/:jobId', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
+      assertJobAccess(String(req.params['jobId']), req.principal!);
+      const job = deps.downloads.publicDownloadJob(String(req.params['jobId']));
+      if (!job) {
+        res.status(404).json({ error: 'file_not_found', code: 'file_not_found' });
+        return;
+      }
+      res.json({
+        download: {
+          jobId: job.id,
+          fileId: job.file_id,
+          state: job.state,
+          requestedBytes: job.requested_bytes,
+          rangeStart: job.requested_range_start_bytes,
+          rangeEnd: job.requested_range_end_bytes,
+          chunksCompleted: job.chunks_completed,
+          chunksTotal: job.chunks_total,
+          bytesCompleted: job.bytes_completed,
+          safeErrorCode: job.last_safe_error_code,
+        },
+      });
+    } catch (err) {
+      errorResponse(res, err);
+    }
+  });
+
+  router.post('/api/downloads/:jobId/cancel', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      assertJobAccess(String(req.params['jobId']), req.principal!);
       const cancelled = deps.downloads.cancelDownload(String(req.params['jobId']));
       res.json({ ok: true, cancelled });
     } catch (err) {

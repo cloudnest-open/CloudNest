@@ -37,8 +37,8 @@ function live() {
   const { db, close } = openDatabase(dbPath);
   runMigrations(db, allMigrations);
   db.prepare(
-    `INSERT INTO files (id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
-     VALUES ('f1','a.bin',100,100,1,'completed',?)`,
+    `INSERT INTO files (id, user_id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
+     VALUES ('f1','usr_admin','a.bin',100,100,1,'completed',?)`,
   ).run(new Date().toISOString());
   return { db, close, dir, dbPath, maintenance: new MaintenanceService(db, dir, '0.1.0') };
 }

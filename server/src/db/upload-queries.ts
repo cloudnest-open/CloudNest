@@ -51,6 +51,8 @@ export interface AttemptRow {
 
 export interface FileRow {
   id: string;
+  /** Owner (roadmap Phase 3): users.id; the built-in admin is 'usr_admin'. */
+  user_id: string;
   original_name: string;
   size_bytes: number;
   mime_type: string | null;
@@ -75,6 +77,10 @@ export function makeUploadQueries(db: Database.Database) {
     getJob: db.prepare('SELECT * FROM transfer_jobs WHERE id = ?'),
     getJobByIdempotencyKey: db.prepare('SELECT * FROM transfer_jobs WHERE idempotency_key = ?'),
     listJobs: db.prepare('SELECT * FROM transfer_jobs WHERE job_type = \'upload\' ORDER BY created_at DESC LIMIT ?'),
+    listJobsForUser: db.prepare(
+      `SELECT j.* FROM transfer_jobs j JOIN files f ON f.id = j.file_id
+       WHERE j.job_type = 'upload' AND f.user_id = ? ORDER BY j.created_at DESC LIMIT ?`,
+    ),
     updateJobState: db.prepare(
       'UPDATE transfer_jobs SET state = @state, last_safe_error_code = @last_safe_error_code, updated_at = @updated_at WHERE id = @id',
     ),
@@ -87,9 +93,9 @@ export function makeUploadQueries(db: Database.Database) {
 
     // ---- files ----
     insertFile: db.prepare(
-      `INSERT INTO files (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, whole_sha256,
+      `INSERT INTO files (id, user_id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, whole_sha256,
         manifest_hash, state, tier, created_at, completed_at)
-       VALUES (@id, @original_name, @size_bytes, @mime_type, @chunk_size_bytes, @chunk_count, NULL, NULL, @state, @tier, @created_at, NULL)`,
+       VALUES (@id, @user_id, @original_name, @size_bytes, @mime_type, @chunk_size_bytes, @chunk_count, NULL, NULL, @state, @tier, @created_at, NULL)`,
     ),
     getFile: db.prepare('SELECT * FROM files WHERE id = ?'),
     listFiles: db.prepare('SELECT * FROM files ORDER BY created_at DESC LIMIT ? OFFSET ?'),
@@ -102,6 +108,22 @@ export function makeUploadQueries(db: Database.Database) {
       "SELECT COUNT(*) AS n FROM files WHERE lower(original_name) LIKE '%' || ? || '%'",
     ),
     countFiles: db.prepare('SELECT COUNT(*) AS n FROM files'),
+    // Phase 3: member-scoped variants of the same listing queries — ownership
+    // filtering happens in SQL, never in the client.
+    listFilesForUser: db.prepare(
+      'SELECT * FROM files WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    ),
+    searchFilesForUser: db.prepare(
+      "SELECT * FROM files WHERE user_id = ? AND lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    ),
+    countSearchedFilesForUser: db.prepare(
+      "SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND lower(original_name) LIKE '%' || ? || '%'",
+    ),
+    countFilesForUser: db.prepare('SELECT COUNT(*) AS n FROM files WHERE user_id = ?'),
+    /** Ownership check for a transfer job: the file's owner, via one join. */
+    getJobOwnerUserId: db.prepare(
+      'SELECT f.user_id AS user_id FROM transfer_jobs j JOIN files f ON f.id = j.file_id WHERE j.id = ?',
+    ),
     completeFile: db.prepare(
       `UPDATE files SET state = 'completed', manifest_hash = @manifest_hash, completed_at = @completed_at WHERE id = @id`,
     ),

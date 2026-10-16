@@ -11,6 +11,21 @@
 import type { Locale } from '../i18n.js';
 
 const en = {
+  accept: {
+    title: 'Set your password',
+    subtitle: 'You were invited to this CloudNest instance. Choose a password to activate your account.',
+    password: 'Password',
+    confirm: 'Confirm password',
+    submit: 'Save and continue',
+    submitting: 'Saving…',
+    success: 'Password set. You can sign in now.',
+    goLogin: 'Go to sign in',
+    invalid: 'This link is invalid, already used, or expired. Ask your administrator for a new one.',
+    mismatch: 'Passwords do not match.',
+    policy: 'Password must be at least 12 characters.',
+    network: 'Could not reach the server. Check that CloudNest is running.',
+    disabled: 'This account is disabled. Ask your administrator.',
+  },
   nav: {
     aria: 'Main navigation',
     home: 'Home',
@@ -87,6 +102,21 @@ const en = {
 export type EntryStrings = typeof en;
 
 const zhCN: EntryStrings = {
+  accept: {
+    title: '设置密码',
+    subtitle: '您被邀请使用这个 CloudNest 实例。设置密码以激活您的账户。',
+    password: '密码',
+    confirm: '确认密码',
+    submit: '保存并继续',
+    submitting: '保存中…',
+    success: '密码已设置。现在可以登录了。',
+    goLogin: '前往登录',
+    invalid: '此链接无效、已被使用或已过期。请向管理员索取新链接。',
+    mismatch: '两次输入的密码不一致。',
+    policy: '密码至少需要 12 个字符。',
+    network: '无法连接服务器。请确认 CloudNest 正在运行。',
+    disabled: '该账户已停用。请联系管理员。',
+  },
   nav: { aria: '主导航', home: '首页', features: '功能', documentation: '文档', support: '支持' },
   badge: '开源云存储',
   headline: { line1: '你的文件。', accent: '你的云端。', rest: '由你掌控。' },
@@ -138,6 +168,21 @@ const zhCN: EntryStrings = {
 };
 
 const es: EntryStrings = {
+  accept: {
+    title: 'Configura tu contraseña',
+    subtitle: 'Has sido invitado a esta instancia de CloudNest. Elige una contraseña para activar tu cuenta.',
+    password: 'Contraseña',
+    confirm: 'Confirmar contraseña',
+    submit: 'Guardar y continuar',
+    submitting: 'Guardando…',
+    success: 'Contraseña establecida. Ya puedes iniciar sesión.',
+    goLogin: 'Ir al inicio de sesión',
+    invalid: 'Este enlace no es válido, ya se usó o caducó. Pide uno nuevo a tu administrador.',
+    mismatch: 'Las contraseñas no coinciden.',
+    policy: 'La contraseña debe tener al menos 12 caracteres.',
+    network: 'No se pudo contactar con el servidor. Comprueba que CloudNest está en ejecución.',
+    disabled: 'Esta cuenta está desactivada. Consulta a tu administrador.',
+  },
   nav: { aria: 'Navegación principal', home: 'Inicio', features: 'Funciones', documentation: 'Documentación', support: 'Soporte' },
   badge: 'Almacenamiento en la nube de código abierto',
   headline: { line1: 'Tus archivos.', accent: 'Tu nube.', rest: 'A tu manera.' },
@@ -189,6 +234,21 @@ const es: EntryStrings = {
 };
 
 const de: EntryStrings = {
+  accept: {
+    title: 'Passwort festlegen',
+    subtitle: 'Du wurdest zu dieser CloudNest-Instanz eingeladen. Wähle ein Passwort, um dein Konto zu aktivieren.',
+    password: 'Passwort',
+    confirm: 'Passwort bestätigen',
+    submit: 'Speichern und weiter',
+    submitting: 'Speichern…',
+    success: 'Passwort festgelegt. Du kannst dich jetzt anmelden.',
+    goLogin: 'Zur Anmeldung',
+    invalid: 'Dieser Link ist ungültig, wurde bereits verwendet oder ist abgelaufen. Frage eine Administration nach einem neuen.',
+    mismatch: 'Die Passwörter stimmen nicht überein.',
+    policy: 'Das Passwort muss mindestens 12 Zeichen lang sein.',
+    network: 'Der Server ist nicht erreichbar. Prüfe, ob CloudNest läuft.',
+    disabled: 'Dieses Konto ist deaktiviert. Wende dich an eine Administration.',
+  },
   nav: { aria: 'Hauptnavigation', home: 'Start', features: 'Funktionen', documentation: 'Dokumentation', support: 'Support' },
   badge: 'Open-Source-Cloudspeicher',
   headline: { line1: 'Deine Dateien.', accent: 'Deine Cloud.', rest: 'Auf deine Art.' },
@@ -240,6 +300,21 @@ const de: EntryStrings = {
 };
 
 const ru: EntryStrings = {
+  accept: {
+    title: 'Задайте пароль',
+    subtitle: 'Вас пригласили в этот экземпляр CloudNest. Задайте пароль, чтобы активировать учётную запись.',
+    password: 'Пароль',
+    confirm: 'Подтвердите пароль',
+    submit: 'Сохранить и продолжить',
+    submitting: 'Сохранение…',
+    success: 'Пароль задан. Теперь можно войти.',
+    goLogin: 'Перейти к входу',
+    invalid: 'Эта ссылка недействительна, уже использована или истекла. Попросите администратора выдать новую.',
+    mismatch: 'Пароли не совпадают.',
+    policy: 'Пароль должен содержать не менее 12 символов.',
+    network: 'Не удалось связаться с сервером. Проверьте, что CloudNest запущен.',
+    disabled: 'Эта учётная запись отключена. Обратитесь к администратору.',
+  },
   nav: { aria: 'Основная навигация', home: 'Главная', features: 'Возможности', documentation: 'Документация', support: 'Поддержка' },
   badge: 'Облачное хранилище с открытым кодом',
   headline: { line1: 'Ваши файлы.', accent: 'Ваше облако.', rest: 'Ваши правила.' },
@@ -291,6 +366,21 @@ const ru: EntryStrings = {
 };
 
 const fr: EntryStrings = {
+  accept: {
+    title: 'Définissez votre mot de passe',
+    subtitle: 'Vous avez été invité sur cette instance CloudNest. Choisissez un mot de passe pour activer votre compte.',
+    password: 'Mot de passe',
+    confirm: 'Confirmer le mot de passe',
+    submit: 'Enregistrer et continuer',
+    submitting: 'Enregistrement…',
+    success: 'Mot de passe défini. Vous pouvez vous connecter.',
+    goLogin: 'Aller à la connexion',
+    invalid: 'Ce lien est invalide, déjà utilisé ou expiré. Demandez-en un nouveau à votre administrateur.',
+    mismatch: 'Les mots de passe ne correspondent pas.',
+    policy: 'Le mot de passe doit comporter au moins 12 caractères.',
+    network: 'Impossible de joindre le serveur. Vérifiez que CloudNest est en cours d’exécution.',
+    disabled: 'Ce compte est désactivé. Contactez votre administrateur.',
+  },
   nav: { aria: 'Navigation principale', home: 'Accueil', features: 'Fonctionnalités', documentation: 'Documentation', support: 'Assistance' },
   badge: 'Stockage cloud open source',
   headline: { line1: 'Vos fichiers.', accent: 'Votre cloud.', rest: 'À votre façon.' },
@@ -342,6 +432,21 @@ const fr: EntryStrings = {
 };
 
 const ja: EntryStrings = {
+  accept: {
+    title: 'パスワードを設定',
+    subtitle: 'この CloudNest インスタンスへの招待です。アカウントを有効化するパスワードを設定してください。',
+    password: 'パスワード',
+    confirm: 'パスワードの確認',
+    submit: '保存して続行',
+    submitting: '保存中…',
+    success: 'パスワードを設定しました。サインインできます。',
+    goLogin: 'サインインへ',
+    invalid: 'このリンクは無効か、使用済みか、期限切れです。管理者に新しいリンクを依頼してください。',
+    mismatch: 'パスワードが一致しません。',
+    policy: 'パスワードは 12 文字以上である必要があります。',
+    network: 'サーバーに接続できません。CloudNest が起動しているか確認してください。',
+    disabled: 'このアカウントは無効です。管理者に相談してください。',
+  },
   nav: { aria: 'メインナビゲーション', home: 'ホーム', features: '機能', documentation: 'ドキュメント', support: 'サポート' },
   badge: 'オープンソースのクラウドストレージ',
   headline: { line1: 'あなたのファイル。', accent: 'あなたのクラウド。', rest: 'あなた流に。' },
@@ -393,6 +498,21 @@ const ja: EntryStrings = {
 };
 
 const ptBR: EntryStrings = {
+  accept: {
+    title: 'Defina sua senha',
+    subtitle: 'Você foi convidado para esta instância do CloudNest. Escolha uma senha para ativar sua conta.',
+    password: 'Senha',
+    confirm: 'Confirmar senha',
+    submit: 'Salvar e continuar',
+    submitting: 'Salvando…',
+    success: 'Senha definida. Você já pode entrar.',
+    goLogin: 'Ir para o login',
+    invalid: 'Este link é inválido, já foi usado ou expirou. Peça um novo ao administrador.',
+    mismatch: 'As senhas não coincidem.',
+    policy: 'A senha deve ter pelo menos 12 caracteres.',
+    network: 'Não foi possível contatar o servidor. Verifique se o CloudNest está em execução.',
+    disabled: 'Esta conta está desativada. Fale com o administrador.',
+  },
   nav: { aria: 'Navegação principal', home: 'Início', features: 'Recursos', documentation: 'Documentação', support: 'Suporte' },
   badge: 'Armazenamento em nuvem de código aberto',
   headline: { line1: 'Seus arquivos.', accent: 'Sua nuvem.', rest: 'Do seu jeito.' },

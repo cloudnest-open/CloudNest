@@ -85,14 +85,49 @@ export interface AccountInfo {
   updatedAt: string;
 }
 
+export interface MeInfo {
+  authenticated: boolean;
+  kind?: 'admin' | 'user';
+  role?: 'admin' | 'member';
+  username?: string;
+  displayName?: string;
+  email?: string;
+  userId?: string;
+}
+
+export interface UserInfo {
+  id: string;
+  email: string;
+  displayName: string;
+  role: 'admin' | 'member';
+  status: 'active' | 'invited' | 'disabled';
+  allowanceBytes: number | null;
+  usedBytes: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const api = {
   setupStatus: () => request('GET', '/api/setup/status'),
   me: () => request('GET', '/api/auth/me'),
   setup: (password: string) => request('POST', '/api/setup', { password, confirm: password }),
-  login: (password: string) => request('POST', '/api/auth/login', { username: 'admin', password }),
+  /** The username field accepts the built-in admin's name OR a member's email. */
+  login: (username: string, password: string) => request('POST', '/api/auth/login', { username, password }),
   logout: () => request('POST', '/api/auth/logout'),
   changePassword: (currentPassword: string, newPassword: string) =>
     request('POST', '/api/auth/change-password', { currentPassword, newPassword, confirmNew: newPassword }),
+  /** Public: set a password from a one-time invite / reset token. */
+  acceptInvite: (token: string, password: string) =>
+    request('POST', '/api/auth/accept-invite', { token, password, confirm: password }),
+
+  // ---- users admin (roadmap Phase 3) ----
+  listUsers: () => request('GET', '/api/users'),
+  inviteUser: (body: { email: string; displayName: string; role: 'admin' | 'member'; allowanceBytes: number | null }) =>
+    request('POST', '/api/users', body),
+  updateUser: (id: string, body: { role?: 'admin' | 'member'; status?: 'active' | 'disabled'; allowanceBytes?: number | null }) =>
+    request('PATCH', `/api/users/${id}`, body),
+  resetUserPassword: (id: string) => request('POST', `/api/users/${id}/password-reset`, {}),
+  removeUser: (id: string) => request('DELETE', `/api/users/${id}`),
 
   // providers + accounts (Step 3)
   providers: () => request('GET', '/api/providers'),

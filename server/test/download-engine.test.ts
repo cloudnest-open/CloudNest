@@ -29,8 +29,8 @@ function seedFile(db: import('better-sqlite3').Database, opts: {
 }): void {
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO files (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, created_at, manifest_hash, completed_at)
-     VALUES (?, ?, ?, 'application/octet-stream', ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO files (id, user_id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, created_at, manifest_hash, completed_at)
+     VALUES (?, 'usr_admin', ?, ?, 'application/octet-stream', ?, ?, ?, ?, ?, ?)`,
   ).run(opts.fileId, opts.name, opts.size, opts.chunkSize, opts.chunks.length, opts.state ?? 'completed', now,
     crypto.createHash('sha256').update(`v1|${opts.chunks.map((c, i) => `${i}:${c.size}:${c.sha256}`).join('|')}`).digest('hex'), now);
   for (const chunk of opts.chunks) {

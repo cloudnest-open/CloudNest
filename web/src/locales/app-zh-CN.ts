@@ -74,6 +74,10 @@ export const appZhCn: AppStrings = {
     },
     account: {
       role: 'CloudNest 管理员',
+      roleMember: 'CloudNest 成员',
+      roleAdminLabel: '管理员',
+      profile: '个人资料',
+      users: '用户',
       close: '关闭账户菜单',
       signOut: '退出登录',
     },
@@ -761,6 +765,82 @@ export const appZhCn: AppStrings = {
     },
   },
 
+  /** Roadmap Phase 3: the member-facing dashboard usage card. */
+  memberUsage: {
+    used: '已用存储',
+    usedSub: '占您的配额',
+    usedOf: '{used} / {allowance}',
+    unlimited: '未设配额限制',
+    uploadsActive: '进行中的上传',
+    uploadsActiveSub: '运行与暂停的任务',
+  },
+
+  /** Roadmap Phase 3 (§4.3): admin Users panel. */
+  users: {
+    title: '用户',
+    invite: '邀请用户',
+    note: '邀请和重置链接只显示一次。请立即复制并直接交给对方 — CloudNest 不发送电子邮件。',
+    table: { email: '邮箱', role: '角色', used: '已用', allowance: '配额', status: '状态', actions: '操作' },
+    role: { admin: '管理员', member: '成员' },
+    status: { active: '活跃', invited: '已邀请', disabled: '已停用' },
+    unlimited: '无限制',
+    you: '您',
+    inviteDialog: {
+      title: '邀请用户',
+      email: '邮箱',
+      name: '显示名称',
+      role: '角色',
+      allowance: '存储配额 (GB)',
+      allowanceHint: '留空表示不设限制。仅计算该用户自己的文件。',
+      submit: '创建邀请',
+    },
+    linkDialog: {
+      title: '一次性链接已生成',
+      note: '请立即复制此链接。它只显示一次，使用后即失效，并授予该账户的访问权限。',
+      copy: '复制链接',
+      copied: '已复制',
+    },
+    editDialog: {
+      title: '编辑用户',
+      role: '角色',
+      allowance: '存储配额 (GB)',
+      allowanceHint: '留空表示不设限制。',
+      save: '保存',
+    },
+    actions: { reset: '重置密码', disable: '停用', enable: '启用', remove: '移除', edit: '编辑' },
+    empty: { title: '还没有用户', body: '邀请团队成员一起使用这个 CloudNest 实例。' },
+    toast: {
+      invited: '邀请已创建。请把一次性链接交给对方。',
+      reset: '重置链接已创建。它一小时后失效。',
+      updated: '用户已更新。',
+      removed: '用户已移除。',
+    },
+    errors: {
+      email_already_exists: '该邮箱已存在账户。',
+      invalid_email: '请输入有效的邮箱地址。',
+      invalid_display_name: '请输入显示名称。',
+      invalid_role: '请选择有效角色。',
+      last_admin: '最后一位管理员不能被降级、停用或移除。',
+      user_admin_immutable: '内置管理员账户不能在此编辑。',
+      user_has_files: '该用户仍拥有文件。请先删除这些文件。',
+      user_disabled: '该账户已停用。请先启用。',
+      user_not_found: '该用户已不存在。',
+      invalid_allowance: '配额必须是正的整数 GB。',
+      fallback: '操作失败。',
+    },
+  },
+
+  /** Roadmap Phase 3 (§4.3): the Profile item in the account menu. */
+  profile: {
+    title: '个人资料',
+    account: '账户',
+    role: '角色',
+    email: '邮箱',
+    used: '已用存储',
+    ofAllowance: '{used} / {allowance}',
+    unlimited: '未设配额限制',
+  },
+
   auth: {
     changePassword: {
       title: '更改管理员密码',
@@ -860,6 +940,8 @@ export const appZhCn: AppStrings = {
       job_paused: '此任务已暂停。',
       account_busy: '该账户已有最大数量的并发分块上传，CloudNest 会自动重试。',
       job_not_found: '该上传任务已不存在。',
+      allowance_exceeded:
+        '此上传将超出您的存储配额。请删除文件或向管理员申请更多空间。',
       fallback: '上传报告了一个错误。',
     },
     download: {

@@ -51,8 +51,8 @@ function seedFile(db: import('better-sqlite3').Database, opts: {
   }
   const total = opts.chunkSize * opts.chunkCount;
   db.prepare(
-    `INSERT INTO files (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, created_at, manifest_hash, completed_at)
-     VALUES (?, ?, ?, 'application/octet-stream', ?, ?, 'completed', ?, ?, ?)`,
+    `INSERT INTO files (id, user_id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, created_at, manifest_hash, completed_at)
+     VALUES (?, 'usr_admin', ?, ?, 'application/octet-stream', ?, ?, 'completed', ?, ?, ?)`,
   ).run(
     opts.fileId, opts.name, total, opts.chunkSize, opts.chunkCount, now,
     crypto.createHash('sha256')

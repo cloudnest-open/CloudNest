@@ -13,6 +13,21 @@ export interface AdminRow {
   auth_version: number;
 }
 
+/** A row of the users table (roadmap Phase 3). Never expose password_hash. */
+export interface UserRow {
+  id: string;
+  email: string;
+  display_name: string;
+  role: 'admin' | 'member';
+  status: 'active' | 'invited' | 'disabled';
+  password_hash: string | null;
+  password_changed_at: string | null;
+  allowance_bytes: number | null;
+  auth_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export function makeQueries(db: Database.Database) {
   return {
     getAdmin(): AdminRow | undefined {
@@ -32,6 +47,14 @@ export function makeQueries(db: Database.Database) {
       ).run(passwordHash, nowIso, nowIso);
       const row = db.prepare('SELECT auth_version FROM admin_users WHERE id = 1').get() as { auth_version: number };
       return row.auth_version;
+    },
+    // ---- users (Phase 3): the reads the session gate itself needs live here,
+    // so requireAdmin/requirePrincipal keep taking the same Queries object.
+    getUser(id: string): UserRow | undefined {
+      return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+    },
+    getUserByEmail(email: string): UserRow | undefined {
+      return db.prepare('SELECT * FROM users WHERE email = ?').get(email) as UserRow | undefined;
     },
     deleteAllSessions(): void {
       db.prepare('DELETE FROM sessions').run();

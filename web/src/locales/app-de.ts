@@ -74,6 +74,10 @@ export const appDe: AppStrings = {
     },
     account: {
       role: 'CloudNest-Administrator',
+      roleMember: 'CloudNest-Mitglied',
+      roleAdminLabel: 'Admin',
+      profile: 'Profil',
+      users: 'Benutzer',
       close: 'Kontomenü schließen',
       signOut: 'Abmelden',
     },
@@ -830,6 +834,82 @@ export const appDe: AppStrings = {
     },
   },
 
+  /** Roadmap Phase 3: the member-facing dashboard usage card. */
+  memberUsage: {
+    used: 'Belegter Speicher',
+    usedSub: 'deines Kontingents',
+    usedOf: '{used} von {allowance}',
+    unlimited: 'Kein Kontingent-Limit',
+    uploadsActive: 'Aktive Uploads',
+    uploadsActiveSub: 'Laufende & pausierte Aufträge',
+  },
+
+  /** Roadmap Phase 3 (§4.3): admin Users panel. */
+  users: {
+    title: 'Benutzer',
+    invite: 'Benutzer einladen',
+    note: 'Einladungs- und Rücksetzungslinks werden nur einmal angezeigt. Kopiere sie und übergib sie direkt — CloudNest verschickt keine E-Mails.',
+    table: { email: 'E-Mail', role: 'Rolle', used: 'Belegt', allowance: 'Kontingent', status: 'Status', actions: 'Aktionen' },
+    role: { admin: 'Admin', member: 'Mitglied' },
+    status: { active: 'Aktiv', invited: 'Eingeladen', disabled: 'Deaktiviert' },
+    unlimited: 'Unbegrenzt',
+    you: 'Du',
+    inviteDialog: {
+      title: 'Benutzer einladen',
+      email: 'E-Mail',
+      name: 'Anzeigename',
+      role: 'Rolle',
+      allowance: 'Speicherkontingent (GB)',
+      allowanceHint: 'Leer lassen für kein Limit. Zählt nur die eigenen Dateien dieses Benutzers.',
+      submit: 'Einladung erstellen',
+    },
+    linkDialog: {
+      title: 'Einmal-Link bereit',
+      note: 'Kopiere diesen Link jetzt. Er wird nur einmal angezeigt, verfällt bei Nutzung und gewährt Zugriff auf dieses Konto.',
+      copy: 'Link kopieren',
+      copied: 'Kopiert',
+    },
+    editDialog: {
+      title: 'Benutzer bearbeiten',
+      role: 'Rolle',
+      allowance: 'Speicherkontingent (GB)',
+      allowanceHint: 'Leer lassen für kein Limit.',
+      save: 'Speichern',
+    },
+    actions: { reset: 'Passwort zurücksetzen', disable: 'Deaktivieren', enable: 'Aktivieren', remove: 'Entfernen', edit: 'Bearbeiten' },
+    empty: { title: 'Noch keine Benutzer', body: 'Lade jemanden ein, diese CloudNest-Instanz gemeinsam zu nutzen.' },
+    toast: {
+      invited: 'Einladung erstellt. Übergibe den Einmal-Link.',
+      reset: 'Rücksetzungslink erstellt. Er läuft in einer Stunde ab.',
+      updated: 'Benutzer aktualisiert.',
+      removed: 'Benutzer entfernt.',
+    },
+    errors: {
+      email_already_exists: 'Für diese E-Mail existiert bereits ein Konto.',
+      invalid_email: 'Gib eine gültige E-Mail-Adresse ein.',
+      invalid_display_name: 'Gib einen Anzeigenamen ein.',
+      invalid_role: 'Wähle eine gültige Rolle.',
+      last_admin: 'Der letzte Admin kann nicht herabgestuft, deaktiviert oder entfernt werden.',
+      user_admin_immutable: 'Das eingebaute Administratorkonto kann hier nicht bearbeitet werden.',
+      user_has_files: 'Dieser Benutzer besitzt noch Dateien. Lösche sie zuerst.',
+      user_disabled: 'Dieses Konto ist deaktiviert. Aktiviere es zuerst.',
+      user_not_found: 'Dieser Benutzer existiert nicht mehr.',
+      invalid_allowance: 'Das Kontingent muss eine positive ganze Zahl in GB sein.',
+      fallback: 'Der Vorgang ist fehlgeschlagen.',
+    },
+  },
+
+  /** Roadmap Phase 3 (§4.3): the Profile item in the account menu. */
+  profile: {
+    title: 'Profil',
+    account: 'Konto',
+    role: 'Rolle',
+    email: 'E-Mail',
+    used: 'Belegter Speicher',
+    ofAllowance: '{used} von {allowance}',
+    unlimited: 'Kein Kontingent-Limit',
+  },
+
   auth: {
     changePassword: {
       title: 'Administrator-Passwort ändern',
@@ -939,6 +1019,8 @@ export const appDe: AppStrings = {
       job_paused: 'Dieser Auftrag ist angehalten.',
       account_busy: 'Dieses Konto hat bereits die maximale Anzahl gleichzeitiger Block-Uploads. CloudNest wiederholt den Versuch automatisch.',
       job_not_found: 'Dieser Upload-Auftrag existiert nicht mehr.',
+      allowance_exceeded:
+        'Dieser Upload würde dein Speicherkontingent überschreiten. Lösche Dateien oder frage eine Administration nach mehr Speicher.',
       fallback: 'Der Upload meldete einen Fehler.',
     },
     download: {

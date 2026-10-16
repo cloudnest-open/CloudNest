@@ -74,6 +74,10 @@ export const appFr: AppStrings = {
     },
     account: {
       role: 'Administrateur CloudNest',
+      roleMember: 'Membre CloudNest',
+      roleAdminLabel: 'Admin',
+      profile: 'Profil',
+      users: 'Utilisateurs',
       close: 'Fermer le menu du compte',
       signOut: 'Se déconnecter',
     },
@@ -832,6 +836,82 @@ export const appFr: AppStrings = {
     },
   },
 
+  /** Roadmap Phase 3: the member-facing dashboard usage card. */
+  memberUsage: {
+    used: 'Stockage utilisé',
+    usedSub: 'de votre quota',
+    usedOf: '{used} sur {allowance}',
+    unlimited: 'Aucune limite de quota',
+    uploadsActive: 'Envois actifs',
+    uploadsActiveSub: 'Tâches en cours ou en pause',
+  },
+
+  /** Roadmap Phase 3 (§4.3): admin Users panel. */
+  users: {
+    title: 'Utilisateurs',
+    invite: 'Inviter un utilisateur',
+    note: 'Les liens d’invitation et de réinitialisation ne s’affichent qu’une fois. Copiez-les et remettez-les directement — CloudNest n’envoie pas d’e-mails.',
+    table: { email: 'E-mail', role: 'Rôle', used: 'Utilisé', allowance: 'Quota', status: 'Statut', actions: 'Actions' },
+    role: { admin: 'Admin', member: 'Membre' },
+    status: { active: 'Actif', invited: 'Invité', disabled: 'Désactivé' },
+    unlimited: 'Illimité',
+    you: 'Vous',
+    inviteDialog: {
+      title: 'Inviter un utilisateur',
+      email: 'E-mail',
+      name: 'Nom affiché',
+      role: 'Rôle',
+      allowance: 'Quota de stockage (Go)',
+      allowanceHint: 'Laissez vide pour aucune limite. Ne compte que les fichiers de cet utilisateur.',
+      submit: 'Créer l’invitation',
+    },
+    linkDialog: {
+      title: 'Lien à usage unique prêt',
+      note: 'Copiez ce lien maintenant. Il ne s’affiche qu’une fois, expire à l’utilisation et donne accès à ce compte.',
+      copy: 'Copier le lien',
+      copied: 'Copié',
+    },
+    editDialog: {
+      title: 'Modifier l’utilisateur',
+      role: 'Rôle',
+      allowance: 'Quota de stockage (Go)',
+      allowanceHint: 'Laissez vide pour aucune limite.',
+      save: 'Enregistrer',
+    },
+    actions: { reset: 'Réinitialiser le mot de passe', disable: 'Désactiver', enable: 'Activer', remove: 'Supprimer', edit: 'Modifier' },
+    empty: { title: 'Aucun utilisateur pour l’instant', body: 'Invitez un coéquipier à partager cette instance CloudNest.' },
+    toast: {
+      invited: 'Invitation créée. Remettez le lien à usage unique.',
+      reset: 'Lien de réinitialisation créé. Il expire dans une heure.',
+      updated: 'Utilisateur mis à jour.',
+      removed: 'Utilisateur supprimé.',
+    },
+    errors: {
+      email_already_exists: 'Un compte existe déjà pour cet e-mail.',
+      invalid_email: 'Saisissez une adresse e-mail valide.',
+      invalid_display_name: 'Saisissez un nom affiché.',
+      invalid_role: 'Choisissez un rôle valide.',
+      last_admin: 'Le dernier administrateur ne peut pas être rétrogradé, désactivé ni supprimé.',
+      user_admin_immutable: 'Le compte administrateur intégré ne peut pas être modifié ici.',
+      user_has_files: 'Cet utilisateur possède encore des fichiers. Supprimez-les d’abord.',
+      user_disabled: 'Ce compte est désactivé. Activez-le d’abord.',
+      user_not_found: 'Cet utilisateur n’existe plus.',
+      invalid_allowance: 'Le quota doit être un nombre entier de gigaoctets positif.',
+      fallback: 'L’opération a échoué.',
+    },
+  },
+
+  /** Roadmap Phase 3 (§4.3): the Profile item in the account menu. */
+  profile: {
+    title: 'Profil',
+    account: 'Compte',
+    role: 'Rôle',
+    email: 'E-mail',
+    used: 'Stockage utilisé',
+    ofAllowance: '{used} sur {allowance}',
+    unlimited: 'Aucune limite de quota',
+  },
+
   auth: {
     changePassword: {
       title: 'Changer le mot de passe administrateur',
@@ -941,6 +1021,8 @@ export const appFr: AppStrings = {
       job_paused: 'Cette tâche est en pause.',
       account_busy: 'Ce compte a déjà son maximum de téléversements de blocs simultanés. CloudNest réessaie automatiquement.',
       job_not_found: 'Cette tâche d’envoi n’existe plus.',
+      allowance_exceeded:
+        'Cet envoi dépasserait votre quota de stockage. Supprimez des fichiers ou demandez plus d’espace à un administrateur.',
       fallback: 'L’envoi a signalé une erreur.',
     },
     download: {

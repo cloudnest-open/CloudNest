@@ -6,7 +6,7 @@ import type { DeletionService } from '../deletions/deletion-service.js';
 import { DeletionError } from '../deletions/deletion-service.js';
 import type { Queries } from '../db/queries.js';
 import type { CsrfBundle } from '../auth/csrf.js';
-import { requireAdmin } from '../middleware/require-admin.js';
+import { requirePrincipal, type Principal } from '../middleware/require-admin.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import type Database from 'better-sqlite3';
 import { revokeGrantsForLink } from '../shares/unlock-gate.js';
@@ -91,22 +91,52 @@ export function sharesRouter(deps: {
   settings?: SettingsService;
 }): Router {
   const router = Router();
-  const adminOnly = requireAdmin(deps.queries);
+  const principalOnly = requirePrincipal(deps.queries);
 
-  // ---- admin: create/list/update/revoke ----
-  router.post('/api/share-links', adminOnly, deps.csrf.doubleCsrfProtection, async (req, res) => {
+  /**
+   * Phase 3: a member manages only their own links and files. A foreign link
+   * or file answers with the SAME 404 as a missing one; admins see and manage
+   * everything.
+   */
+  function assertLinkAccess(link: { createdBy: string | null } | null | undefined, principal: Principal): void {
+    if (principal.role === 'admin') return;
+    if (!link || link.createdBy !== principal.id) throw new ShareError('share_not_found', 404);
+  }
+
+  /** A member may only delete their own files (same 404 for foreign ids). */
+  function assertFileOwnedBy(fileId: string, principal: Principal): void {
+    if (principal.role === 'admin') return;
+    const row = deps.db.prepare('SELECT user_id FROM files WHERE id = ?').get(fileId) as
+      | { user_id: string }
+      | undefined;
+    if (!row || row.user_id !== principal.id) throw new ShareError('file_not_found', 404);
+  }
+
+  function assertDeletionJobAccess(jobId: string, principal: Principal): void {
+    if (principal.role === 'admin') return;
+    const owner = deps.deletions.jobFileOwner(jobId);
+    if (owner !== principal.id) throw new ShareError('file_not_found', 404);
+  }
+
+  // ---- create/list/update/revoke ----
+  router.post('/api/share-links', principalOnly, deps.csrf.doubleCsrfProtection, async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const body = (req.body ?? {}) as {
       fileIds?: unknown; password?: unknown; expiresAt?: unknown; downloadLimit?: unknown;
     };
     const fileIds = Array.isArray(body.fileIds) ? body.fileIds.filter((v): v is string => typeof v === 'string') : [];
     try {
+      const principal = req.principal!;
       const settings = resolveSettings(req, deps.settings);
       const common = {
         fileIds,
         expiresAt: effectiveExpiresAt(body.expiresAt, settings),
         downloadLimit: effectiveDownloadLimit(body.downloadLimit, settings),
         baseUrl: effectiveBaseUrl(deps.appBaseUrl, settings),
+        // the link belongs to its creator; a member can only ever share
+        // files they own (the service enforces it with the same 404 shape)
+        createdBy: principal.id,
+        restrictToOwnerId: principal.role === 'admin' ? null : principal.id,
       };
       const password = typeof body.password === 'string' && body.password.length > 0 ? body.password : null;
       // A "passwords required" policy must never silently yield an open link,
@@ -120,7 +150,7 @@ export function sharesRouter(deps: {
       } else {
         created = deps.shares.create(common);
       }
-      deps.queries.recordAudit('share_link_created', true, 'created');
+      deps.queries.recordAudit('share_link_created', true, 'created', { userId: principal.id });
       // the raw URL is returned exactly once, here
       res.status(201).json({ id: created.id, url: created.url, fileIds: created.fileIds });
     } catch (err) {
@@ -128,25 +158,32 @@ export function sharesRouter(deps: {
     }
   });
 
-  router.get('/api/share-links', adminOnly, (_req, res) => {
+  router.get('/api/share-links', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json({ links: deps.shares.listLinks() });
+    const principal = req.principal!;
+    res.json({ links: deps.shares.listLinks(principal.role === 'admin' ? null : principal.id) });
   });
 
-  router.get('/api/share-links/:id', adminOnly, (req, res) => {
+  router.get('/api/share-links/:id', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
-    const link = deps.shares.getLink(String(req.params['id']));
-    if (!link) {
-      res.status(404).json({ error: 'share_not_found', code: 'share_not_found' });
-      return;
+    try {
+      const link = deps.shares.getLink(String(req.params['id']));
+      assertLinkAccess(link, req.principal!);
+      if (!link) {
+        res.status(404).json({ error: 'share_not_found', code: 'share_not_found' });
+        return;
+      }
+      res.json({ link });
+    } catch (err) {
+      shareError(res, err);
     }
-    res.json({ link });
   });
 
-  router.patch('/api/share-links/:id', adminOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
+  router.patch('/api/share-links/:id', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
     res.set('Cache-Control', 'no-store');
     const body = (req.body ?? {}) as { expiresAt?: unknown; downloadLimit?: unknown };
     try {
+      assertLinkAccess(deps.shares.getLink(String(req.params['id'])), req.principal!);
       deps.shares.update(String(req.params['id']), {
         ...(body.expiresAt !== undefined ? { expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null } : {}),
         ...(body.downloadLimit !== undefined
@@ -159,9 +196,10 @@ export function sharesRouter(deps: {
     }
   });
 
-  router.post('/api/share-links/:id/rotate', adminOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
+  router.post('/api/share-links/:id/rotate', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
+      assertLinkAccess(deps.shares.getLink(String(req.params['id'])), req.principal!);
       const rotated = deps.shares.rotate(
         String(req.params['id']),
         effectiveBaseUrl(deps.appBaseUrl, resolveSettings(req, deps.settings)),
@@ -173,9 +211,10 @@ export function sharesRouter(deps: {
     }
   });
 
-  router.post('/api/share-links/:id/revoke', adminOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
+  router.post('/api/share-links/:id/revoke', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
+      assertLinkAccess(deps.shares.getLink(String(req.params['id'])), req.principal!);
       const revoked = deps.shares.revoke(String(req.params['id']));
       revokeGrantsForLink(deps.db, String(req.params['id']));
       res.json({ ok: true, revoked });
@@ -184,10 +223,11 @@ export function sharesRouter(deps: {
     }
   });
 
-  // ---- admin: deletion ----
-  router.delete('/api/files/:fileId', adminOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
+  // ---- deletion ----
+  router.delete('/api/files/:fileId', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
+      assertFileOwnedBy(String(req.params['fileId']), req.principal!);
       const queued = deps.deletions.enqueue(String(req.params['fileId']));
       res.status(202).json({ ok: true, jobId: queued.jobId, state: queued.state });
     } catch (err) {
@@ -195,19 +235,25 @@ export function sharesRouter(deps: {
     }
   });
 
-  router.get('/api/deletions/:jobId', adminOnly, (req, res) => {
-    res.set('Cache-Control', 'no-store');
-    const status = deps.deletions.jobStatus(String(req.params['jobId']));
-    if (!status) {
-      res.status(404).json({ error: 'file_not_found', code: 'file_not_found' });
-      return;
-    }
-    res.json({ deletion: status });
-  });
-
-  router.post('/api/deletions/:jobId/retry', adminOnly, deps.csrf.doubleCsrfProtection, async (req, res) => {
+  router.get('/api/deletions/:jobId', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
+      assertDeletionJobAccess(String(req.params['jobId']), req.principal!);
+      const status = deps.deletions.jobStatus(String(req.params['jobId']));
+      if (!status) {
+        res.status(404).json({ error: 'file_not_found', code: 'file_not_found' });
+        return;
+      }
+      res.json({ deletion: status });
+    } catch (err) {
+      shareError(res, err);
+    }
+  });
+
+  router.post('/api/deletions/:jobId/retry', principalOnly, deps.csrf.doubleCsrfProtection, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      assertDeletionJobAccess(String(req.params['jobId']), req.principal!);
       const result = await deps.deletions.retry(String(req.params['jobId']));
       res.json({ ok: true, result });
     } catch (err) {

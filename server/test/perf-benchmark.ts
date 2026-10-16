@@ -80,8 +80,8 @@ function seedWorld(db: import('better-sqlite3').Database, dataDir: string, accou
     // files row first — file_chunks.chunk_id FK-references it
     const manifestPlaceholder = crypto.randomBytes(32).toString('hex');
     db.prepare(
-      `INSERT INTO files (id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, manifest_hash, created_at, completed_at)
-       VALUES (?, ?, ?, 'application/octet-stream', ?, ?, 'completed', ?, ?, ?)`,
+      `INSERT INTO files (id, user_id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count, state, manifest_hash, created_at, completed_at)
+       VALUES (?, 'usr_admin', ?, ?, 'application/octet-stream', ?, ?, 'completed', ?, ?, ?)`,
     ).run(fileId, `bench-file-${f}.bin`, chunkCount * 8 * MIB, 8 * MIB, chunkCount, manifestPlaceholder, now, now);
     for (let c = 0; c < chunkCount; c++) {
       const chunkId = `bench-chunk-${chunkSeq++}`;

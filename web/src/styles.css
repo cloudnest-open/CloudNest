@@ -2356,3 +2356,24 @@ input:disabled, select:disabled, textarea:disabled {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- Roadmap Phase 3: Users panel + one-time invite/reset link ---- */
+.users-table td { vertical-align: middle; }
+.one-time-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.one-time-link {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface-muted, rgba(127, 127, 127, 0.08));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  user-select: all;
+}

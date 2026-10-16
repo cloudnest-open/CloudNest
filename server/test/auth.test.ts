@@ -20,7 +20,7 @@ test('correct password logs in; wrong password gives generic 401', async () => {
     const ok = await client.login(GOOD);
     assert.equal(ok.status, 200);
     const me = await client.get('/api/auth/me');
-    assert.deepEqual(me.body, { authenticated: true, username: 'admin' });
+    assert.deepEqual(me.body, { authenticated: true, kind: 'admin', role: 'admin', username: 'admin', displayName: 'admin', userId: 'usr_admin' });
   } finally {
     await app.close();
   }
@@ -79,7 +79,7 @@ test('authVersion check: stale session is rejected after password change', async
 
     // client B (regenerated session with the new authVersion) still works
     const okMe = await clientB.get('/api/auth/me');
-    assert.deepEqual(okMe.body, { authenticated: true, username: 'admin' });
+    assert.deepEqual(okMe.body, { authenticated: true, kind: 'admin', role: 'admin', username: 'admin', displayName: 'admin', userId: 'usr_admin' });
   } finally {
     await app.close();
   }

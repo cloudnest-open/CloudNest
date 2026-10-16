@@ -772,6 +772,104 @@ const M0012_S3_BUSINESS_TIER: Migration = {
   },
 };
 
+const M0013_MULTI_USER: Migration = {
+  version: 13,
+  name: '0013-multi-user-foundation',
+  // Roadmap Phase 3 (multi-user foundation):
+  // - users: every principal that can own files. The built-in root admin is
+  //   seeded here as the ATTRIBUTION identity for all pre-multi-user data; its
+  //   credentials stay in admin_users (the root admin keeps signing in with the
+  //   username 'admin', never an email, through the existing login path).
+  // - user_tokens: single-use invite / password-reset tokens. Only the SHA-256
+  //   hash is stored, exactly like share-link and session tokens.
+  // - files.user_id: NOT NULL with a foreign key to users, which SQLite cannot
+  //   add in place. file_chunks/share_link_items/transfer_jobs/deletion_attempts
+  //   reference files with ON DELETE RESTRICT, so the rebuild follows the
+  //   documented altertable §7 procedure with foreign keys disabled — the same
+  //   exception M0012 uses — and verifies foreign_key_check before re-enabling.
+  // - share_links.created_by: who created a link, so members only manage their
+  //   own. Nullable ADD COLUMN with a REFERENCES clause is legal in SQLite
+  //   (NULL default), so this one stays a plain ALTER.
+  requiresForeignKeysOff: true,
+  up: (db) => {
+    db.exec(`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('admin','member')),
+        status TEXT NOT NULL CHECK(status IN ('active','invited','disabled')),
+        password_hash TEXT,
+        password_changed_at TEXT,
+        allowance_bytes INTEGER CHECK(allowance_bytes IS NULL OR allowance_bytes >= 0),
+        auth_version INTEGER NOT NULL DEFAULT 1 CHECK(auth_version >= 1),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    // db.exec cannot bind parameters: the seeded row is written through a
+    // prepared statement like every other parameterized write.
+    db.prepare(
+      `INSERT INTO users (id, email, display_name, role, status, password_hash, password_changed_at,
+        allowance_bytes, auth_version, created_at, updated_at)
+       VALUES ('usr_admin', 'admin', 'admin', 'admin', 'active', NULL, NULL, NULL, 1, ?, ?)`,
+    ).run(new Date().toISOString(), new Date().toISOString());
+
+    db.exec(`
+      CREATE TABLE user_tokens (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        purpose TEXT NOT NULL CHECK(purpose IN ('invite','password_reset')),
+        expires_at INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX idx_user_tokens_user ON user_tokens(user_id, purpose);
+      CREATE INDEX idx_user_tokens_expiry ON user_tokens(expires_at);
+    `);
+
+    // rebuild files with the owner column; every existing row belongs to the
+    // built-in admin by definition (only one principal existed until now)
+    db.exec('DROP TABLE IF EXISTS files_new;');
+    db.exec(`
+      CREATE TABLE files_new (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        original_name TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+        mime_type TEXT,
+        chunk_size_bytes INTEGER NOT NULL CHECK(chunk_size_bytes > 0),
+        chunk_count INTEGER NOT NULL CHECK(chunk_count >= 0),
+        whole_sha256 TEXT,
+        manifest_hash TEXT,
+        state TEXT NOT NULL CHECK(state IN ('draft','uploading','completed','incomplete','needs_repair','deleting','deletion_pending','deleted','failed')),
+        tier TEXT NOT NULL DEFAULT 'personal' CHECK(tier IN ('personal','business')),
+        created_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+    `);
+    db.exec(`
+      INSERT INTO files_new (id, user_id, original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count,
+        whole_sha256, manifest_hash, state, tier, created_at, completed_at)
+      SELECT id, 'usr_admin', original_name, size_bytes, mime_type, chunk_size_bytes, chunk_count,
+        whole_sha256, manifest_hash, state, tier, created_at, completed_at
+      FROM files;
+    `);
+    db.exec('DROP TABLE files;');
+    db.exec('ALTER TABLE files_new RENAME TO files;');
+    db.exec('CREATE INDEX idx_files_state_created ON files(state, created_at);');
+    db.exec('CREATE INDEX idx_files_user_created ON files(user_id, created_at);');
+
+    db.exec('ALTER TABLE share_links ADD COLUMN created_by TEXT REFERENCES users(id);');
+    db.exec("UPDATE share_links SET created_by = 'usr_admin' WHERE created_by IS NULL;");
+    db.exec('CREATE INDEX idx_share_links_created_by ON share_links(created_by) WHERE created_by IS NOT NULL;');
+
+    const violations = db.pragma('foreign_key_check', { simple: true });
+    if (violations) {
+      throw new Error('foreign_key_check failed after the multi-user migration');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -785,4 +883,5 @@ export const allMigrations: readonly Migration[] = [
   M0010_SHARE_UNLOCK_GRANTS,
   M0011_QUOTA_SCOPE_AND_RECONCILE,
   M0012_S3_BUSINESS_TIER,
+  M0013_MULTI_USER,
 ];

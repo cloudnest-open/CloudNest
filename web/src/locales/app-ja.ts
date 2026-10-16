@@ -74,6 +74,10 @@ export const appJa: AppStrings = {
     },
     account: {
       role: 'CloudNest 管理者',
+      roleMember: 'CloudNest メンバー',
+      roleAdminLabel: '管理者',
+      profile: 'プロフィール',
+      users: 'ユーザー',
       close: 'アカウントメニューを閉じる',
       signOut: 'サインアウト',
     },
@@ -809,6 +813,82 @@ export const appJa: AppStrings = {
     },
   },
 
+  /** Roadmap Phase 3: the member-facing dashboard usage card. */
+  memberUsage: {
+    used: '使用済みストレージ',
+    usedSub: '許容量のうち',
+    usedOf: '{used} / {allowance}',
+    unlimited: '許容量の上限なし',
+    uploadsActive: '実行中のアップロード',
+    uploadsActiveSub: '実行・一時停止中のジョブ',
+  },
+
+  /** Roadmap Phase 3 (§4.3): admin Users panel. */
+  users: {
+    title: 'ユーザー',
+    invite: 'ユーザーを招待',
+    note: '招待リンクとリセットリンクは一度しか表示されません。今すぐコピーして直接お渡しください — CloudNest はメールを送信しません。',
+    table: { email: 'メールアドレス', role: '役割', used: '使用量', allowance: '許容量', status: '状態', actions: '操作' },
+    role: { admin: '管理者', member: 'メンバー' },
+    status: { active: '有効', invited: '招待済み', disabled: '無効' },
+    unlimited: '無制限',
+    you: 'あなた',
+    inviteDialog: {
+      title: 'ユーザーを招待',
+      email: 'メールアドレス',
+      name: '表示名',
+      role: '役割',
+      allowance: 'ストレージ許容量 (GB)',
+      allowanceHint: '空欄で上限なし。このユーザー自身のファイルのみを計算します。',
+      submit: '招待を作成',
+    },
+    linkDialog: {
+      title: '1 回限りのリンクを発行しました',
+      note: '今すぐこのリンクをコピーしてください。一度しか表示されず、使用すると失効し、このアカウントへのアクセスを許可します。',
+      copy: 'リンクをコピー',
+      copied: 'コピーしました',
+    },
+    editDialog: {
+      title: 'ユーザーを編集',
+      role: '役割',
+      allowance: 'ストレージ許容量 (GB)',
+      allowanceHint: '空欄で上限なし。',
+      save: '保存',
+    },
+    actions: { reset: 'パスワードをリセット', disable: '無効化', enable: '有効化', remove: '削除', edit: '編集' },
+    empty: { title: 'ユーザーはまだいません', body: 'この CloudNest インスタンスを共有するメンバーを招待しましょう。' },
+    toast: {
+      invited: '招待を作成しました。1 回限りのリンクをお渡しください。',
+      reset: 'リセットリンクを作成しました。1 時間で失効します。',
+      updated: 'ユーザーを更新しました。',
+      removed: 'ユーザーを削除しました。',
+    },
+    errors: {
+      email_already_exists: 'そのメールアドレスのアカウントは既に存在します。',
+      invalid_email: '有効なメールアドレスを入力してください。',
+      invalid_display_name: '表示名を入力してください。',
+      invalid_role: '有効な役割を選択してください。',
+      last_admin: '最後の管理者は降格・無効化・削除できません。',
+      user_admin_immutable: '組み込み管理者アカウントはここでは編集できません。',
+      user_has_files: 'このユーザーにはまだファイルがあります。先に削除してください。',
+      user_disabled: 'このアカウントは無効です。先に有効化してください。',
+      user_not_found: 'そのユーザーはもう存在しません。',
+      invalid_allowance: '許容量は正の整数 GB で指定してください。',
+      fallback: '操作に失敗しました。',
+    },
+  },
+
+  /** Roadmap Phase 3 (§4.3): the Profile item in the account menu. */
+  profile: {
+    title: 'プロフィール',
+    account: 'アカウント',
+    role: '役割',
+    email: 'メールアドレス',
+    used: '使用済みストレージ',
+    ofAllowance: '{used} / {allowance}',
+    unlimited: '許容量の上限なし',
+  },
+
   auth: {
     changePassword: {
       title: '管理者パスワードの変更',
@@ -915,6 +995,8 @@ export const appJa: AppStrings = {
       job_paused: 'このジョブは一時停止中です。',
       account_busy: 'そのアカウントは同時チャンクアップロードの上限に達しています。CloudNest が自動的に再試行します。',
       job_not_found: 'そのアップロードジョブは存在しません。',
+      allowance_exceeded:
+        'このアップロードはストレージ許容量を超えます。ファイルを削除するか、管理者に容量の増加を依頼してください。',
       fallback: 'アップロードがエラーを報告しました。',
     },
     download: {

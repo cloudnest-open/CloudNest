@@ -89,7 +89,11 @@ export const appEn = {
     },
     account: {
       role: 'CloudNest administrator',
+      roleMember: 'CloudNest member',
+      roleAdminLabel: 'Admin',
       close: 'Close account menu',
+      profile: 'Profile',
+      users: 'Users',
       signOut: 'Sign out',
     },
     loading: 'Loading…',
@@ -831,6 +835,92 @@ export const appEn = {
     },
   },
 
+  /** Roadmap Phase 3: the member-facing dashboard usage card. */
+  memberUsage: {
+    used: 'Storage Used',
+    usedSub: 'of your allowance',
+    usedOf: '{used} of {allowance}',
+    unlimited: 'No allowance limit',
+    uploadsActive: 'Active Uploads',
+    uploadsActiveSub: 'Running & paused jobs',
+  },
+
+  /** Roadmap Phase 3 (§4.3): admin Users panel. */
+  users: {
+    title: 'Users',
+    invite: 'Invite user',
+    note: 'Invite and reset links are shown once. Copy them and hand them over directly — CloudNest does not send email.',
+    table: {
+      email: 'Email',
+      role: 'Role',
+      used: 'Used',
+      allowance: 'Allowance',
+      status: 'Status',
+      actions: 'Actions',
+    },
+    role: { admin: 'Admin', member: 'Member' },
+    status: { active: 'Active', invited: 'Invited', disabled: 'Disabled' },
+    unlimited: 'Unlimited',
+    you: 'You',
+    inviteDialog: {
+      title: 'Invite user',
+      email: 'Email',
+      name: 'Display name',
+      role: 'Role',
+      allowance: 'Storage allowance (GB)',
+      allowanceHint: "Leave empty for no limit. Counts this user's own files only.",
+      submit: 'Create invite',
+    },
+    linkDialog: {
+      title: 'One-time link ready',
+      note: 'Copy this link now. It is shown only once, expires on use, and grants access to this account.',
+      copy: 'Copy link',
+      copied: 'Copied',
+    },
+    editDialog: {
+      title: 'Edit user',
+      role: 'Role',
+      allowance: 'Storage allowance (GB)',
+      allowanceHint: 'Leave empty for no limit.',
+      save: 'Save',
+    },
+    actions: { reset: 'Reset password', disable: 'Disable', enable: 'Enable', remove: 'Remove', edit: 'Edit' },
+    empty: {
+      title: 'No users yet',
+      body: 'Invite a teammate to share this CloudNest instance.',
+    },
+    toast: {
+      invited: 'Invitation created. Hand over the one-time link.',
+      reset: 'Reset link created. It expires in one hour.',
+      updated: 'User updated.',
+      removed: 'User removed.',
+    },
+    errors: {
+      email_already_exists: 'That email already has an account.',
+      invalid_email: 'Enter a valid email address.',
+      invalid_display_name: 'Enter a display name.',
+      invalid_role: 'Choose a valid role.',
+      last_admin: 'The last administrator cannot be demoted, disabled or removed.',
+      user_admin_immutable: 'The built-in administrator account cannot be edited here.',
+      user_has_files: 'This user still owns files. Delete them first.',
+      user_disabled: 'This account is disabled. Enable it first.',
+      user_not_found: 'That user no longer exists.',
+      invalid_allowance: 'The allowance must be a positive whole number of gigabytes.',
+      fallback: 'The operation failed.',
+    },
+  },
+
+  /** Roadmap Phase 3 (§4.3): the Profile item in the account menu. */
+  profile: {
+    title: 'Profile',
+    account: 'Account',
+    role: 'Role',
+    email: 'Email',
+    used: 'Storage used',
+    ofAllowance: '{used} of {allowance}',
+    unlimited: 'No allowance limit',
+  },
+
   auth: {
     changePassword: {
       title: 'Change admin password',
@@ -939,6 +1029,8 @@ export const appEn = {
       job_paused: 'This job is paused.',
       account_busy: 'That account already has its maximum concurrent chunk uploads. CloudNest retries automatically.',
       job_not_found: 'That upload job no longer exists.',
+      allowance_exceeded:
+        'This upload would exceed your storage allowance. Remove files or ask an administrator for more space.',
       fallback: 'The upload reported an error.',
     },
     download: {

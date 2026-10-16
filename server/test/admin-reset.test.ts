@@ -30,8 +30,8 @@ test('reset removes only admin + sessions; preserves non-auth metadata', async (
        VALUES (?, 'mega', 'kept', 'connected', ?, ?)`,
     ).run(crypto.randomUUID(), now, now);
     db.prepare(
-      `INSERT INTO files (id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
-       VALUES (?, 'keep.txt', 1, 1, 1, 'completed', ?)`,
+      `INSERT INTO files (id, user_id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
+       VALUES (?, 'usr_admin', 'keep.txt', 1, 1, 1, 'completed', ?)`,
     ).run(crypto.randomUUID(), now);
     db.prepare(
       `INSERT INTO audit_events (id, created_at, event_type, success, reason_code) VALUES (?, ?, 'login', 1, 'success')`,

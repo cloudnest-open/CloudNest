@@ -218,6 +218,18 @@ export class DeletionService {
     return { jobId: job.id, fileId: job.file_id, state: job.state, safeErrorCode: job.last_safe_error_code, attempts };
   }
 
+  /**
+   * Roadmap Phase 3 ownership check: the users-table id that owns the file a
+   * deletion job belongs to, or null when the job does not exist. Routes
+   * answer a foreign job with the same 404 as a missing one.
+   */
+  jobFileOwner(jobId: string): string | null {
+    const row = this.db.prepare(
+      'SELECT f.user_id AS user_id FROM transfer_jobs j JOIN files f ON f.id = j.file_id WHERE j.id = ? AND j.job_type = ?',
+    ).get(jobId, 'delete') as { user_id: string } | undefined;
+    return row?.user_id ?? null;
+  }
+
   /** Startup: retry queued/pending deletions so obligations are not forgotten. */
   async resumePending(): Promise<{ attempted: number; completed: number }> {
     const pending = this.pendingJobs();

@@ -8,6 +8,7 @@ import type { CredentialsStore } from '../providers/credentials-store.js';
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError, type AccountTier } from '../providers/types.js';
 import { drainAndHash, HashingCounter } from './streaming.js';
+import { ADMIN_USER_ID } from '../middleware/require-admin.js';
 
 /**
  * Upload planning, allocation, chunk commit, resume and cancellation (M9).
@@ -90,6 +91,16 @@ export interface PlanRequest {
   mimeType?: string | null;
   idempotencyKey: string;
   /**
+   * Roadmap Phase 3: the requesting principal's users-table id. The file is
+   * owned by this account and the per-user allowance is checked against it;
+   * part of the idempotency fingerprint so two accounts can never share one
+   * idempotency key. HTTP routes ALWAYS pass the authenticated principal's id
+   * explicitly; the service-level default is the built-in admin's attribution
+   * row ('usr_admin'), which is what direct service callers (tests, recovery
+   * tooling) mean.
+   */
+  userId?: string;
+  /**
    * Storage tier (roadmap Phase 1). A file may only draw capacity from its own
    * tier's pool: personal files never land on business (S3) accounts and
    * business files never land on personal OAuth accounts. Defaults to
@@ -102,6 +113,27 @@ export interface PlanRequest {
    * exact V1 behaviour, so a caller that does not pass it is unaffected.
    */
   routingStrategy?: RoutingStrategy;
+}
+
+/** Why a plan was refused: the user's own allowance, plainly stated. */
+export interface AllowanceExceededDetail {
+  allowanceBytes: number;
+  usedBytes: number;
+  requestedBytes: number;
+}
+
+/**
+ * Roadmap Phase 3: the plan would push this user past their own storage
+ * allowance. This is independent of pool capacity — the pool may be half
+ * empty and the refusal still stands. 403: the request is authenticated and
+ * well-formed, but this principal may not store that much.
+ */
+export class AllowanceExceededError extends UploadError {
+  readonly detail: AllowanceExceededDetail;
+  constructor(detail: AllowanceExceededDetail) {
+    super('allowance_exceeded', 403);
+    this.detail = detail;
+  }
 }
 
 /**
@@ -157,6 +189,9 @@ export class UploadService {
         // tier is part of the plan contract: the same key must not silently
         // move an upload to a different storage pool (roadmap Phase 1)
         t: req.tier ?? 'personal',
+        // the owner is part of the contract too (roadmap Phase 3): two
+        // accounts must never share one idempotency key's reservation
+        u: req.userId ?? ADMIN_USER_ID,
       }))
       .digest('hex');
   }
@@ -309,13 +344,36 @@ export class UploadService {
       });
     }
 
-    // one transaction: file + job + every allocation, or nothing at all
+    // one transaction: allowance check + file + job + every allocation, or
+    // nothing at all. The check lives INSIDE the transaction so two concurrent
+    // plans from the same user cannot both pass against the same old usage.
+    const ownerUserId = req.userId ?? ADMIN_USER_ID;
     const now = new Date().toISOString();
     const fileId = this.q.newId();
     const jobId = this.q.newId();
     const txn = this.db.transaction(() => {
+      const allowanceRow = this.db.prepare('SELECT allowance_bytes FROM users WHERE id = ?')
+        .get(ownerUserId) as { allowance_bytes: number | null } | undefined;
+      if (allowanceRow === undefined) {
+        // the principal vanished between auth and plan; refuse rather than
+        // attach a file to a nonexistent owner
+        throw new UploadError('user_not_found', 403);
+      }
+      if (allowanceRow.allowance_bytes !== null) {
+        const used = (this.db.prepare(
+          "SELECT COALESCE(SUM(size_bytes), 0) AS n FROM files WHERE user_id = ? AND state <> 'deleted'",
+        ).get(ownerUserId) as { n: number }).n;
+        if (used + plan.fileSizeBytes > allowanceRow.allowance_bytes) {
+          throw new AllowanceExceededError({
+            allowanceBytes: allowanceRow.allowance_bytes,
+            usedBytes: used,
+            requestedBytes: plan.fileSizeBytes,
+          });
+        }
+      }
       this.q.insertFile.run({
         id: fileId,
+        user_id: ownerUserId,
         original_name: name,
         size_bytes: plan.fileSizeBytes,
         mime_type: req.mimeType ?? null,
@@ -373,7 +431,7 @@ export class UploadService {
     const jobId = this.q.newId();
     const txn = this.db.transaction(() => {
       this.q.insertFile.run({
-        id: fileId, original_name: name, size_bytes: 0, mime_type: req.mimeType ?? null,
+        id: fileId, user_id: req.userId ?? ADMIN_USER_ID, original_name: name, size_bytes: 0, mime_type: req.mimeType ?? null,
         chunk_size_bytes: chunkSizeBytes, chunk_count: 0, state: 'completed', tier: req.tier ?? 'personal', created_at: now,
       });
       this.q.insertJob.run({
@@ -392,36 +450,59 @@ export class UploadService {
     return this.q.getJob.get(jobId) as JobRow | undefined;
   }
 
+  /**
+   * Phase 3 ownership check: the users-table id that owns a transfer job's
+   * file, or null when the job (or its file) does not exist. Routes use this
+   * so a member naming a foreign job gets the same 404 as a missing one.
+   */
+  jobOwnerUserId(jobId: string): string | null {
+    const row = this.q.getJobOwnerUserId.get(jobId) as { user_id: string } | undefined;
+    return row?.user_id ?? null;
+  }
+
   getFile(fileId: string): FileRow | undefined {
     return this.q.getFile.get(fileId) as FileRow | undefined;
   }
 
-  listJobs(limit = 50): JobRow[] {
-    return this.q.listJobs.all(limit) as unknown as JobRow[];
+  /** `userId: string | null` — null lists everything (the admin view). */
+  listJobs(limit = 50, userId: string | null = null): JobRow[] {
+    if (userId === null) return this.q.listJobs.all(limit) as unknown as JobRow[];
+    return this.q.listJobsForUser.all(userId, limit) as unknown as JobRow[];
   }
 
-  listFiles(limit: number, offset: number): FileRow[] {
-    return this.q.listFiles.all(limit, offset) as unknown as FileRow[];
+  listFiles(limit: number, offset: number, userId: string | null = null): FileRow[] {
+    if (userId === null) return this.q.listFiles.all(limit, offset) as unknown as FileRow[];
+    return this.q.listFilesForUser.all(userId, limit, offset) as unknown as FileRow[];
   }
 
   /**
    * FE-02: search the whole library in SQL before pagination. An empty term
-   * degenerates to the plain paginated listing.
+   * degenerates to the plain paginated listing. A member's "whole library" is
+   * their own files only; the admin sees everything.
    */
-  searchFiles(search: string, limit: number, offset: number): FileRow[] {
+  searchFiles(search: string, limit: number, offset: number, userId: string | null = null): FileRow[] {
     const term = search.trim().toLowerCase();
+    if (userId !== null) {
+      if (term === '') return this.listFiles(limit, offset, userId);
+      return this.q.searchFilesForUser.all(userId, term, limit, offset) as unknown as FileRow[];
+    }
     if (term === '') return this.listFiles(limit, offset);
     return this.q.searchFiles.all(term, limit, offset) as unknown as FileRow[];
   }
 
-  countSearchedFiles(search: string): number {
+  countSearchedFiles(search: string, userId: string | null = null): number {
     const term = search.trim().toLowerCase();
+    if (userId !== null) {
+      if (term === '') return this.countFiles(userId);
+      return (this.q.countSearchedFilesForUser.get(userId, term) as { n: number }).n;
+    }
     if (term === '') return this.countFiles();
     return (this.q.countSearchedFiles.get(term) as { n: number }).n;
   }
 
-  countFiles(): number {
-    return (this.q.countFiles.get() as { n: number }).n;
+  countFiles(userId: string | null = null): number {
+    if (userId === null) return (this.q.countFiles.get() as { n: number }).n;
+    return (this.q.countFilesForUser.get(userId) as { n: number }).n;
   }
 
   listAllocations(jobId: string): AllocationRow[] {
@@ -1214,8 +1295,12 @@ export class UploadService {
     return storageHealthOf(unavailable);
   }
 
-  /** Live dashboard summary: real rows only, unknown quota stays unknown. */
-  dashboardSummary(): {
+  /** Live dashboard summary: real rows only, unknown quota stays unknown.
+   * `userId` scopes the file/job counts and the recent list to one account's
+   * own data (Phase 3); when set, `userUsage` carries that account's honest
+   * used-vs-allowance numbers. Pool-level fields are unchanged — the ROUTE
+   * omits them for members, because provider accounts are admin knowledge. */
+  dashboardSummary(userId: string | null = null): {
     accounts: Array<{ id: string; provider: string; displayLabel: string; status: string; quotaStatus: string }>;
     activeJobs: number;
     recentFiles: number;
@@ -1234,6 +1319,7 @@ export class UploadService {
     };
     activeShareLinks: number;
     recentFileList: Array<ReturnType<UploadService['publicFile']>>;
+    userUsage: { usedBytes: number; allowanceBytes: number | null } | null;
   } {
     const rows = this.providerQ.listAccounts.all() as Array<{
       id: string; provider: string; display_label: string; status: string; quota_status: string;
@@ -1319,17 +1405,30 @@ export class UploadService {
       id: a.id, provider: a.provider, displayLabel: a.display_label,
       status: a.status, quotaStatus: a.quota_status,
     }));
-    const jobs = this.q.listJobs.all(200) as unknown as JobRow[];
+    const jobs = this.listJobs(200, userId);
     const activeJobs = jobs.filter((j) => j.state === 'running' || j.state === 'queued' || j.state === 'paused').length;
-    const files = this.q.listFiles.all(5, 0) as unknown as FileRow[];
-    const activeShareLinks = (
-      this.db.prepare("SELECT COUNT(*) AS n FROM share_links WHERE state = 'active'").get() as { n: number }
-    ).n;
+    const files = this.listFiles(5, 0, userId);
+    const activeShareLinks = userId === null
+      ? (this.db.prepare("SELECT COUNT(*) AS n FROM share_links WHERE state = 'active'").get() as { n: number }).n
+      : (this.db.prepare(
+          "SELECT COUNT(*) AS n FROM share_links l WHERE l.state = 'active' AND l.created_by = ?",
+        ).get(userId) as { n: number }).n;
+    const userUsage = userId === null ? null : (() => {
+      const row = this.db.prepare('SELECT allowance_bytes FROM users WHERE id = ?').get(userId) as
+        | { allowance_bytes: number | null }
+        | undefined;
+      return {
+        usedBytes: (this.db.prepare(
+          "SELECT COALESCE(SUM(size_bytes), 0) AS n FROM files WHERE user_id = ? AND state <> 'deleted'",
+        ).get(userId) as { n: number }).n,
+        allowanceBytes: row?.allowance_bytes ?? null,
+      };
+    })();
     return {
       accounts,
       activeJobs,
       recentFiles: files.length,
-      totalFiles: this.countFiles(),
+      totalFiles: this.countFiles(userId),
       accountsDetailed,
       storage,
       activeShareLinks,
@@ -1338,6 +1437,7 @@ export class UploadService {
         const recent = this.publicFiles(files.map((f) => f.id));
         return files.map((f) => recent.get(f.id)!);
       })(),
+      userUsage,
     };
   }
 

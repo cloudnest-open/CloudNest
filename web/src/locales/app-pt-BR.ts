@@ -74,6 +74,10 @@ export const appPtBr: AppStrings = {
     },
     account: {
       role: 'Administrador do CloudNest',
+      roleMember: 'Membro do CloudNest',
+      roleAdminLabel: 'Admin',
+      profile: 'Perfil',
+      users: 'Usuários',
       close: 'Fechar menu da conta',
       signOut: 'Sair',
     },
@@ -831,6 +835,82 @@ export const appPtBr: AppStrings = {
     },
   },
 
+  /** Roadmap Phase 3: the member-facing dashboard usage card. */
+  memberUsage: {
+    used: 'Armazenamento usado',
+    usedSub: 'da sua cota',
+    usedOf: '{used} de {allowance}',
+    unlimited: 'Sem limite de cota',
+    uploadsActive: 'Envios ativos',
+    uploadsActiveSub: 'Trabalhos em execução ou pausados',
+  },
+
+  /** Roadmap Phase 3 (§4.3): admin Users panel. */
+  users: {
+    title: 'Usuários',
+    invite: 'Convidar usuário',
+    note: 'Os links de convite e de redefinição são exibidos uma única vez. Copie-os e entregue diretamente — o CloudNest não envia e-mail.',
+    table: { email: 'E-mail', role: 'Papel', used: 'Usado', allowance: 'Cota', status: 'Status', actions: 'Ações' },
+    role: { admin: 'Admin', member: 'Membro' },
+    status: { active: 'Ativo', invited: 'Convidado', disabled: 'Desativado' },
+    unlimited: 'Ilimitado',
+    you: 'Você',
+    inviteDialog: {
+      title: 'Convidar usuário',
+      email: 'E-mail',
+      name: 'Nome de exibição',
+      role: 'Papel',
+      allowance: 'Cota de armazenamento (GB)',
+      allowanceHint: 'Deixe vazio para sem limite. Conta apenas os arquivos deste usuário.',
+      submit: 'Criar convite',
+    },
+    linkDialog: {
+      title: 'Link de uso único pronto',
+      note: 'Copie este link agora. Ele é exibido uma única vez, expira ao ser usado e concede acesso a esta conta.',
+      copy: 'Copiar link',
+      copied: 'Copiado',
+    },
+    editDialog: {
+      title: 'Editar usuário',
+      role: 'Papel',
+      allowance: 'Cota de armazenamento (GB)',
+      allowanceHint: 'Deixe vazio para sem limite.',
+      save: 'Salvar',
+    },
+    actions: { reset: 'Redefinir senha', disable: 'Desativar', enable: 'Ativar', remove: 'Remover', edit: 'Editar' },
+    empty: { title: 'Nenhum usuário ainda', body: 'Convide alguém para compartilhar esta instância do CloudNest.' },
+    toast: {
+      invited: 'Convite criado. Entregue o link de uso único.',
+      reset: 'Link de redefinição criado. Ele expira em uma hora.',
+      updated: 'Usuário atualizado.',
+      removed: 'Usuário removido.',
+    },
+    errors: {
+      email_already_exists: 'Já existe uma conta com esse e-mail.',
+      invalid_email: 'Informe um e-mail válido.',
+      invalid_display_name: 'Informe um nome de exibição.',
+      invalid_role: 'Escolha um papel válido.',
+      last_admin: 'O último administrador não pode ser rebaixado, desativado ou removido.',
+      user_admin_immutable: 'A conta de administrador embutida não pode ser editada aqui.',
+      user_has_files: 'Este usuário ainda possui arquivos. Exclua-os primeiro.',
+      user_disabled: 'Esta conta está desativada. Ative-a primeiro.',
+      user_not_found: 'Esse usuário não existe mais.',
+      invalid_allowance: 'A cota deve ser um número inteiro positivo de gigabytes.',
+      fallback: 'A operação falhou.',
+    },
+  },
+
+  /** Roadmap Phase 3 (§4.3): the Profile item in the account menu. */
+  profile: {
+    title: 'Perfil',
+    account: 'Conta',
+    role: 'Papel',
+    email: 'E-mail',
+    used: 'Armazenamento usado',
+    ofAllowance: '{used} de {allowance}',
+    unlimited: 'Sem limite de cota',
+  },
+
   auth: {
     changePassword: {
       title: 'Alterar senha do administrador',
@@ -940,6 +1020,8 @@ export const appPtBr: AppStrings = {
       job_paused: 'Esta tarefa está em pausa.',
       account_busy: 'Essa conta já atingiu o máximo de envios de blocos simultâneos. O CloudNest tenta novamente automaticamente.',
       job_not_found: 'Essa tarefa de envio não existe mais.',
+      allowance_exceeded:
+        'Este envio excederia sua cota de armazenamento. Remova arquivos ou peça mais espaço a um administrador.',
       fallback: 'O envio relatou um erro.',
     },
     download: {

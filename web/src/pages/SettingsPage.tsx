@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { ChangePasswordPanel } from './AuthPages.js';
+import { UsersPanel } from './UsersPanel.js';
 import { ProviderSetupCard } from '../components/ProviderSetupCard.js';
 import { applyTheme, currentTheme, type Theme } from '../theme.js';
 import { setConfirmDestructivePreference } from '../confirm.js';
@@ -19,10 +20,10 @@ import { LOCALES, LOCALE_NAMES, type Locale } from '../i18n.js';
  */
 
 type SectionKey =
-  | 'general' | 'upload' | 'downloads' | 'sharing' | 'domain' | 'security' | 'system' | 'diagnostics' | 'providerSetup';
+  | 'general' | 'upload' | 'downloads' | 'sharing' | 'domain' | 'security' | 'system' | 'diagnostics' | 'providerSetup' | 'users';
 
 const SECTION_KEYS: SectionKey[] = [
-  'general', 'upload', 'downloads', 'sharing', 'domain', 'security', 'system', 'diagnostics', 'providerSetup',
+  'general', 'upload', 'downloads', 'sharing', 'domain', 'security', 'system', 'diagnostics', 'providerSetup', 'users',
 ];
 
 type NumericDrafts = { workers: string; downloadConcurrency: string; expiryDays: string; downloadLimit: string };
@@ -63,9 +64,9 @@ interface BackupInfo {
   appVersion: string;
 }
 
-export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: () => void } = {}) {
+export function SettingsPage({ onGoToCloudAccounts, initialSection }: { onGoToCloudAccounts?: () => void; initialSection?: SectionKey } = {}) {
   const { t, tf, locale, setLocale } = useI18n();
-  const [section, setSection] = useState<SectionKey>('general');
+  const [section, setSection] = useState<SectionKey>(initialSection ?? 'general');
   const [focusProviderSetup, setFocusProviderSetup] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [system, setSystem] = useState<SystemInfo | null>(null);
@@ -298,7 +299,7 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
         <span className="sr-only">{t.settings.tabsAria}</span>
         <select value={section} onChange={(e) => setSection(e.target.value as SectionKey)}>
           {SECTION_KEYS.map((key) => (
-            <option key={key} value={key}>{key === 'providerSetup' ? t.settings.providerSetup.title : t.settings.tab[key]}</option>
+            <option key={key} value={key}>{key === 'providerSetup' ? t.settings.providerSetup.title : key === 'users' ? t.users.title : t.settings.tab[key]}</option>
           ))}
         </select>
       </label>
@@ -329,7 +330,7 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
               }
             }}
           >
-            {key === 'providerSetup' ? t.settings.providerSetup.title : t.settings.tab[key]}
+            {key === 'providerSetup' ? t.settings.providerSetup.title : key === 'users' ? t.users.title : t.settings.tab[key]}
           </button>
         ))}
       </div>
@@ -765,6 +766,12 @@ export function SettingsPage({ onGoToCloudAccounts }: { onGoToCloudAccounts?: ()
             <h2>{t.settings.providerSetup.title}</h2>
             <ProviderSetupCard onChanged={() => void load()} onGoToCloudAccounts={onGoToCloudAccounts} />
           </section>
+        </div>
+      )}
+
+      {section === 'users' && (
+        <div role="tabpanel" id="settings-panel-users" aria-labelledby="settings-tab-users">
+          <UsersPanel />
         </div>
       )}
       </div>

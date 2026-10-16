@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Cloud, Database, FileText, Link as LinkIcon, Plus, Upload, RefreshCw, Activity,
+  Cloud, CloudUpload, Database, FileText, Link as LinkIcon, Plus, Upload, RefreshCw, Activity,
 } from 'lucide-react';
 import { api } from '../api.js';
 import { FileTable, type FileTableRow } from '../components/FileTable.js';
@@ -64,6 +64,8 @@ interface Summary {
     storedAcross: string[];
     createdAt: string;
   }>;
+  /** Phase 3: present only in the member-scoped summary response. */
+  userUsage?: { usedBytes: number; allowanceBytes: number | null } | null;
 }
 
 interface DisplayStorage {
@@ -209,7 +211,7 @@ interface RecentFile {
 
 const RECENT_PAGE_SIZE = 5;
 
-export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void }) {
+export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (page: Page) => void; isMember?: boolean }) {
   const { t, tf, plural } = useI18n();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -291,7 +293,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
   }
 
   const accounts = summary?.accountsDetailed ?? [];
-  const storage = summary ? buildDisplayStorage(accounts, summary.storage.lastCheckedAt) : undefined;
+  // the member-scoped summary omits pool-level fields entirely — optional
+  // chaining keeps their dashboard rendering without them
+  const storage = summary ? buildDisplayStorage(accounts, summary.storage?.lastCheckedAt ?? null) : undefined;
   const storageUnlimited = accounts.some((account) =>
     account.provider !== 'mega' && account.status === 'connected' && account.quotaStatus === 'current' && account.quotaUnlimited
   );
@@ -334,6 +338,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
         <div className="dash-main">
           {/* ---- summary cards ---- */}
           <div className="metric-grid">
+            {!isMember && (
             <section className="card metric-card">
               <span className="metric-icon" aria-hidden="true"><Cloud size={20} /></span>
               <div className="metric-text">
@@ -348,7 +353,9 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                 )}
               </div>
             </section>
+            )}
 
+            {!isMember ? (
             <section className="card metric-card">
               <span className="metric-icon" aria-hidden="true"><Database size={20} /></span>
               <div className="metric-text">
@@ -379,6 +386,25 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                 )}
               </div>
             </section>
+            ) : (
+            <section className="card metric-card">
+              <span className="metric-icon" aria-hidden="true"><Database size={20} /></span>
+              <div className="metric-text">
+                <span className="metric-label">{t.memberUsage.used}</span>
+                <span className="metric-value">
+                  {formatBytes(summary?.userUsage?.usedBytes ?? 0)}
+                </span>
+                <span className="small muted">
+                  {summary?.userUsage?.allowanceBytes == null
+                    ? t.memberUsage.unlimited
+                    : tf(t.memberUsage.usedOf, {
+                        used: formatBytes(summary.userUsage.usedBytes),
+                        allowance: formatBytes(summary.userUsage.allowanceBytes),
+                      })}
+                </span>
+              </div>
+            </section>
+            )}
 
             <section className="card metric-card">
               <span className="metric-icon" aria-hidden="true"><FileText size={20} /></span>
@@ -389,6 +415,16 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
               </div>
             </section>
 
+            {isMember ? (
+            <section className="card metric-card">
+              <span className="metric-icon" aria-hidden="true"><CloudUpload size={20} /></span>
+              <div className="metric-text">
+                <span className="metric-label">{t.memberUsage.uploadsActive}</span>
+                <span className="metric-value">{summary?.activeJobs ?? 0}</span>
+                <span className="small muted">{t.memberUsage.uploadsActiveSub}</span>
+              </div>
+            </section>
+            ) : (
             <section className="card metric-card">
               <span className="metric-icon" aria-hidden="true"><LinkIcon size={20} /></span>
               <div className="metric-text">
@@ -397,9 +433,14 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                 <span className="small muted">{t.dashboard.metric.linksSub}</span>
               </div>
             </section>
+            )}
           </div>
 
-          {/* ---- provider slots: five cards, always present (reference 01) ---- */}
+          {/* ---- provider slots: five cards, always present (reference 01).
+              Members never see the pool view: accounts and quotas are the
+              owner's knowledge (roadmap Phase 3). ---- */}
+          {!isMember && (
+          <>
           <h2 className="section-title">{t.dashboard.providersTitle}</h2>
           {loading && accounts.length === 0 ? (
             <section className="card"><SkeletonRows rows={2} /></section>
@@ -449,6 +490,8 @@ export function DashboardPage({ onNavigate }: { onNavigate: (page: Page) => void
                 );
               })}
             </div>
+          )}
+          </>
           )}
 
           {/* ---- recent files: real server-paged table ---- */}

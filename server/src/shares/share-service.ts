@@ -39,6 +39,8 @@ export interface ShareLinkRow {
   download_count: number;
   state: string;
   revoked_at: string | null;
+  /** Roadmap Phase 3: the users-table id of whoever created the link. */
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -46,21 +48,29 @@ export interface ShareLinkRow {
 export class ShareService {
   constructor(private readonly db: Database.Database) {}
 
-  /** Create a link for one or more complete files; returns the raw URL once. */
+  /** Create a link for one or more complete files; returns the raw URL once.
+   * Phase 3: `createdBy` records the owning principal (routes always pass the
+   * authenticated principal's id; omitted means an ownerless, admin-managed
+   * link); `restrictToOwnerId` (set for members) refuses any file they do not
+   * own with the same 404 a missing file gets. */
   create(input: {
     fileIds: string[];
     password?: string | null;
     expiresAt?: string | null;
     downloadLimit?: number | null;
     baseUrl: string;
+    createdBy?: string | null;
+    restrictToOwnerId?: string | null;
   }): { id: string; url: string; fileIds: string[] } {
     if (input.fileIds.length === 0) throw new ShareError('invalid_share_metadata', 400);
     const unique = [...new Set(input.fileIds)];
     for (const fileId of unique) {
-      const file = this.db.prepare('SELECT id, state, chunk_count FROM files WHERE id = ?').get(fileId) as
-        | { id: string; state: string; chunk_count: number }
+      const file = this.db.prepare('SELECT id, state, chunk_count, user_id FROM files WHERE id = ?').get(fileId) as
+        | { id: string; state: string; chunk_count: number; user_id: string }
         | undefined;
-      if (!file) throw new ShareError('file_not_found', 404);
+      if (!file || (input.restrictToOwnerId !== null && input.restrictToOwnerId !== undefined && file.user_id !== input.restrictToOwnerId)) {
+        throw new ShareError('file_not_found', 404);
+      }
       // only a fully stored file can be shared
       if (file.state !== 'completed') throw new ShareError('file_not_complete', 409);
     }
@@ -84,9 +94,9 @@ export class ShareService {
     const now = new Date().toISOString();
     const txn = this.db.transaction(() => {
       this.db.prepare(
-        `INSERT INTO share_links (id, token_hash, password_hash, expires_at, download_limit, download_count, state, created_at, updated_at)
-         VALUES (?, ?, NULL, ?, ?, 0, 'active', ?, ?)`,
-      ).run(id, sha256(rawToken), input.expiresAt ?? null, input.downloadLimit ?? null, now, now);
+        `INSERT INTO share_links (id, token_hash, password_hash, expires_at, download_limit, download_count, state, created_by, created_at, updated_at)
+         VALUES (?, ?, NULL, ?, ?, 0, 'active', ?, ?, ?)`,
+      ).run(id, sha256(rawToken), input.expiresAt ?? null, input.downloadLimit ?? null, input.createdBy ?? null, now, now);
       for (const fileId of unique) {
         this.db.prepare('INSERT INTO share_link_items (share_link_id, file_id) VALUES (?, ?)').run(id, fileId);
       }
@@ -102,16 +112,20 @@ export class ShareService {
     expiresAt?: string | null;
     downloadLimit?: number | null;
     baseUrl: string;
+    createdBy?: string | null;
+    restrictToOwnerId?: string | null;
   }): Promise<{ id: string; url: string; fileIds: string[] }> {
     const policy = validatePasswordPolicy(input.password);
     if (!policy.ok) throw new ShareError('invalid_share_metadata', 400);
     const passwordHash = await hashPassword(input.password);
     const unique = [...new Set(input.fileIds)];
     for (const fileId of unique) {
-      const file = this.db.prepare('SELECT id, state FROM files WHERE id = ?').get(fileId) as
-        | { id: string; state: string }
+      const file = this.db.prepare('SELECT id, state, user_id FROM files WHERE id = ?').get(fileId) as
+        | { id: string; state: string; user_id: string }
         | undefined;
-      if (!file) throw new ShareError('file_not_found', 404);
+      if (!file || (input.restrictToOwnerId !== null && input.restrictToOwnerId !== undefined && file.user_id !== input.restrictToOwnerId)) {
+        throw new ShareError('file_not_found', 404);
+      }
       if (file.state !== 'completed') throw new ShareError('file_not_complete', 409);
     }
     if (input.downloadLimit !== null && input.downloadLimit !== undefined) {
@@ -124,9 +138,9 @@ export class ShareService {
     const now = new Date().toISOString();
     const txn = this.db.transaction(() => {
       this.db.prepare(
-        `INSERT INTO share_links (id, token_hash, password_hash, expires_at, download_limit, download_count, state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 0, 'active', ?, ?)`,
-      ).run(id, sha256(rawToken), passwordHash, input.expiresAt ?? null, input.downloadLimit ?? null, now, now);
+        `INSERT INTO share_links (id, token_hash, password_hash, expires_at, download_limit, download_count, state, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, 'active', ?, ?, ?)`,
+      ).run(id, sha256(rawToken), passwordHash, input.expiresAt ?? null, input.downloadLimit ?? null, input.createdBy ?? null, now, now);
       for (const fileId of unique) {
         this.db.prepare('INSERT INTO share_link_items (share_link_id, file_id) VALUES (?, ?)').run(id, fileId);
       }
@@ -307,18 +321,27 @@ export class ShareService {
     }
   }
 
-  /** Admin listing: no token, no password hash. */
-  listLinks(): Array<{
+  /** Admin listing: no token, no password hash. `createdBy` scopes a member
+   * to their own links; null (admin) lists everything. */
+  listLinks(createdBy: string | null = null): Array<{
     id: string; state: string; expiresAt: string | null; downloadLimit: number | null;
-    downloadCount: number; hasPassword: boolean; fileCount: number; createdAt: string;
+    downloadCount: number; hasPassword: boolean; fileCount: number; createdBy: string | null; createdAt: string;
   }> {
-    const rows = this.db.prepare(
-      `SELECT l.id, l.state, l.expires_at, l.download_limit, l.download_count, l.password_hash, l.created_at,
+    const rows = (
+      createdBy === null
+        ? this.db.prepare(
+            `SELECT l.id, l.state, l.expires_at, l.download_limit, l.download_count, l.password_hash, l.created_by, l.created_at,
               (SELECT COUNT(*) FROM share_link_items i WHERE i.share_link_id = l.id) AS file_count
        FROM share_links l ORDER BY l.created_at DESC`,
-    ).all() as Array<{
+          ).all()
+        : this.db.prepare(
+            `SELECT l.id, l.state, l.expires_at, l.download_limit, l.download_count, l.password_hash, l.created_by, l.created_at,
+              (SELECT COUNT(*) FROM share_link_items i WHERE i.share_link_id = l.id) AS file_count
+       FROM share_links l WHERE l.created_by = ? ORDER BY l.created_at DESC`,
+          ).all(createdBy)
+    ) as Array<{
       id: string; state: string; expires_at: string | null; download_limit: number | null;
-      download_count: number; password_hash: string | null; created_at: string; file_count: number;
+      download_count: number; password_hash: string | null; created_by: string | null; created_at: string; file_count: number;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -328,6 +351,7 @@ export class ShareService {
       downloadCount: r.download_count,
       hasPassword: r.password_hash !== null,
       fileCount: r.file_count,
+      createdBy: r.created_by,
       createdAt: r.created_at,
     }));
   }

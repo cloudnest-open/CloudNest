@@ -62,6 +62,18 @@ export function makeDownloadQueries(db: Database.Database) {
       "SELECT * FROM transfer_jobs WHERE job_type = 'download' ORDER BY created_at DESC LIMIT ? OFFSET ?",
     ),
     countDownloadJobs: db.prepare("SELECT COUNT(*) AS n FROM transfer_jobs WHERE job_type = 'download'"),
+    // Phase 3: a member's download history is their own files' jobs only.
+    listDownloadJobsForUser: db.prepare(
+      `SELECT j.* FROM transfer_jobs j JOIN files f ON f.id = j.file_id
+       WHERE j.job_type = 'download' AND f.user_id = ? ORDER BY j.created_at DESC LIMIT ? OFFSET ?`,
+    ),
+    countDownloadJobsForUser: db.prepare(
+      `SELECT COUNT(*) AS n FROM transfer_jobs j JOIN files f ON f.id = j.file_id
+       WHERE j.job_type = 'download' AND f.user_id = ?`,
+    ),
+    getJobOwnerUserId: db.prepare(
+      'SELECT f.user_id AS user_id FROM transfer_jobs j JOIN files f ON f.id = j.file_id WHERE j.id = ?',
+    ),
     runningDownloadJobs: db.prepare("SELECT * FROM transfer_jobs WHERE job_type = 'download' AND state = 'running'"),
 
     getFile: db.prepare('SELECT * FROM files WHERE id = ?'),

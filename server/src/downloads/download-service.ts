@@ -113,7 +113,7 @@ export class DownloadService {
 
   getFile(fileId: string) {
     return this.q.getFile.get(fileId) as
-      | { id: string; original_name: string; size_bytes: number; mime_type: string | null; chunk_size_bytes: number; chunk_count: number; manifest_hash: string | null; state: string }
+      | { id: string; user_id: string; original_name: string; size_bytes: number; mime_type: string | null; chunk_size_bytes: number; chunk_count: number; manifest_hash: string | null; state: string }
       | undefined;
   }
 
@@ -502,12 +502,24 @@ export class DownloadService {
     return job;
   }
 
-  listDownloadJobs(limit: number, offset: number): DownloadJobRow[] {
-    return this.q.listDownloadJobs.all(limit, offset) as unknown as DownloadJobRow[];
+  listDownloadJobs(limit: number, offset: number, userId: string | null = null): DownloadJobRow[] {
+    if (userId === null) return this.q.listDownloadJobs.all(limit, offset) as unknown as DownloadJobRow[];
+    return this.q.listDownloadJobsForUser.all(userId, limit, offset) as unknown as DownloadJobRow[];
   }
 
-  countDownloadJobs(): number {
-    return (this.q.countDownloadJobs.get() as { n: number }).n;
+  countDownloadJobs(userId: string | null = null): number {
+    if (userId === null) return (this.q.countDownloadJobs.get() as { n: number }).n;
+    return (this.q.countDownloadJobsForUser.get(userId) as { n: number }).n;
+  }
+
+  /**
+   * Phase 3 ownership check: the users-table id that owns a download job's
+   * file, or null when the job does not exist. Routes answer a foreign job
+   * with the same 404 as a missing one.
+   */
+  downloadJobOwnerUserId(jobId: string): string | null {
+    const row = this.q.getJobOwnerUserId.get(jobId) as { user_id: string } | undefined;
+    return row?.user_id ?? null;
   }
 
   /** Cancel an active stream and mark the job truthfully. */

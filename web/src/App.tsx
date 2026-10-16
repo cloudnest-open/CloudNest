@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   Cloud, House, Folder, CloudUpload, Download, Link, Settings as SettingsIcon,
-  Sun, Moon, LogOut, Search, ChevronDown, Bell, Menu, X,
+  Sun, Moon, LogOut, Search, ChevronDown, Bell, Menu, X, UserRound, UsersRound,
 } from 'lucide-react';
 import { api, refreshCsrfToken } from './api.js';
 import { FirstRunPage, LoginPage } from './pages/EntryPage.js';
+import { ChangePasswordPanel } from './pages/AuthPages.js';
 import { CloudAccountsPage } from './pages/CloudAccountsPage.js';
 import { UploadsPage } from './pages/UploadsPage.js';
 import { FilesPage } from './pages/FilesPage.js';
@@ -12,7 +13,7 @@ import { DashboardPage } from './pages/DashboardPage.js';
 import { DownloadsPage } from './pages/DownloadsPage.js';
 import { SharedLinksPage } from './pages/SharedLinksPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
-import { EmptyState, ToastProvider } from './components/ui.js';
+import { Dialog, EmptyState, ToastProvider } from './components/ui.js';
 import { FileActionsProvider } from './components/FileActionsProvider.js';
 import { LanguageMenu } from './components/LanguageMenu.js';
 import { useI18n } from './i18n-context.js';
@@ -61,6 +62,14 @@ interface SearchHit {
 }
 type AuthState = 'loading' | 'setup' | 'login' | 'ready';
 
+/** The authenticated principal, from /api/auth/me (roadmap Phase 3). */
+interface PrincipalInfo {
+  role: 'admin' | 'member';
+  username: string;
+  displayName: string;
+  email: string | null;
+}
+
 interface Health {
   status: string;
   version: string;
@@ -77,6 +86,10 @@ export default function App() {
   const [theme, setTheme] = useState(currentTheme());
   // Real account identity from the backend drives the avatar initials.
   const [username, setUsername] = useState('admin');
+  // Roadmap Phase 3: the full principal (role decides nav + admin surfaces).
+  const [principal, setPrincipal] = useState<PrincipalInfo | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<'general' | 'users'>('general');
   // Notification bell: a real toggle whose panel truthfully reports the
   // (currently empty) notification list — never a decorative icon.
   const [bellOpen, setBellOpen] = useState(false);
@@ -89,6 +102,29 @@ export default function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [fileSearch, setFileSearch] = useState<{ text: string; seq: number }>({ text: '', seq: 0 });
 
+  /** Load the authenticated principal; decides role-aware nav and menus. */
+  const refreshMe = async (): Promise<void> => {
+    const me = await api.me();
+    const data = me.data as {
+      authenticated?: boolean;
+      role?: 'admin' | 'member';
+      username?: string;
+      displayName?: string;
+      email?: string | null;
+    };
+    if (data.authenticated === true) {
+      setPrincipal({
+        role: data.role ?? 'admin',
+        username: data.username ?? 'admin',
+        displayName: data.displayName ?? data.username ?? 'admin',
+        email: data.email ?? null,
+      });
+      setUsername(data.username ?? 'admin');
+    } else {
+      setPrincipal(null);
+    }
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -99,10 +135,9 @@ export default function App() {
           setAuthState('setup');
           return;
         }
+        await refreshMe();
         const me = await api.me();
         const authenticated = (me.data as { authenticated?: boolean })?.authenticated === true;
-        const meUsername = (me.data as { username?: string }).username;
-        if (meUsername) setUsername(meUsername);
         setAuthState(authenticated ? 'ready' : 'login');
       } catch {
         setServerError(t.common.errorNetwork);
@@ -198,15 +233,46 @@ export default function App() {
     await api.logout();
     await refreshCsrfToken();
     setNotice(null);
+    setPrincipal(null);
+    setProfileOpen(false);
     setAuthState('login');
   }
 
+  // Roadmap Phase 3: members work with their own files only; Cloud Accounts
+  // and Settings are admin surfaces and stay out of their navigation.
+  const isAdmin = principal?.role === 'admin';
+  const visibleNav = NAV_ITEMS.filter((item) => isAdmin || (item !== 'Cloud Accounts' && item !== 'Settings'));
+
+  function goToUsers(): void {
+    setSettingsSection('users');
+    setActive('Settings');
+    setAccountOpen(false);
+  }
+
   if (authState === 'setup') {
-    return <FirstRunPage onDone={() => setAuthState('ready')} />;
+    return (
+      <FirstRunPage
+        onDone={async () => {
+          // the form just authenticated this session: load the principal
+          // before the shell renders, so role-aware nav is correct at once
+          try { await refreshMe(); } catch { /* fall back to defaults */ }
+          setAuthState('ready');
+        }}
+      />
+    );
   }
   if (authState === 'login') {
     // The entry page renders the server-unreachable state itself (localized).
-    return <LoginPage onDone={() => setAuthState('ready')} serverError={serverError} />;
+    return (
+      <LoginPage
+        onDone={async () => {
+          // same as first-run: the principal decides nav, menus and scopes
+          try { await refreshMe(); } catch { /* fall back to defaults */ }
+          setAuthState('ready');
+        }}
+        serverError={serverError}
+      />
+    );
   }
   if (authState === 'loading') {
     return <div className="auth-card">{t.shell.loading}</div>;
@@ -249,7 +315,7 @@ export default function App() {
             }
           }}
         >
-          {NAV_ITEMS.map((item) => {
+          {visibleNav.map((item) => {
             const Icon = NAV_ICONS[item];
             return (
               <button
@@ -402,7 +468,9 @@ export default function App() {
               <span className="account-avatar" aria-hidden="true">{username.charAt(0).toUpperCase()}</span>
               <span className="account-text">
                 <strong>{username}</strong>
-                <span className="muted">{t.shell.account.role}</span>
+                <span className="muted">
+                  {principal?.role === 'member' ? t.shell.account.roleMember : t.shell.account.role}
+                </span>
               </span>
               <ChevronDown size={15} aria-hidden="true" className="muted" />
             </button>
@@ -430,6 +498,28 @@ export default function App() {
                     document.querySelector<HTMLButtonElement>('.account-chip')?.focus();
                   }
                 }}>
+                  {/* Roadmap Phase 3 (§4.3): Profile for every principal,
+                      Users for admins only, then Sign out. */}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="account-item"
+                    onClick={() => { setAccountOpen(false); setProfileOpen(true); }}
+                  >
+                    <UserRound size={15} aria-hidden="true" />
+                    <span>{t.shell.account.profile}</span>
+                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="account-item"
+                      onClick={goToUsers}
+                    >
+                      <UsersRound size={15} aria-hidden="true" />
+                      <span>{t.shell.account.users}</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     role="menuitem"
@@ -451,7 +541,11 @@ export default function App() {
             </div>
           )}
           {active === 'Settings' ? (
-            <SettingsPage onGoToCloudAccounts={() => setActive('Cloud Accounts')} />
+            <SettingsPage
+              key={settingsSection}
+              initialSection={settingsSection}
+              onGoToCloudAccounts={() => setActive('Cloud Accounts')}
+            />
           ) : active === 'Cloud Accounts' ? (
             <CloudAccountsPage onGoToSettings={() => setActive('Settings')} />
           ) : active === 'Uploads' ? (
@@ -460,7 +554,7 @@ export default function App() {
             <FilesPage
               key={fileSearch.seq}
               initialSearch={fileSearch.text}
-              onGoToCloudAccounts={() => setActive('Cloud Accounts')}
+              {...(isAdmin ? { onGoToCloudAccounts: () => setActive('Cloud Accounts') } : {})}
               onGoToUploads={() => setActive('Uploads')}
             />
           ) : active === 'Downloads' ? (
@@ -468,7 +562,7 @@ export default function App() {
           ) : active === 'Shared Links' ? (
             <SharedLinksPage />
           ) : active === 'Dashboard' ? (
-            <DashboardPage onNavigate={(page) => setActive(page)} />
+            <DashboardPage isMember={!isAdmin} onNavigate={(page) => setActive(page)} />
           ) : (
             <section className="card placeholder-card">
               <h1>{navLabel(active)}</h1>
@@ -478,6 +572,21 @@ export default function App() {
         </main>
       </div>
     </div>
+    {profileOpen && principal && (
+      <Dialog title={t.profile.title} onClose={() => setProfileOpen(false)}>
+        <div className="upload-form">
+          <p><strong>{t.profile.account}:</strong> {principal.role === 'member' ? principal.email : principal.username}</p>
+          <p>
+            <strong>{t.profile.role}:</strong>{' '}
+            {principal.role === 'member' ? t.shell.account.roleMember : t.shell.account.role}
+          </p>
+        </div>
+        {/* Real, working password change for every principal kind: the
+            endpoint serves the root admin and users-table accounts alike;
+            it re-authenticates the current session, so no logout is needed. */}
+        <ChangePasswordPanel onDone={() => setProfileOpen(false)} />
+      </Dialog>
+    )}
     <ConfirmHost />
     </FileActionsProvider>
     </ToastProvider>

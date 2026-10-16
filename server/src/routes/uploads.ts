@@ -1,13 +1,15 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { UploadService, PlanRequest } from '../uploads/upload-service.js';
-import { UploadError, CapacityInsufficientError, compareProviderChecksum } from '../uploads/upload-service.js';
+import {
+  UploadError, CapacityInsufficientError, AllowanceExceededError, compareProviderChecksum,
+} from '../uploads/upload-service.js';
 import type { SettingsService } from '../settings/settings-service.js';
 import { assertAllowedChunkSizeMiB, DEFAULT_CHUNK_SIZE_MIB, mibToBytes, ChunkMathError } from '../uploads/chunk-math.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
 import type { Queries } from '../db/queries.js';
 import type { CsrfBundle } from '../auth/csrf.js';
-import { requireAdmin } from '../middleware/require-admin.js';
+import { requireAdmin, requirePrincipal, type Principal } from '../middleware/require-admin.js';
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
 import { isS3Bundle, presignUploadUrl } from '../providers/s3-files.js';
@@ -46,6 +48,11 @@ function uploadErrorResponse(res: Response, err: unknown): void {
     res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode, ...err.detail });
     return;
   }
+  if (err instanceof AllowanceExceededError) {
+    // Phase 3: the user's own allowance, plainly stated.
+    res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode, ...err.detail });
+    return;
+  }
   if (err instanceof UploadError) {
     res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode });
     return;
@@ -62,6 +69,16 @@ function uploadErrorResponse(res: Response, err: unknown): void {
   res.status(500).json({ error: 'upload_failed', code: 'upload_failed' });
 }
 
+/**
+ * Phase 3: a member may only touch their own jobs. A foreign or missing job
+ * answers with the SAME 404 — job existence is not disclosed across owners.
+ */
+function assertJobAccess(deps: { uploads: UploadService }, jobId: string, principal: Principal): void {
+  if (principal.role === 'admin') return;
+  const owner = deps.uploads.jobOwnerUserId(jobId);
+  if (owner !== principal.id) throw new UploadError('job_not_found', 404);
+}
+
 /** Raw binary chunk upload. Mounted before JSON middleware. */
 export function rawChunkRouter(deps: {
   queries: Queries;
@@ -71,7 +88,7 @@ export function rawChunkRouter(deps: {
   settings: SettingsService;
 }): Router {
   const router = Router();
-  const adminOnly = requireAdmin(deps.queries);
+  const principalOnly = requirePrincipal(deps.queries);
   const chunkLimiter = rateLimit({
     windowMs: 60 * 1000, limit: 600, standardHeaders: 'draft-8', legacyHeaders: false,
     message: { error: 'provider_rate_limited' },
@@ -101,7 +118,7 @@ export function rawChunkRouter(deps: {
 
   router.put(
     '/api/uploads/:jobId/chunks/:chunkIndex',
-    adminOnly,
+    principalOnly,
     chunkLimiter,
     (req: Request, res: Response, next: NextFunction) => {
       // CSRF for a raw-binary request: the token travels in the header, so the
@@ -135,6 +152,7 @@ export function rawChunkRouter(deps: {
       try {
         const job = deps.uploads.getJob(jobId);
         if (!job) throw new UploadError('job_not_found', 404);
+        assertJobAccess(deps, jobId, req.principal!);
         if (job.state === 'cancelled') throw new UploadError('job_not_resumable', 409);
         if (job.state === 'paused') throw new UploadError('job_paused', 409);
         // UL-2: a completed file is immutable from the upload path; a late or
@@ -263,13 +281,13 @@ export function uploadsRouter(deps: {
   settings: SettingsService;
 }): Router {
   const router = Router();
-  const adminOnly = requireAdmin(deps.queries);
+  const principalOnly = requirePrincipal(deps.queries);
   const planLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false,
     message: { error: 'provider_rate_limited' },
   });
 
-  router.post('/api/uploads/plan', adminOnly, deps.csrf.doubleCsrfProtection, planLimiter, (req, res) => {
+  router.post('/api/uploads/plan', principalOnly, deps.csrf.doubleCsrfProtection, planLimiter, (req, res) => {
     res.set('Cache-Control', 'no-store');
     const body = (req.body ?? {}) as Record<string, unknown>;
     const idempotencyKey = typeof req.headers['idempotency-key'] === 'string'
@@ -300,6 +318,8 @@ export function uploadsRouter(deps: {
         chunkSizeMiB,
         mimeType: typeof body['mimeType'] === 'string' ? (body['mimeType'] as string) : null,
         idempotencyKey,
+        // the file belongs to the authenticated principal (Phase 3)
+        userId: req.principal!.id,
         tier,
         routingStrategy: deps.settings.get('upload.spaceAwareRouting') ? 'capacity-aware' : 'balanced',
       };
@@ -321,29 +341,38 @@ export function uploadsRouter(deps: {
     }
   });
 
-  router.get('/api/uploads', adminOnly, (_req, res) => {
+  router.get('/api/uploads', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
-    const jobs = deps.uploads.listJobs(50).map((job) => deps.uploads.publicJob(job.id));
+    const principal = req.principal!;
+    const jobs = deps.uploads.listJobs(50, principal.role === 'admin' ? null : principal.id)
+      .map((job) => deps.uploads.publicJob(job.id));
     // M12.a: the worker bound the UI must respect is served from settings, so
     // the client can never invent a higher limit than the admin configured.
     res.json({ jobs, workerLimit: deps.settings.effectiveWorkerLimit() });
   });
 
-  router.get('/api/uploads/:jobId', adminOnly, (req, res) => {
+  router.get('/api/uploads/:jobId', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
-    const job = deps.uploads.publicJob(String(req.params['jobId']));
-    if (!job) {
-      res.status(404).json({ error: 'job_not_found', code: 'job_not_found' });
-      return;
+    const jobId = String(req.params['jobId']);
+    try {
+      assertJobAccess(deps, jobId, req.principal!);
+      const job = deps.uploads.publicJob(jobId);
+      if (!job) {
+        res.status(404).json({ error: 'job_not_found', code: 'job_not_found' });
+        return;
+      }
+      res.json({ job });
+    } catch (err) {
+      uploadErrorResponse(res, err);
     }
-    res.json({ job });
   });
 
-  router.get('/api/uploads/:jobId/resume-manifest', adminOnly, (req, res) => {
+  router.get('/api/uploads/:jobId/resume-manifest', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
     const offset = Math.max(0, Number(req.query['offset'] ?? 0) || 0);
     const limit = Math.min(500, Math.max(1, Number(req.query['limit'] ?? 200) || 200));
     try {
+      assertJobAccess(deps, String(req.params['jobId']), req.principal!);
       const manifest = deps.uploads.getResumeManifest(String(req.params['jobId']), offset, limit);
       res.json(manifest);
     } catch (err) {
@@ -363,7 +392,7 @@ export function uploadsRouter(deps: {
 
   router.post(
     '/api/uploads/:jobId/chunks/:chunkIndex/begin',
-    adminOnly,
+    principalOnly,
     deps.csrf.doubleCsrfProtection,
     directLimiter,
     async (req: Request, res: Response) => {
@@ -380,6 +409,7 @@ export function uploadsRouter(deps: {
       try {
         const job = deps.uploads.getJob(jobId);
         if (!job) throw new UploadError('job_not_found', 404);
+        assertJobAccess(deps, jobId, req.principal!);
         if (job.state === 'cancelled' || job.state === 'completed') throw new UploadError('job_not_resumable', 409);
         if (job.state === 'paused') throw new UploadError('job_paused', 409);
         const allocation = deps.uploads.listAllocations(jobId).find((a) => a.chunk_index === chunkIndex);
@@ -426,7 +456,7 @@ export function uploadsRouter(deps: {
 
   router.post(
     '/api/uploads/:jobId/chunks/:chunkIndex/complete',
-    adminOnly,
+    principalOnly,
     deps.csrf.doubleCsrfProtection,
     directLimiter,
     async (req: Request, res: Response) => {
@@ -443,6 +473,7 @@ export function uploadsRouter(deps: {
       try {
         const job = deps.uploads.getJob(jobId);
         if (!job) throw new UploadError('job_not_found', 404);
+        assertJobAccess(deps, jobId, req.principal!);
         if (job.state === 'cancelled' || job.state === 'completed') throw new UploadError('job_not_resumable', 409);
         if (job.state === 'paused') throw new UploadError('job_paused', 409);
         const allocation = deps.uploads.listAllocations(jobId).find((a) => a.chunk_index === chunkIndex);
@@ -509,7 +540,7 @@ export function uploadsRouter(deps: {
   // counting as in-flight and the per-account slot frees immediately.
   router.post(
     '/api/uploads/:jobId/chunks/:chunkIndex/fail',
-    adminOnly,
+    principalOnly,
     deps.csrf.doubleCsrfProtection,
     directLimiter,
     (req: Request, res: Response) => {
@@ -524,6 +555,7 @@ export function uploadsRouter(deps: {
       }
       try {
         if (!deps.uploads.getJob(jobId)) throw new UploadError('job_not_found', 404);
+        assertJobAccess(deps, jobId, req.principal!);
         const attempt = deps.uploads.getAttemptForChunk(jobId, chunkIndex, attemptId);
         if (!attempt) throw new UploadError('invalid_upload_metadata', 400);
         const reported = typeof body.code === 'string' ? body.code : '';
@@ -539,30 +571,48 @@ export function uploadsRouter(deps: {
     },
   );
 
-  router.get('/api/dashboard/summary', adminOnly, (_req, res) => {
+  // Phase 3: members get their own dashboard truth — their jobs, their files,
+  // their used-vs-allowance — and never the pool/account view, which is
+  // admin knowledge (provider accounts, quotas, reservations).
+  router.get('/api/dashboard/summary', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json(deps.uploads.dashboardSummary());
+    const principal = req.principal!;
+    if (principal.role === 'admin') {
+      res.json(deps.uploads.dashboardSummary());
+      return;
+    }
+    const scoped = deps.uploads.dashboardSummary(principal.id);
+    res.json({
+      activeJobs: scoped.activeJobs,
+      recentFiles: scoped.recentFiles,
+      totalFiles: scoped.totalFiles,
+      recentFileList: scoped.recentFileList,
+      userUsage: scoped.userUsage,
+    });
   });
 
-  router.get('/api/files', adminOnly, (req, res) => {
+  router.get('/api/files', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
+    const principal = req.principal!;
+    const owner = principal.role === 'admin' ? null : principal.id;
     const offset = Math.max(0, Number(req.query['offset'] ?? 0) || 0);
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 50) || 50));
     const search = typeof req.query['search'] === 'string' ? req.query['search'].toLowerCase() : '';
     // FE-02: filtering happens in SQL before limit/offset, so a search sees
-    // the entire library; `total` reflects the same filter. The page is
+    // the entire (own) library; `total` reflects the same filter. The page is
     // resolved with one batched placement query (no per-file N+1).
-    const rows = deps.uploads.searchFiles(search, limit, offset);
+    const rows = deps.uploads.searchFiles(search, limit, offset, owner);
     const shaped = deps.uploads.publicFiles(rows.map((f) => f.id));
     const files = rows.map((f) => shaped.get(f.id)!);
-    res.json({ files, total: deps.uploads.countSearchedFiles(search) });
+    res.json({ files, total: deps.uploads.countSearchedFiles(search, owner) });
   });
 
   for (const action of ['pause', 'resume', 'cancel', 'retry'] as const) {
-    router.post(`/api/uploads/:jobId/${action}`, adminOnly, deps.csrf.doubleCsrfProtection, async (req, res) => {
+    router.post(`/api/uploads/:jobId/${action}`, principalOnly, deps.csrf.doubleCsrfProtection, async (req, res) => {
       res.set('Cache-Control', 'no-store');
       const jobId = String(req.params['jobId']);
       try {
+        assertJobAccess(deps, jobId, req.principal!);
         if (action === 'pause') deps.uploads.pause(jobId);
         if (action === 'resume') deps.uploads.resume(jobId);
         if (action === 'retry') deps.uploads.resume(jobId);

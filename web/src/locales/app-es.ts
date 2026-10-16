@@ -74,6 +74,10 @@ export const appEs: AppStrings = {
     },
     account: {
       role: 'Administrador de CloudNest',
+      roleMember: 'Miembro de CloudNest',
+      roleAdminLabel: 'Admin',
+      profile: 'Perfil',
+      users: 'Usuarios',
       close: 'Cerrar menú de cuenta',
       signOut: 'Cerrar sesión',
     },
@@ -822,6 +826,82 @@ export const appEs: AppStrings = {
     },
   },
 
+  /** Roadmap Phase 3: the member-facing dashboard usage card. */
+  memberUsage: {
+    used: 'Almacenamiento usado',
+    usedSub: 'de tu asignación',
+    usedOf: '{used} de {allowance}',
+    unlimited: 'Sin límite de asignación',
+    uploadsActive: 'Subidas activas',
+    uploadsActiveSub: 'Trabajos en ejecución o en pausa',
+  },
+
+  /** Roadmap Phase 3 (§4.3): admin Users panel. */
+  users: {
+    title: 'Usuarios',
+    invite: 'Invitar usuario',
+    note: 'Los enlaces de invitación y restablecimiento se muestran una sola vez. Cópialos y entrégalos directamente: CloudNest no envía correo electrónico.',
+    table: { email: 'Correo', role: 'Rol', used: 'Usado', allowance: 'Asignación', status: 'Estado', actions: 'Acciones' },
+    role: { admin: 'Admin', member: 'Miembro' },
+    status: { active: 'Activo', invited: 'Invitado', disabled: 'Desactivado' },
+    unlimited: 'Ilimitado',
+    you: 'Tú',
+    inviteDialog: {
+      title: 'Invitar usuario',
+      email: 'Correo',
+      name: 'Nombre para mostrar',
+      role: 'Rol',
+      allowance: 'Asignación de almacenamiento (GB)',
+      allowanceHint: 'Déjalo vacío para no poner límite. Solo cuenta los archivos de este usuario.',
+      submit: 'Crear invitación',
+    },
+    linkDialog: {
+      title: 'Enlace de un solo uso listo',
+      note: 'Copia este enlace ahora. Se muestra una sola vez, caduca al usarse y otorga acceso a esta cuenta.',
+      copy: 'Copiar enlace',
+      copied: 'Copiado',
+    },
+    editDialog: {
+      title: 'Editar usuario',
+      role: 'Rol',
+      allowance: 'Asignación de almacenamiento (GB)',
+      allowanceHint: 'Déjalo vacío para no poner límite.',
+      save: 'Guardar',
+    },
+    actions: { reset: 'Restablecer contraseña', disable: 'Desactivar', enable: 'Activar', remove: 'Eliminar', edit: 'Editar' },
+    empty: { title: 'Aún no hay usuarios', body: 'Invita a alguien a compartir esta instancia de CloudNest.' },
+    toast: {
+      invited: 'Invitación creada. Entrega el enlace de un solo uso.',
+      reset: 'Enlace de restablecimiento creado. Caduca en una hora.',
+      updated: 'Usuario actualizado.',
+      removed: 'Usuario eliminado.',
+    },
+    errors: {
+      email_already_exists: 'Ese correo ya tiene una cuenta.',
+      invalid_email: 'Introduce un correo válido.',
+      invalid_display_name: 'Introduce un nombre para mostrar.',
+      invalid_role: 'Elige un rol válido.',
+      last_admin: 'El último administrador no puede degradarse, desactivarse ni eliminarse.',
+      user_admin_immutable: 'La cuenta de administrador integrada no puede editarse aquí.',
+      user_has_files: 'Este usuario todavía tiene archivos. Elimínalos primero.',
+      user_disabled: 'Esta cuenta está desactivada. Actívala primero.',
+      user_not_found: 'Ese usuario ya no existe.',
+      invalid_allowance: 'La asignación debe ser un número entero positivo de GB.',
+      fallback: 'La operación falló.',
+    },
+  },
+
+  /** Roadmap Phase 3 (§4.3): the Profile item in the account menu. */
+  profile: {
+    title: 'Perfil',
+    account: 'Cuenta',
+    role: 'Rol',
+    email: 'Correo',
+    used: 'Almacenamiento usado',
+    ofAllowance: '{used} de {allowance}',
+    unlimited: 'Sin límite de asignación',
+  },
+
   auth: {
     changePassword: {
       title: 'Cambiar la contraseña de administrador',
@@ -931,6 +1011,8 @@ export const appEs: AppStrings = {
       job_paused: 'Esta tarea está en pausa.',
       account_busy: 'Esa cuenta ya tiene el máximo de subidas de fragmentos simultáneas. CloudNest lo reintenta automáticamente.',
       job_not_found: 'Esa tarea de subida ya no existe.',
+      allowance_exceeded:
+        'Esta subida superaría tu asignación de almacenamiento. Elimina archivos o pide más espacio a un administrador.',
       fallback: 'La subida informó de un error.',
     },
     download: {

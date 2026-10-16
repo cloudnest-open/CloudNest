@@ -357,6 +357,10 @@ function PasswordField({ id, label, value, onChange, autoComplete, minLength, e 
 }
 
 function LoginForm({ e, serverUnreachable, onDone }: { e: EntryStrings; serverUnreachable: boolean; onDone: () => void }) {
+  // Roadmap Phase 3: the field accepts the built-in admin's username OR a
+  // member's email; the server tells them apart. It still defaults to 'admin'
+  // so the single-admin experience is unchanged.
+  const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -367,7 +371,7 @@ function LoginForm({ e, serverUnreachable, onDone }: { e: EntryStrings; serverUn
     setBusy(true);
     setError(null);
     try {
-      const { status, data } = await api.login(password);
+      const { status, data } = await api.login(username.trim(), password);
       if (status === 200) {
         setPassword('');
         await refreshCsrfToken();
@@ -396,10 +400,11 @@ function LoginForm({ e, serverUnreachable, onDone }: { e: EntryStrings; serverUn
           id="login-username"
           className="entry-input"
           type="text"
-          value="admin"
-          readOnly
+          value={username}
+          onChange={(ev) => setUsername(ev.target.value)}
           aria-label={e.login.username}
           autoComplete="username"
+          required
         />
       </div>
       <PasswordField
@@ -573,6 +578,122 @@ export function FirstRunPage({ onDone, serverError }: { onDone: () => void; serv
             <h2 className="entry-auth-title" id="entry-auth-title">{e.setup.title}</h2>
             <p className="entry-auth-subtitle">{e.setup.subtitle}</p>
             <SetupForm e={e} serverUnreachable={serverError != null} onDone={onDone} />
+          </div>
+        </section>
+        <EntryHero e={e} />
+      </main>
+      <EntryFooter e={e} theme={theme} onSetTheme={setTheme} />
+    </div>
+  );
+}
+
+/**
+ * Roadmap Phase 3: the public half of the invite / password-reset flow. The
+ * admin hands out a one-time link (the URL is the whole invitation — no
+ * email in this product); its holder sets a password here. One page serves
+ * both token purposes because the token itself says which.
+ */
+export function AcceptInvitePage({ onDone }: { onDone: () => void }) {
+  const { e } = useI18n();
+  const [theme, setThemeState] = useState<Theme>(() => currentTheme());
+  const [token] = useState(() => new URLSearchParams(window.location.search).get('token') ?? '');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  // a fresh visitor has no CSRF token yet: fetch one before the claim POST,
+  // exactly like the login form's mount flow
+  useEffect(() => {
+    void refreshCsrfToken();
+  }, []);
+  function setTheme(next: Theme): void {
+    applyTheme(next);
+    setThemeState(next);
+  }
+
+  async function submit(ev: FormEvent) {
+    ev.preventDefault();
+    if (busy) return;
+    if (password !== confirm) {
+      setError(e.accept.mismatch);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const { status, data } = await api.acceptInvite(token, password);
+      if (status === 200) {
+        setDone(true);
+        await refreshCsrfToken();
+        return;
+      }
+      const code = (data as { code?: string })?.code ?? '';
+      setError(
+        status === 409 && code === 'user_disabled'
+          ? e.accept.disabled
+          : status === 400 && code === 'password_policy'
+            ? e.accept.policy
+            : e.accept.invalid,
+      );
+    } catch {
+      setError(e.accept.network);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="entry-page">
+      <EntryHeader e={e} theme={theme} onSetTheme={setTheme} />
+      <main className="entry-main">
+        <section className="entry-auth" aria-labelledby="entry-auth-title">
+          <div className="entry-auth-content">
+            <BrandLockup markSize={52} className="entry-lockup-panel" />
+            {done ? (
+              <>
+                <h2 className="entry-auth-title" id="entry-auth-title">{e.accept.success}</h2>
+                <button type="button" className="entry-submit" onClick={onDone}>
+                  <ArrowRight size={17} aria-hidden="true" />
+                  <span>{e.accept.goLogin}</span>
+                </button>
+              </>
+            ) : !token ? (
+              <>
+                <h2 className="entry-auth-title" id="entry-auth-title">{e.accept.title}</h2>
+                <p className="entry-error" role="alert">{e.accept.invalid}</p>
+              </>
+            ) : (
+              <>
+                <h2 className="entry-auth-title" id="entry-auth-title">{e.accept.title}</h2>
+                <p className="entry-auth-subtitle">{e.accept.subtitle}</p>
+                <form className="entry-form" onSubmit={submit}>
+                  <PasswordField
+                    id="accept-password"
+                    label={e.accept.password}
+                    value={password}
+                    onChange={setPassword}
+                    autoComplete="new-password"
+                    minLength={12}
+                    e={e}
+                  />
+                  <PasswordField
+                    id="accept-confirm"
+                    label={e.accept.confirm}
+                    value={confirm}
+                    onChange={setConfirm}
+                    autoComplete="new-password"
+                    minLength={12}
+                    e={e}
+                  />
+                  {error && <p className="entry-error" role="alert">{error}</p>}
+                  <button type="submit" className="entry-submit" disabled={busy}>
+                    {busy ? <span className="entry-spinner" aria-hidden="true" /> : <ArrowRight size={17} aria-hidden="true" />}
+                    <span>{busy ? e.accept.submitting : e.accept.submit}</span>
+                  </button>
+                </form>
+              </>
+            )}
           </div>
         </section>
         <EntryHero e={e} />

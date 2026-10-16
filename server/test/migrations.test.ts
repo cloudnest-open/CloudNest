@@ -78,8 +78,8 @@ test('enumerated values are constrained in SQLite', () => {
 
     // file state enum + negative size
     const fileId = uuid();
-    db.prepare(`INSERT INTO files (id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
-      VALUES (?, 'a.txt', 10, 5, 2, 'completed', ?)`).run(fileId, now);
+    db.prepare(`INSERT INTO files (id, user_id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
+      VALUES (?, 'usr_admin', 'a.txt', 10, 5, 2, 'completed', ?)`).run(fileId, now);
     assert.throws(() => db.prepare(`UPDATE files SET size_bytes = -1`).run());
     assert.throws(() => db.prepare(`UPDATE files SET state = 'bogus'`).run());
     assert.throws(() => db.prepare(`UPDATE files SET chunk_size_bytes = 0`).run());
