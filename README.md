@@ -8,14 +8,48 @@ OneDrive, pCloud; MEGA experimentally). Large files are split into app-managed
 logical chunks, placed across eligible accounts, and reconstructed byte-for-byte
 on download — the full original file is never stored on, or staged on, this host.
 
-**Status:** Steps 1–6 implemented: first-run admin + sessions/CSRF, provider
-account lifecycle with encrypted credentials, chunked upload engine with
+**Status:** Implemented: first-run admin + sessions/CSRF, provider account
+lifecycle with encrypted credentials, chunked upload engine with
 capacity-aware routing, download/reconstruction with per-chunk verification,
-CloudNest share links with expiry/password/limits, safe deletion of
-CloudNest-owned objects, Settings/Diagnostics/Backup, and an optional Cloudflare
-Tunnel. Provider evidence status: see [PROVIDER_STATUS.md](PROVIDER_STATUS.md) —
-**no provider has been live-tested in this environment**; every connector is
-mock-tested, and MEGA is experimental.
+CloudNest share links with expiry/password/limits, safe deletion with a
+7-day trash window, multi-user (admin/member with one-time invite/reset
+links and per-user allowances), folders, notifications, S3-compatible
+business tier with browser-direct pre-signed transfers, chunk-level
+mirroring with download fallback, a background scheduler (quota refresh,
+cleanup retries), provider health metrics, Settings/Diagnostics/Backup, and
+an optional Cloudflare Tunnel. Provider evidence status: see
+[PROVIDER_STATUS.md](PROVIDER_STATUS.md) — **no provider has been live-tested
+in this environment**; every connector is mock-tested, and MEGA is
+experimental.
+
+## Features
+
+- **Your accounts, one pool** — connect several cloud accounts (including
+  several from the same provider) and CloudNest places chunks across them by
+  real capacity; org-level shared budgets can be grouped into one quota pool.
+- **Chunked, resumable uploads** — multi-file/folder queue with per-item
+  planning, pause/resume/retry, and recovery across restarts; business-tier
+  (S3) chunks transfer browser-direct over short-lived pre-signed URLs.
+- **Verified downloads** — files are reconstructed chunk by chunk with
+  per-chunk verification; if a mirrored copy's account is down, download
+  falls back to a healthy copy.
+- **Chunk mirroring** — copy a completed file's chunks to a second account in
+  the same tier for redundancy, with honest job state and retry.
+- **Folders and trash** — folder tree with breadcrumbs, and a 7-day trash
+  window before deletion really purges objects from your providers.
+- **Share links** — expiry, download limits, and passwords; tokens are
+  256-bit random values stored as hashes; rotation and revocation.
+- **Multi-user** — invite members with one-time links, roles, per-user
+  storage allowances, and strict ownership isolation.
+- **Notifications** — a real bell feed: upload completions, share downloads,
+  stale quota warnings.
+- **Provider health** — per-provider Healthy/Degraded/Down verdicts on the
+  dashboard, derived from the server's own metrics.
+- **Private by construction** — metadata-only SQLite on your machine, bytes
+  only in your own accounts, no telemetry, encrypted credentials, loopback
+  bind (see [PRIVACY.md](PRIVACY.md)).
+- **In 8 languages** — English, 简体中文, Español, Deutsch, Русский,
+  Français, 日本語, Português (Brasil), with light/dark themes.
 
 The application binds to `127.0.0.1` only. Public access exists solely through
 the optional, explicitly enabled Cloudflare Tunnel.
@@ -48,10 +82,15 @@ npm test          # live provider tests are opt-in and skipped by default
 
 Documentation:
 
+- **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** — the user guide:
+  getting started, files/folders/trash, uploads, shares, multi-user, backups
 - **[docs/provider-setup.md](docs/provider-setup.md)** — per-provider OAuth
   app registration, exact scopes/redirect URIs, and provider usage limits
 - **[docs/troubleshooting.md](docs/troubleshooting.md)** — error codes and
   recovery steps for startup, login, uploads, downloads, accounts, backups
+- **[SUPPORT.md](SUPPORT.md)** — where to ask for help and how to report
+  problems
+- **[PRIVACY.md](PRIVACY.md)** — what CloudNest stores, and where
 - **[RELEASE.md](RELEASE.md)** — full install guide, backup/restore notes,
   known limitations, upgrade behaviour, release checklist
 - **[docs/architecture.md](docs/architecture.md)** — architecture notes

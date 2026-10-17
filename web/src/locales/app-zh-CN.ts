@@ -800,6 +800,14 @@ export const appZhCn: AppStrings = {
       hostPort: '主机 / 端口：',
       baseUrl: '基础 URL：',
       dataDir: '数据目录：',
+      project: {
+        title: '项目',
+        note: '用户指南、支持页面与隐私说明位于公开的 GitHub 仓库中；打开任一链接都会跳转过去。',
+        docs: '文档',
+        support: '支持',
+        privacy: '隐私',
+        repository: 'GitHub 仓库',
+      },
     },
     backup: {
       title: '数据库备份',

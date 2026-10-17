@@ -852,6 +852,14 @@ export const appDe: AppStrings = {
       hostPort: 'Host / Port:',
       baseUrl: 'Basis-URL:',
       dataDir: 'Datenverzeichnis:',
+      project: {
+        title: 'Projekt',
+        note: 'Benutzerhandbuch, Support-Seite und Datenschutzhinweise liegen im öffentlichen GitHub-Repository; ein Klick führt dorthin.',
+        docs: 'Dokumentation',
+        support: 'Support',
+        privacy: 'Datenschutz',
+        repository: 'GitHub-Repository',
+      },
     },
     backup: {
       title: 'Datenbank-Backup',

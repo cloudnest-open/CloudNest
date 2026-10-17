@@ -844,6 +844,14 @@ export const appEs: AppStrings = {
       hostPort: 'Host / puerto:',
       baseUrl: 'URL base:',
       dataDir: 'Directorio de datos:',
+      project: {
+        title: 'Proyecto',
+        note: 'La guía de usuario, la página de soporte y las notas de privacidad viven en el repositorio público de GitHub; al abrirlas vas allí.',
+        docs: 'Documentación',
+        support: 'Soporte',
+        privacy: 'Privacidad',
+        repository: 'Repositorio de GitHub',
+      },
     },
     backup: {
       title: 'Copia de seguridad de la base de datos',

@@ -649,6 +649,16 @@ export function SettingsPage({ onGoToCloudAccounts, initialSection }: { onGoToCl
             </ul>
           </section>
           <section className="card">
+            <h2>{t.settings.system.project.title}</h2>
+            <p className="muted small">{t.settings.system.project.note}</p>
+            <div className="actions project-links">
+              <a className="btn-secondary" href="https://github.com/cloudnest-open/CloudNest/blob/main/docs/DOCUMENTATION.md" target="_blank" rel="noreferrer">{t.settings.system.project.docs}</a>
+              <a className="btn-secondary" href="https://github.com/cloudnest-open/CloudNest/blob/main/SUPPORT.md" target="_blank" rel="noreferrer">{t.settings.system.project.support}</a>
+              <a className="btn-secondary" href="https://github.com/cloudnest-open/CloudNest/blob/main/PRIVACY.md" target="_blank" rel="noreferrer">{t.settings.system.project.privacy}</a>
+              <a className="btn-secondary" href="https://github.com/cloudnest-open/CloudNest" target="_blank" rel="noreferrer">{t.settings.system.project.repository}</a>
+            </div>
+          </section>
+          <section className="card">
             <h2>{t.settings.backup.title}</h2>
             <p className="muted small">{t.settings.backup.note}</p>
             <div className="actions">

@@ -852,6 +852,14 @@ export const appPtBr: AppStrings = {
       hostPort: 'Host / porta:',
       baseUrl: 'URL base:',
       dataDir: 'Diretório de dados:',
+      project: {
+        title: 'Projeto',
+        note: 'O guia do usuário, a página de suporte e as notas de privacidade ficam no repositório público do GitHub; ao abrir, você é levado até lá.',
+        docs: 'Documentação',
+        support: 'Suporte',
+        privacy: 'Privacidade',
+        repository: 'Repositório do GitHub',
+      },
     },
     backup: {
       title: 'Backup do banco de dados',

@@ -836,6 +836,14 @@ export const appJa: AppStrings = {
       hostPort: 'ホスト / ポート：',
       baseUrl: 'ベース URL：',
       dataDir: 'データディレクトリ：',
+      project: {
+        title: 'プロジェクト',
+        note: 'ユーザーガイド、サポート、プライバシーに関する説明は公開 GitHub リポジトリにあります。開くとそのページへ移動します。',
+        docs: 'ドキュメント',
+        support: 'サポート',
+        privacy: 'プライバシー',
+        repository: 'GitHub リポジトリ',
+      },
     },
     backup: {
       title: 'データベースのバックアップ',

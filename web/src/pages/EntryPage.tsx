@@ -26,10 +26,12 @@ import { useI18n } from '../i18n-context.js';
 import { LanguageMenu } from '../components/LanguageMenu.js';
 import { applyTheme, currentTheme, type Theme } from '../theme.js';
 
+// The product's public surfaces live in this GitHub repository and are
+// rendered by GitHub itself; these links open them, never an external service.
 const REPO_URL = 'https://github.com/cloudnest-open/CloudNest';
-const DOCS_URL = 'https://github.com/cloudnest-open/CloudNest#readme';
-const SUPPORT_URL = 'https://github.com/cloudnest-open/CloudNest/issues';
-const PRIVACY_URL = 'https://github.com/cloudnest-open/CloudNest/blob/main/SECURITY.md';
+const DOCS_URL = 'https://github.com/cloudnest-open/CloudNest/blob/main/docs/DOCUMENTATION.md';
+const SUPPORT_URL = 'https://github.com/cloudnest-open/CloudNest/blob/main/SUPPORT.md';
+const PRIVACY_URL = 'https://github.com/cloudnest-open/CloudNest/blob/main/PRIVACY.md';
 
 /** The approved CloudNest cloud mark, reused from the app's sidebar brand. */
 function BrandLockup({ markSize, className }: { markSize: number; className: string }) {

@@ -860,6 +860,8 @@ input:disabled, select:disabled, textarea:disabled {
   margin-top: 16px;
 }
 .settings-nav { min-width: 0; }
+.project-links { margin-top: 12px; }
+.project-links a.btn-secondary { text-decoration: none; }
 .settings-tabs {
   display: flex;
   flex-direction: column;

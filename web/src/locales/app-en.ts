@@ -859,6 +859,14 @@ export const appEn = {
       hostPort: 'Host / port:',
       baseUrl: 'Base URL:',
       dataDir: 'Data directory:',
+      project: {
+        title: 'Project',
+        note: 'The user guide, support page and privacy notes live in the public GitHub repository; opening any of them takes you there.',
+        docs: 'Documentation',
+        support: 'Support',
+        privacy: 'Privacy',
+        repository: 'GitHub repository',
+      },
     },
     backup: {
       title: 'Database backup',
