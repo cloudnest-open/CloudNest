@@ -21,11 +21,13 @@ web/ (React + Vite + TypeScript, plain CSS, no state-management library)
 server/ (Express 5 + TypeScript)
   src/index.ts         entry: config, DB open + migrate, listen, graceful shutdown
   src/app.ts           app factory; middleware order is load-bearing:
-                       helmet -> Host/Origin guard -> sessions -> CSRF ->
+                       helmet -> Host/Origin guard -> sessions ->
                        raw chunk router (before any body parser) -> JSON parser ->
                        JSON upload router -> auth/setup -> downloads -> shares ->
                        settings/maintenance/tunnel -> /api/admin (requireAdmin) ->
                        static UI + SPA fallback -> central error handler
+                       (CSRF is not a global step — every state-changing router
+                       below injects its own CSRF middleware per-route)
   src/config/env.ts    validated config (PORT, NODE_ENV, DATA_DIR, APP_BASE_URL)
   src/db/              better-sqlite3 (WAL, foreign_keys=ON, synchronous=FULL),
                        transactional versioned migrations, query bundles
@@ -54,4 +56,5 @@ server/ (Express 5 + TypeScript)
 - **Honesty rules:** unknown/stale quota is never counted as free space; a
   provider checksum of a different algorithm is never compared to SHA-256; a
   connector is never called live-tested without a real live test.
-- **Node.js 24 LTS baseline** (`engines.node = 24.x`, `.nvmrc` = 24).
+- **Node.js 24 LTS baseline** (`engines.node = 24.x`, `.nvmrc` = 24; installs
+  on any other Node fail via the `preinstall` guard + `engine-strict`).

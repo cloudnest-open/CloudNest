@@ -56,7 +56,9 @@ the optional, explicitly enabled Cloudflare Tunnel.
 
 ## Prerequisites
 
-- Node.js **24 LTS** (`.nvmrc` contains `24`; `engines.node` enforces `24.x`)
+- Node.js **24 LTS** (`.nvmrc` contains `24`; installing on any other Node
+  fails — `engines.node` + `engine-strict` for dependencies, a `preinstall`
+  guard for the project itself, because npm never enforces root `engines`)
 - npm (bundled with Node)
 - Optional: a `cloudflared` binary you installed yourself, only if you want
   remote access

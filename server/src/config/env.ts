@@ -71,7 +71,7 @@ function resolveDataDir(raw: string | undefined): string {
     return path.resolve(raw.trim());
   }
   // Per-user OS application data directory, e.g.
-  // ~/.local/share/CloudNest-nodejs/Data on Linux.
+  // ~/.local/share/CloudNest on Linux.
   const paths = envPaths('CloudNest', { suffix: '' });
   return paths.data;
 }

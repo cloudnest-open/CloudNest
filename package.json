@@ -8,6 +8,7 @@
     "node": "24.x"
   },
   "scripts": {
+    "preinstall": "node -e \"if(!/^24\\./.test(process.versions.node)){console.error('CloudNest requires Node 24.x (got ' + process.versions.node + '). See .nvmrc.');process.exit(1)}\"",
     "dev": "concurrently -k -n API,WEB \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "tsx watch server/src/index.ts",
     "dev:web": "vite --config web/vite.config.ts",

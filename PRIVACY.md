@@ -30,7 +30,9 @@ provider credentials at rest.
 - **No telemetry, analytics, or crash reporting.** The application makes no
   outbound network calls except to the cloud providers *you* connect and —
   during OAuth connect — to the authorization endpoints those providers
-  document. There is no tracking code in the web UI.
+  document, and — only if you explicitly enable the optional Cloudflare
+  Tunnel — to Cloudflare's API (tunnel provisioning and token verification).
+  There is no tracking code in the web UI.
 - **No files staged on the host.** Full files are never stored in the
   database and never staged whole on the CloudNest host; downloads are
   reconstructed chunk by chunk and verified byte-for-byte.
