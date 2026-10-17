@@ -1079,10 +1079,11 @@ input:disabled, select:disabled, textarea:disabled {
 /* --- Provider cards, metrics, previews ----------------------------------- */
 .provider-grid {
   display: grid;
-  /* auto-fill at 220px: 5 personal cards land 3+2 and 6 business cards 3+3 —
+  /* auto-fill at 250px: 5 personal cards land 3+2 and 6 business cards 3+3 —
      the old auto-fit at 182px stretched to 4 columns and left one card alone
-     on the second row at laptop widths. */
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+     on the second row at laptop widths (220px still fit 4 into the ~940px
+     dashboard column). */
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 12px;
 }
 
