@@ -4,12 +4,34 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type Database from 'better-sqlite3';
 import { openDatabase, runMigrations } from '../src/db/index.js';
 import { allMigrations } from '../src/db/migrations.js';
 import { REQUIRED_PRAGMAS } from '../src/db/index.js';
 
 function tempDb(): string {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cn-mig-')), 't.db');
+}
+
+/**
+ * A delegating stand-in for the database that executes every statement for
+ * real and then throws once `killerSql` has run — simulating a process crash
+ * exactly there (statements before it applied, nothing after).
+ */
+function crashAfterExec(db: Database.Database, killerSql: string): Database.Database {
+  const realExec = db.exec.bind(db);
+  return new Proxy(db, {
+    get(target, prop) {
+      if (prop === 'exec') {
+        return (sql: string) => {
+          realExec(sql);
+          if (sql === killerSql) throw new Error('SIMULATED CRASH');
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  }) as Database.Database;
 }
 
 test('migrates a fresh DB to the latest schema; safe on second startup', () => {
@@ -143,6 +165,99 @@ test('no fake rows are seeded', () => {
       const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
       assert.equal(row.n, 0, `${table} should be empty`);
     }
+  } finally {
+    close();
+  }
+});
+
+test('M0012 resume: a crash after the parent DROP keeps the data and completes on re-run', () => {
+  const { db, close } = openDatabase(tempDb());
+  try {
+    runMigrations(db, allMigrations.filter((m) => m.version <= 11));
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO provider_accounts (id, provider, display_label, status, created_at, updated_at)
+       VALUES ('acc-crash', 'google_drive', 'survived', 'connected', ?, ?)`,
+    ).run(now, now);
+
+    // simulate a process crash inside M0012: run its up() for real and kill it
+    // right after the parent DROP — the populated staging table is then the
+    // only copy of the account rows
+    const m0012 = allMigrations.find((m) => m.version === 12)!;
+    assert.throws(
+      () => m0012.up(crashAfterExec(db, 'DROP TABLE provider_accounts;')),
+      /SIMULATED CRASH/,
+    );
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM provider_accounts_new').get() as { n: number }).n,
+      1,
+    );
+
+    // re-run the real runner: M0012 must resume from staging, not destroy it
+    runMigrations(db, allMigrations);
+    const row = db.prepare('SELECT display_label, tier FROM provider_accounts WHERE id = ?').get('acc-crash') as {
+      display_label: string;
+      tier: string;
+    };
+    assert.equal(row.display_label, 'survived');
+    assert.equal(row.tier, 'personal');
+    const applied = (
+      db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>
+    ).map((r) => r.version);
+    assert.deepEqual(applied, allMigrations.map((m) => m.version));
+  } finally {
+    close();
+  }
+});
+
+test('M0015 resume: a crash after the parent DROP keeps the job rows and completes on re-run', () => {
+  const { db, close } = openDatabase(tempDb());
+  try {
+    runMigrations(db, allMigrations.filter((m) => m.version <= 14));
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO transfer_jobs (id, job_type, state, created_at, updated_at)
+       VALUES ('job-crash', 'reconcile', 'completed', ?, ?)`,
+    ).run(now, now);
+
+    const m0015 = allMigrations.find((m) => m.version === 15)!;
+    assert.throws(
+      () => m0015.up(crashAfterExec(db, 'DROP TABLE transfer_jobs;')),
+      /SIMULATED CRASH/,
+    );
+    assert.equal(
+      (db.prepare('SELECT COUNT(*) AS n FROM transfer_jobs_new').get() as { n: number }).n,
+      1,
+    );
+
+    runMigrations(db, allMigrations);
+    const row = db.prepare('SELECT job_type, state FROM transfer_jobs WHERE id = ?').get('job-crash') as {
+      job_type: string;
+      state: string;
+    };
+    assert.equal(row.job_type, 'reconcile');
+    assert.equal(row.state, 'completed');
+    const applied = (
+      db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>
+    ).map((r) => r.version);
+    assert.deepEqual(applied, allMigrations.map((m) => m.version));
+  } finally {
+    close();
+  }
+});
+
+test('transfer_jobs.job_type is indexed for the dashboard job list', () => {
+  const { db, close } = openDatabase(tempDb());
+  try {
+    runMigrations(db, allMigrations);
+    const plan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN SELECT j.* FROM transfer_jobs j JOIN files f ON f.id = j.file_id
+         WHERE j.job_type = 'upload' AND f.user_id = ? ORDER BY j.created_at DESC LIMIT ?`,
+      )
+      .all('usr_admin', 50) as Array<{ detail: string }>;
+    const details = plan.map((r) => r.detail).join(' | ');
+    assert.match(details, /idx_transfer_jobs_type/, `expected the job_type index in the plan, got: ${details}`);
   } finally {
     close();
   }

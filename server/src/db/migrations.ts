@@ -24,6 +24,19 @@ export interface Migration {
   requiresForeignKeysOff?: boolean;
 }
 
+/** True when a table with this exact name exists in the current schema. */
+function tableExists(db: Database.Database, name: string): boolean {
+  return (
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !==
+    undefined
+  );
+}
+
+/** True when the named table already has this column. */
+function columnExists(db: Database.Database, table: string, column: string): boolean {
+  return db.prepare('SELECT 1 FROM pragma_table_info(?) WHERE name = ?').get(table, column) !== undefined;
+}
+
 const M0001_INFRASTRUCTURE: Migration = {
   version: 1,
   name: '0001-migration-infrastructure-check',
@@ -707,64 +720,83 @@ const M0012_S3_BUSINESS_TIER: Migration = {
     //   provider-reported-quota accounts.
     // - files.tier records the tier a file was planned for, keeping the
     //   routing constraint checkable and auditable after the fact.
-    // retry safety: a previous interrupted run can only have left the staging
-    // table behind; every other statement is part of the checked sequence
-    db.exec('DROP TABLE IF EXISTS provider_accounts_new;');
-    db.exec(`
-      CREATE TABLE provider_accounts_new (
-        id TEXT PRIMARY KEY,
-        provider TEXT NOT NULL CHECK(provider IN ('google_drive','dropbox','pcloud','mega','onedrive','s3')),
-        display_label TEXT NOT NULL,
-        account_identifier TEXT,
-        status TEXT NOT NULL CHECK(status IN ('connected','needs_reauth','disconnected','error')),
-        tier TEXT NOT NULL DEFAULT 'personal' CHECK(tier IN ('personal','business')),
-        quota_total_bytes INTEGER CHECK(quota_total_bytes IS NULL OR quota_total_bytes >= 0),
-        used_bytes INTEGER CHECK(used_bytes IS NULL OR used_bytes >= 0),
-        quota_status TEXT NOT NULL DEFAULT 'unknown' CHECK(quota_status IN ('current','stale','unknown')),
-        quota_unlimited INTEGER NOT NULL DEFAULT 0 CHECK(quota_unlimited IN (0,1)),
-        quota_scope TEXT,
-        capacity_cap_bytes INTEGER CHECK(capacity_cap_bytes IS NULL OR capacity_cap_bytes > 0),
-        reserve_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserve_bytes >= 0),
-        reserved_inflight_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserved_inflight_bytes >= 0),
-        last_quota_check_at TEXT,
-        last_quota_error_code TEXT,
-        last_quota_error_at TEXT,
-        last_error_code TEXT,
-        last_error_at TEXT,
-        credential_ciphertext BLOB,
-        credential_nonce BLOB,
-        credential_auth_tag BLOB,
-        credential_key_version INTEGER,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+    // retry safety: with foreign keys off there is no transaction, so a crash
+    // can interrupt this sequence anywhere. The unrecoverable window is the
+    // parent DROP → RENAME pair: once the parent is gone the populated staging
+    // table holds the ONLY copy of the data, so a re-run must rename it back
+    // in instead of dropping it. The steps after the rebuild check what they
+    // touch (IF NOT EXISTS / columnExists), so a resume continues from any
+    // interrupted point.
+    const hasParent = tableExists(db, 'provider_accounts');
+    const hasStaging = tableExists(db, 'provider_accounts_new');
+    if (!hasParent && !hasStaging) {
+      throw new Error(
+        'provider_accounts is missing and no staging table exists; the S3 business-tier rebuild cannot resume',
       );
-    `);
-    // every existing account is personal by definition (only OAuth existed so far)
-    db.exec(`
-      INSERT INTO provider_accounts_new
-        (id, provider, display_label, account_identifier, status, tier,
-         quota_total_bytes, used_bytes, quota_status, quota_unlimited, quota_scope, capacity_cap_bytes,
-         reserve_bytes, reserved_inflight_bytes, last_quota_check_at,
-         last_quota_error_code, last_quota_error_at, last_error_code, last_error_at,
-         credential_ciphertext, credential_nonce, credential_auth_tag, credential_key_version,
-         created_at, updated_at)
-      SELECT id, provider, display_label, account_identifier, status, 'personal',
-         quota_total_bytes, used_bytes, quota_status, quota_unlimited, quota_scope, NULL,
-         reserve_bytes, reserved_inflight_bytes, last_quota_check_at,
-         last_quota_error_code, last_quota_error_at, last_error_code, last_error_at,
-         credential_ciphertext, credential_nonce, credential_auth_tag, credential_key_version,
-         created_at, updated_at
-      FROM provider_accounts;
-    `);
-    db.exec('DROP TABLE provider_accounts;');
+    }
+    if (hasParent) {
+      // normal path: the parent still holds the data — rebuild staging from it
+      db.exec('DROP TABLE IF EXISTS provider_accounts_new;');
+      db.exec(`
+        CREATE TABLE provider_accounts_new (
+          id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL CHECK(provider IN ('google_drive','dropbox','pcloud','mega','onedrive','s3')),
+          display_label TEXT NOT NULL,
+          account_identifier TEXT,
+          status TEXT NOT NULL CHECK(status IN ('connected','needs_reauth','disconnected','error')),
+          tier TEXT NOT NULL DEFAULT 'personal' CHECK(tier IN ('personal','business')),
+          quota_total_bytes INTEGER CHECK(quota_total_bytes IS NULL OR quota_total_bytes >= 0),
+          used_bytes INTEGER CHECK(used_bytes IS NULL OR used_bytes >= 0),
+          quota_status TEXT NOT NULL DEFAULT 'unknown' CHECK(quota_status IN ('current','stale','unknown')),
+          quota_unlimited INTEGER NOT NULL DEFAULT 0 CHECK(quota_unlimited IN (0,1)),
+          quota_scope TEXT,
+          capacity_cap_bytes INTEGER CHECK(capacity_cap_bytes IS NULL OR capacity_cap_bytes > 0),
+          reserve_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserve_bytes >= 0),
+          reserved_inflight_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserved_inflight_bytes >= 0),
+          last_quota_check_at TEXT,
+          last_quota_error_code TEXT,
+          last_quota_error_at TEXT,
+          last_error_code TEXT,
+          last_error_at TEXT,
+          credential_ciphertext BLOB,
+          credential_nonce BLOB,
+          credential_auth_tag BLOB,
+          credential_key_version INTEGER,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      // every existing account is personal by definition (only OAuth existed so far)
+      db.exec(`
+        INSERT INTO provider_accounts_new
+          (id, provider, display_label, account_identifier, status, tier,
+           quota_total_bytes, used_bytes, quota_status, quota_unlimited, quota_scope, capacity_cap_bytes,
+           reserve_bytes, reserved_inflight_bytes, last_quota_check_at,
+           last_quota_error_code, last_quota_error_at, last_error_code, last_error_at,
+           credential_ciphertext, credential_nonce, credential_auth_tag, credential_key_version,
+           created_at, updated_at)
+        SELECT id, provider, display_label, account_identifier, status, 'personal',
+           quota_total_bytes, used_bytes, quota_status, quota_unlimited, quota_scope, NULL,
+           reserve_bytes, reserved_inflight_bytes, last_quota_check_at,
+           last_quota_error_code, last_quota_error_at, last_error_code, last_error_at,
+           credential_ciphertext, credential_nonce, credential_auth_tag, credential_key_version,
+           created_at, updated_at
+        FROM provider_accounts;
+      `);
+      db.exec('DROP TABLE provider_accounts;');
+    }
+    // both paths converge here with the old parent gone: adopt the rebuilt
+    // staging table as the new parent
     db.exec('ALTER TABLE provider_accounts_new RENAME TO provider_accounts;');
-    db.exec('CREATE INDEX idx_provider_accounts_provider_status ON provider_accounts(provider, status);');
-    db.exec('CREATE UNIQUE INDEX idx_provider_accounts_identity ON provider_accounts(provider, account_identifier) WHERE account_identifier IS NOT NULL;');
-    db.exec('CREATE INDEX idx_provider_accounts_quota_scope ON provider_accounts(quota_scope) WHERE quota_scope IS NOT NULL;');
-    db.exec('CREATE INDEX idx_provider_accounts_tier ON provider_accounts(tier);');
-    db.exec(
-      `ALTER TABLE files ADD COLUMN tier TEXT NOT NULL DEFAULT 'personal' CHECK(tier IN ('personal','business'));`,
-    );
+    db.exec('CREATE INDEX IF NOT EXISTS idx_provider_accounts_provider_status ON provider_accounts(provider, status);');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_accounts_identity ON provider_accounts(provider, account_identifier) WHERE account_identifier IS NOT NULL;');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_provider_accounts_quota_scope ON provider_accounts(quota_scope) WHERE quota_scope IS NOT NULL;');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_provider_accounts_tier ON provider_accounts(tier);');
+    if (!columnExists(db, 'files', 'tier')) {
+      db.exec(
+        `ALTER TABLE files ADD COLUMN tier TEXT NOT NULL DEFAULT 'personal' CHECK(tier IN ('personal','business'));`,
+      );
+    }
     const violations = db.pragma('foreign_key_check', { simple: true });
     if (violations) {
       throw new Error('foreign_key_check failed after the S3 business-tier migration');
@@ -944,56 +976,75 @@ const M0015_MIRROR_AND_PROVIDER_METRICS: Migration = {
   //   scheduler prunes days past the retention window.
   requiresForeignKeysOff: true,
   up: (db) => {
-    // retry safety: an interrupted earlier run can only have left the staging
-    // table behind; every other statement is part of the checked sequence
-    db.exec('DROP TABLE IF EXISTS transfer_jobs_new;');
-    db.exec(`
-      CREATE TABLE transfer_jobs_new (
-        id TEXT PRIMARY KEY,
-        file_id TEXT REFERENCES files(id) ON DELETE RESTRICT,
-        job_type TEXT NOT NULL CHECK(job_type IN ('upload','download','delete','repair','reconcile','mirror')),
-        state TEXT NOT NULL CHECK(state IN ('queued','running','paused','failed','completed','cancelled','deletion_pending')),
-        chunks_completed INTEGER NOT NULL DEFAULT 0 CHECK(chunks_completed >= 0),
-        chunks_total INTEGER NOT NULL DEFAULT 0 CHECK(chunks_total >= 0),
-        bytes_completed INTEGER NOT NULL DEFAULT 0 CHECK(bytes_completed >= 0),
-        retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count >= 0),
-        last_safe_error_code TEXT,
-        idempotency_key TEXT,
-        request_fingerprint TEXT,
-        requested_range_start_bytes INTEGER CHECK(requested_range_start_bytes IS NULL OR requested_range_start_bytes >= 0),
-        requested_range_end_bytes INTEGER CHECK(requested_range_end_bytes IS NULL OR requested_range_end_bytes >= 0),
-        requested_bytes INTEGER CHECK(requested_bytes IS NULL OR requested_bytes >= 0),
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        CHECK(file_id IS NOT NULL OR job_type = 'reconcile')
+    // retry safety: with foreign keys off there is no transaction, so a crash
+    // can interrupt this sequence anywhere. The unrecoverable window is the
+    // parent DROP → RENAME pair: once transfer_jobs is gone the populated
+    // staging table holds the ONLY copy of the job rows, so a re-run must
+    // rename it back in instead of dropping it. The steps after the rebuild
+    // check what they touch (IF NOT EXISTS / columnExists), so a resume
+    // continues from any interrupted point.
+    const hasParent = tableExists(db, 'transfer_jobs');
+    const hasStaging = tableExists(db, 'transfer_jobs_new');
+    if (!hasParent && !hasStaging) {
+      throw new Error(
+        'transfer_jobs is missing and no staging table exists; the mirror/metrics rebuild cannot resume',
       );
-    `);
-    db.exec(`
-      INSERT INTO transfer_jobs_new
-        (id, file_id, job_type, state, chunks_completed, chunks_total, bytes_completed, retry_count,
-         last_safe_error_code, idempotency_key, request_fingerprint,
-         requested_range_start_bytes, requested_range_end_bytes, requested_bytes, created_at, updated_at)
-      SELECT id, file_id, job_type, state, chunks_completed, chunks_total, bytes_completed, retry_count,
-         last_safe_error_code, idempotency_key, request_fingerprint,
-         requested_range_start_bytes, requested_range_end_bytes, requested_bytes, created_at, updated_at
-      FROM transfer_jobs;
-    `);
-    db.exec('DROP TABLE transfer_jobs;');
+    }
+    if (hasParent) {
+      // normal path: the parent still holds the data — rebuild staging from it
+      db.exec('DROP TABLE IF EXISTS transfer_jobs_new;');
+      db.exec(`
+        CREATE TABLE transfer_jobs_new (
+          id TEXT PRIMARY KEY,
+          file_id TEXT REFERENCES files(id) ON DELETE RESTRICT,
+          job_type TEXT NOT NULL CHECK(job_type IN ('upload','download','delete','repair','reconcile','mirror')),
+          state TEXT NOT NULL CHECK(state IN ('queued','running','paused','failed','completed','cancelled','deletion_pending')),
+          chunks_completed INTEGER NOT NULL DEFAULT 0 CHECK(chunks_completed >= 0),
+          chunks_total INTEGER NOT NULL DEFAULT 0 CHECK(chunks_total >= 0),
+          bytes_completed INTEGER NOT NULL DEFAULT 0 CHECK(bytes_completed >= 0),
+          retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count >= 0),
+          last_safe_error_code TEXT,
+          idempotency_key TEXT,
+          request_fingerprint TEXT,
+          requested_range_start_bytes INTEGER CHECK(requested_range_start_bytes IS NULL OR requested_range_start_bytes >= 0),
+          requested_range_end_bytes INTEGER CHECK(requested_range_end_bytes IS NULL OR requested_range_end_bytes >= 0),
+          requested_bytes INTEGER CHECK(requested_bytes IS NULL OR requested_bytes >= 0),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK(file_id IS NOT NULL OR job_type = 'reconcile')
+        );
+      `);
+      db.exec(`
+        INSERT INTO transfer_jobs_new
+          (id, file_id, job_type, state, chunks_completed, chunks_total, bytes_completed, retry_count,
+           last_safe_error_code, idempotency_key, request_fingerprint,
+           requested_range_start_bytes, requested_range_end_bytes, requested_bytes, created_at, updated_at)
+        SELECT id, file_id, job_type, state, chunks_completed, chunks_total, bytes_completed, retry_count,
+           last_safe_error_code, idempotency_key, request_fingerprint,
+           requested_range_start_bytes, requested_range_end_bytes, requested_bytes, created_at, updated_at
+        FROM transfer_jobs;
+      `);
+      db.exec('DROP TABLE transfer_jobs;');
+    }
+    // both paths converge here with the old parent gone: adopt the rebuilt
+    // staging table as the new parent
     db.exec('ALTER TABLE transfer_jobs_new RENAME TO transfer_jobs;');
-    db.exec('CREATE INDEX idx_transfer_jobs_state ON transfer_jobs(state, updated_at);');
-    db.exec('CREATE UNIQUE INDEX idx_transfer_jobs_idempotency ON transfer_jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_transfer_jobs_state ON transfer_jobs(state, updated_at);');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_transfer_jobs_idempotency ON transfer_jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;');
 
     // one chunk, at most one ACTIVE copy per account, two accounts max
     db.exec('DROP INDEX IF EXISTS idx_chunk_placements_active;');
     db.exec(
-      'CREATE UNIQUE INDEX idx_chunk_placements_active ON chunk_placements(chunk_id, provider_account_id) WHERE is_active = 1;',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_chunk_placements_active ON chunk_placements(chunk_id, provider_account_id) WHERE is_active = 1;',
     );
-    db.exec(`
-      ALTER TABLE chunk_placements ADD COLUMN placement_role TEXT CHECK(placement_role IN ('primary','mirror'));
-    `);
+    if (!columnExists(db, 'chunk_placements', 'placement_role')) {
+      db.exec(`
+        ALTER TABLE chunk_placements ADD COLUMN placement_role TEXT CHECK(placement_role IN ('primary','mirror'));
+      `);
+    }
 
     db.exec(`
-      CREATE TABLE provider_metrics (
+      CREATE TABLE IF NOT EXISTS provider_metrics (
         provider TEXT NOT NULL,
         day TEXT NOT NULL,
         requests_total INTEGER NOT NULL DEFAULT 0 CHECK(requests_total >= 0),
@@ -1005,7 +1056,7 @@ const M0015_MIRROR_AND_PROVIDER_METRICS: Migration = {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (provider, day)
       );
-      CREATE INDEX idx_provider_metrics_day ON provider_metrics(day);
+      CREATE INDEX IF NOT EXISTS idx_provider_metrics_day ON provider_metrics(day);
     `);
 
     const violations = db.pragma('foreign_key_check', { simple: true });
@@ -1033,6 +1084,20 @@ const M0016_ACCOUNT_PARTICIPATION: Migration = {
   },
 };
 
+const M0017_TRANSFER_JOB_TYPE_INDEX: Migration = {
+  version: 17,
+  name: '0017-transfer-job-type-index',
+  // Audit (step 2): transfer_jobs gains one row per upload/download/delete/
+  // mirror, and the dashboard's listJobsForUser filters on job_type with a
+  // created_at sort. The pre-existing indexes ((state, updated_at) and the
+  // idempotency partial) cannot serve that filter — EXPLAIN QUERY PLAN showed
+  // a full scan plus a temp B-tree sort. A plain CREATE INDEX stays inside
+  // the default transactional runner.
+  up: (db) => {
+    db.exec('CREATE INDEX idx_transfer_jobs_type ON transfer_jobs(job_type);');
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -1050,4 +1115,5 @@ export const allMigrations: readonly Migration[] = [
   M0014_FOLDERS_TRASH_NOTIFICATIONS,
   M0015_MIRROR_AND_PROVIDER_METRICS,
   M0016_ACCOUNT_PARTICIPATION,
+  M0017_TRANSFER_JOB_TYPE_INDEX,
 ];

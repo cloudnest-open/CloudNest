@@ -60,7 +60,15 @@ export function makeUserQueries(db: Database.Database) {
 
 export type UserQueries = ReturnType<typeof makeUserQueries>;
 
-/** Delete exactly one user's sessions; the id is a server-generated UUID. */
+/**
+ * Delete exactly one user's sessions. Sessions persist express-session's JSON
+ * blob, which has no user_id column, so the match is an interpolated LIKE
+ * pattern. Safe only while BOTH invariants hold: userId is a server-generated
+ * UUID (never carries the LIKE metacharacters % or _, and its fixed length
+ * rules out substring collisions) and the whole pattern stays parameter-bound.
+ * If a caller would ever pass a non-UUID id, add a sessions.user_id column
+ * instead of widening the pattern.
+ */
 export function deleteUserSessionsByUserId(db: Database.Database, userId: string): void {
   db.prepare('DELETE FROM sessions WHERE session_json LIKE ?')
     .run(`%"userId":"${userId}"%`);
