@@ -590,6 +590,7 @@ export const appJa: AppStrings = {
       expires: '{when} に期限切れ',
       rotate: 'ローテーション',
       revoke: '取り消す',
+      moreFiles: '＋{count} 件',
     },
     revoke: {
       message:
@@ -624,6 +625,7 @@ export const appJa: AppStrings = {
   accounts: {
     title: 'クラウドアカウント',
     connectAccount: '+ アカウントを接続',
+    emptyBusiness: 'ビジネスアカウントはまだありません。「アカウントを接続」から S3 互換バケットを選んで追加してください。',
     errorLoad: 'クラウドアカウントを読み込めませんでした。サーバーが実データを返しませんでした。',
     startFailed: '接続を開始できませんでした。',
     sharedPool: {
@@ -906,6 +908,7 @@ export const appJa: AppStrings = {
       needsCorrection: '要修正',
       megaNote:
         'MEGA はローカル接続を通じてアカウントのメールアドレスとパスワードで接続します。実験的機能で、OAuth アプリの設定はありません。',
+      s3Note: 'アクセスキーとシークレットで接続 — ビジネス階層で、OAuth アプリの設定は不要です。',
       clientId: 'クライアント ID',
       clientSecret: 'クライアントシークレット',
       authority: 'Authority（common / consumers / organizations / テナント ID）',
@@ -1131,8 +1134,8 @@ export const appJa: AppStrings = {
   },
   dock: {
     aria: '進行中の転送',
-    uploadsOnly: { other: '{count} 件アップロード中' },
-    downloadsOnly: { other: '{count} 件ダウンロード中' },
+    uploadsOnly: { other: '{count} 件の転送' },
+    downloadsOnly: { other: '{count} 件の転送' },
     both: 'アップロード {up} · ダウンロード {down}',
     downloadRow: 'ダウンロード — 累計 {bytes}',
     openUploads: 'アップロードを開く',

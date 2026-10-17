@@ -603,6 +603,7 @@ export const appFr: AppStrings = {
       expires: 'expire le {when}',
       rotate: 'Faire pivoter',
       revoke: 'Révoquer',
+      moreFiles: '+{count} autres',
     },
     revoke: {
       message:
@@ -637,6 +638,7 @@ export const appFr: AppStrings = {
   accounts: {
     title: 'Comptes cloud',
     connectAccount: '+ Connecter un compte',
+    emptyBusiness: 'Aucun compte professionnel pour l’instant. Utilisez « Connecter un compte » et choisissez un bucket compatible S3 pour en ajouter un.',
     errorLoad: 'Les comptes cloud n’ont pas pu être chargés. Le serveur n’a pas renvoyé de données réelles.',
     startFailed: 'La connexion n’a pas pu être lancée.',
     sharedPool: {
@@ -924,6 +926,7 @@ export const appFr: AppStrings = {
       needsCorrection: 'À corriger',
       megaNote:
         'MEGA se connecte avec l’e-mail et le mot de passe du compte via la connexion locale. C’est expérimental et sans configuration d’app OAuth.',
+      s3Note: 'Se connecte avec une clé d’accès et un secret — niveau professionnel, sans configuration d’app OAuth.',
       clientId: 'ID client',
       clientSecret: 'Secret client',
       authority: 'Authority (common / consumers / organizations / ID de locataire)',
@@ -1154,8 +1157,8 @@ export const appFr: AppStrings = {
   },
   dock: {
     aria: 'Transferts actifs',
-    uploadsOnly: { one: '{count} en téléversement', other: '{count} en téléversement' },
-    downloadsOnly: { one: '{count} en téléchargement', other: '{count} en téléchargement' },
+    uploadsOnly: { one: '{count} transfert', other: '{count} transferts' },
+    downloadsOnly: { one: '{count} transfert', other: '{count} transferts' },
     both: '{up} en téléversement · {down} en téléchargement',
     downloadRow: 'Téléchargement — {bytes} à ce jour',
     openUploads: 'Ouvrir Téléversements',

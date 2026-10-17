@@ -1520,6 +1520,13 @@ input:disabled, select:disabled, textarea:disabled {
   .page-title { font-size: 22px; line-height: 30px; }
   .provider-grid { grid-template-columns: 1fr; }
   .row-action-items { max-width: calc(100vw - 64px); }
+  /* Files rows on phones keep checkbox + name + actions; the middle columns
+     (type/size/stored-in/modified) would otherwise squeeze the actions out of
+     reach. */
+  .files-table th:nth-child(3), .files-table td:nth-child(3),
+  .files-table th:nth-child(4), .files-table td:nth-child(4),
+  .files-table th:nth-child(5), .files-table td:nth-child(5),
+  .files-table th:nth-child(6), .files-table td:nth-child(6) { display: none; }
   .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .settings-tabs { display: none; }
   .settings-mobile-select { display: block; }
@@ -2509,6 +2516,10 @@ input:disabled, select:disabled, textarea:disabled {
   gap: 8px;
   font-weight: 500;
 }
+
+/* The generic .upload-form input width:100% rule would also stretch the
+   toggles' checkboxes across the row, pushing their labels to the far edge. */
+.upload-toggle-row input[type='checkbox'] { width: 20px; height: 20px; padding: 0; }
 
 .upload-folder-btn { margin-top: 8px; align-self: flex-start; }
 

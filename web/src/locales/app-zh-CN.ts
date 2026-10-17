@@ -577,6 +577,7 @@ export const appZhCn: AppStrings = {
       expires: '{when} 过期',
       rotate: '轮换',
       revoke: '吊销',
+      moreFiles: '等 {count} 个文件',
     },
     revoke: {
       message: '吊销此链接吗？持有该 URL 的人将立即失去访问权限。文件不会被删除。',
@@ -608,6 +609,7 @@ export const appZhCn: AppStrings = {
   accounts: {
     title: '云盘账户',
     connectAccount: '+ 连接账户',
+    emptyBusiness: '还没有商业账户。使用“连接账户”并选择兼容 S3 的存储桶来添加。',
     errorLoad: '无法加载云盘账户。服务器没有返回真实数据。',
     startFailed: '无法发起连接。',
     sharedPool: {
@@ -863,6 +865,7 @@ export const appZhCn: AppStrings = {
       verified: '已验证',
       needsCorrection: '需要更正',
       megaNote: 'MEGA 通过本地连接使用账户电子邮件和密码连接。它是实验性功能，没有 OAuth 应用配置。',
+      s3Note: '通过访问密钥和私有密钥连接——商业层级，无需 OAuth 应用配置。',
       clientId: 'Client ID',
       clientSecret: 'Client Secret',
       authority: 'Authority（common / consumers / organizations / 租户 ID）',
@@ -1077,8 +1080,8 @@ export const appZhCn: AppStrings = {
   },
   dock: {
     aria: '进行中的传输',
-    uploadsOnly: { other: '{count} 个上传中' },
-    downloadsOnly: { other: '{count} 个下载中' },
+    uploadsOnly: { other: '{count} 个传输' },
+    downloadsOnly: { other: '{count} 个传输' },
     both: '上传 {up} · 下载 {down}',
     downloadRow: '下载——已传输 {bytes}',
     openUploads: '打开上传页',

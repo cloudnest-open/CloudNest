@@ -109,6 +109,24 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [fileSearch, setFileSearch] = useState<{ text: string; seq: number }>({ text: '', seq: 0 });
+  // Escape must close the bell panel and the account menu from anywhere: the
+  // per-element handlers only fire when focus sits inside them, which is not
+  // where a click-opened menu leaves focus.
+  useEffect(() => {
+    function onEscape(ev: KeyboardEvent) {
+      if (ev.key !== 'Escape') return;
+      if (bellOpen) {
+        setBellOpen(false);
+        return;
+      }
+      if (accountOpen) {
+        setAccountOpen(false);
+        document.querySelector<HTMLButtonElement>('.account-chip')?.focus();
+      }
+    }
+    document.addEventListener('keydown', onEscape);
+    return () => document.removeEventListener('keydown', onEscape);
+  }, [bellOpen, accountOpen]);
 
   /** Load the authenticated principal; decides role-aware nav and menus. */
   const refreshMe = async (): Promise<void> => {

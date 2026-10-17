@@ -600,6 +600,7 @@ export const appRu: AppStrings = {
       expires: 'истекает {when}',
       rotate: 'Ротировать',
       revoke: 'Отозвать',
+      moreFiles: 'ещё {count}',
     },
     revoke: {
       message:
@@ -634,6 +635,7 @@ export const appRu: AppStrings = {
   accounts: {
     title: 'Облачные аккаунты',
     connectAccount: '+ Подключить аккаунт',
+    emptyBusiness: 'Бизнес-аккаунтов пока нет. Используйте «Подключить аккаунт» и выберите S3-совместимый bucket, чтобы добавить.',
     errorLoad: 'Не удалось загрузить облачные аккаунты. Сервер не вернул реальные данные.',
     startFailed: 'Не удалось начать подключение.',
     sharedPool: {
@@ -919,6 +921,7 @@ export const appRu: AppStrings = {
       needsCorrection: 'Требует исправления',
       megaNote:
         'MEGA подключается по локальному соединению с e-mail и паролем аккаунта. Это экспериментальная функция без настройки OAuth-приложения.',
+      s3Note: 'Подключается по access key и secret — бизнес-уровень, без настройки OAuth-приложения.',
       clientId: 'Client ID',
       clientSecret: 'Client secret',
       authority: 'Authority (common / consumers / organizations / Tenant ID)',
@@ -1148,8 +1151,8 @@ export const appRu: AppStrings = {
   },
   dock: {
     aria: 'Активные передачи',
-    uploadsOnly: { one: '{count} загружается', other: '{count} загружаются' },
-    downloadsOnly: { one: '{count} скачивается', other: '{count} скачиваются' },
+    uploadsOnly: { one: '{count} передача', other: '{count} передач' },
+    downloadsOnly: { one: '{count} передача', other: '{count} передач' },
     both: 'загрузок: {up} · скачиваний: {down}',
     downloadRow: 'Скачивание — всего {bytes}',
     openUploads: 'Открыть загрузки',

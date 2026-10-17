@@ -158,7 +158,7 @@ export function ProviderSetupCard({ onChanged, onGoToCloudAccounts }: { onChange
               </div>
 
               {!p.requiresAppConfig ? (
-                <p className="muted">{ps.megaNote}</p>
+                <p className="muted">{p.id === 's3' ? ps.s3Note : ps.megaNote}</p>
               ) : openId === p.id ? (
                 <form onSubmit={(e) => void save(e, p)} className="password-form">
                   <label htmlFor={`${p.id}-client-id`}>{ps.clientId}</label>

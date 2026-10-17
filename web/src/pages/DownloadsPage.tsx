@@ -292,9 +292,13 @@ export function DownloadsPage() {
                     </td>
                     <td className="muted small">{formatDateTime(d.updatedAt)}</td>
                     <td className="actions">
-                      <button type="button" className="btn-secondary" disabled={d.state !== 'running'} onClick={() => void cancel(d.jobId)}>
-                        {t.downloads.cancel}
-                      </button>
+                      {/* A cancel is only meaningful while the download runs;
+                          finished/failed rows keep the record but no button. */}
+                      {d.state === 'running' && (
+                        <button type="button" className="btn-secondary" onClick={() => void cancel(d.jobId)}>
+                          {t.downloads.cancel}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

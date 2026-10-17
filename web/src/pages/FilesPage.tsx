@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChevronRight, Folder, FolderPlus, Pencil, RefreshCw, RotateCcw,
   Trash2, Upload,
@@ -70,6 +70,12 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
   const [search, setSearch] = useState(initialSearch);
   const [appliedSearch, setAppliedSearch] = useState(initialSearch.trim());
   const [detail, setDetail] = useState<FileView | null>(null);
+  // The details panel renders at the end of the page; scrolling it into view
+  // when it opens keeps the panel reachable from a row deep in the list.
+  const detailsRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (detail) detailsRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [detail]);
   // FE-13: server-driven pagination so the library is not silently capped at
   // the first 100 rows.
   const [page, setPage] = useState(0);
@@ -574,7 +580,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
       )}
 
       {detail && view === 'files' && (
-        <section className="card">
+        <section className="card" ref={detailsRef}>
           <div className="page-head">
             <h2>{t.files.details.title}</h2>
             <button type="button" className="btn-secondary" onClick={() => setDetail(null)}>{t.common.close}</button>

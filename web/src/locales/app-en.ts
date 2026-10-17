@@ -615,6 +615,7 @@ export const appEn = {
       expires: 'expires {when}',
       rotate: 'Rotate',
       revoke: 'Revoke',
+      moreFiles: '+{count} more',
     },
     revoke: {
       message: 'Revoke this link? Anyone holding the URL will lose access immediately. The files are not deleted.',
@@ -647,6 +648,7 @@ export const appEn = {
   accounts: {
     title: 'Cloud Accounts',
     connectAccount: '+ Connect Account',
+    emptyBusiness: 'No business accounts yet. Use Connect Account and choose an S3-compatible bucket to add one.',
     errorLoad: 'Could not load cloud accounts. The server did not answer with real data.',
     startFailed: 'Could not start the connection.',
     sharedPool: {
@@ -928,6 +930,8 @@ export const appEn = {
       needsCorrection: 'Needs correction',
       megaNote:
         'MEGA connects with an account email and password over the local connection. It is experimental and has no OAuth app setup.',
+      s3Note:
+        'Connects with an access key and secret — business tier, no OAuth app setup.',
       clientId: 'Client ID',
       clientSecret: 'Client secret',
       authority: 'Authority (common / consumers / organizations / tenant ID)',
@@ -1165,8 +1169,10 @@ export const appEn = {
 
   dock: {
     aria: 'Active transfers',
-    uploadsOnly: pl({ one: '{count} uploading', other: '{count} uploading' }),
-    downloadsOnly: pl({ one: '{count} downloading', other: '{count} downloading' }),
+    // The dock keeps paused and running rows together, so the heading counts
+    // transfers instead of claiming they are all actively uploading.
+    uploadsOnly: pl({ one: '{count} transfer', other: '{count} transfers' }),
+    downloadsOnly: pl({ one: '{count} transfer', other: '{count} transfers' }),
     both: '{up} uploading · {down} downloading',
     downloadRow: 'Download — {bytes} so far',
     openUploads: 'Open Uploads',

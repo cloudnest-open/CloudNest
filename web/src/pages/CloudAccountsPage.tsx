@@ -479,6 +479,10 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
           <p className="muted">{t.common.loading}</p>
         ) : accounts.length === 0 ? (
           <p className="muted">{t.common.noAccountsYet}</p>
+        ) : accounts.filter((a) => (a.tier ?? 'personal') === tierTab).length === 0 ? (
+          // An empty tier tab is not the same as an empty account list — say
+          // what the tab is for instead of showing a bare table skeleton.
+          <p className="muted">{tierTab === 'business' ? t.accounts.emptyBusiness : t.common.noAccountsYet}</p>
         ) : (
           <table className="accounts-table">
             <thead>

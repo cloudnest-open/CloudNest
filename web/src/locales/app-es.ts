@@ -598,6 +598,7 @@ export const appEs: AppStrings = {
       expires: 'caduca el {when}',
       rotate: 'Rotar',
       revoke: 'Revocar',
+      moreFiles: '+{count} más',
     },
     revoke: {
       message:
@@ -631,6 +632,7 @@ export const appEs: AppStrings = {
   accounts: {
     title: 'Cuentas en la nube',
     connectAccount: '+ Conectar cuenta',
+    emptyBusiness: 'Aún no hay cuentas de negocio. Usa «Conectar cuenta» y elige un bucket compatible con S3 para añadir una.',
     errorLoad: 'No se pudieron cargar las cuentas en la nube. El servidor no respondió con datos reales.',
     startFailed: 'No se pudo iniciar la conexión.',
     sharedPool: {
@@ -915,6 +917,7 @@ export const appEs: AppStrings = {
       needsCorrection: 'Necesita corrección',
       megaNote:
         'MEGA se conecta con el correo y la contraseña de la cuenta por la conexión local. Es experimental y no tiene configuración de app OAuth.',
+      s3Note: 'Se conecta con clave de acceso y secreto: nivel de negocio, sin configuración de app OAuth.',
       clientId: 'ID de cliente',
       clientSecret: 'Secreto de cliente',
       authority: 'Authority (common / consumers / organizations / ID de inquilino)',
@@ -1144,8 +1147,8 @@ export const appEs: AppStrings = {
   },
   dock: {
     aria: 'Transferencias activas',
-    uploadsOnly: { one: '{count} subiendo', other: '{count} subiendo' },
-    downloadsOnly: { one: '{count} descargando', other: '{count} descargando' },
+    uploadsOnly: { one: '{count} transferencia', other: '{count} transferencias' },
+    downloadsOnly: { one: '{count} transferencia', other: '{count} transferencias' },
     both: '{up} subiendo · {down} descargando',
     downloadRow: 'Descarga — {bytes} hasta ahora',
     openUploads: 'Abrir Subidas',

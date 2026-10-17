@@ -338,23 +338,29 @@ export class ShareService {
    * to their own links; null (admin) lists everything. */
   listLinks(createdBy: string | null = null): Array<{
     id: string; state: string; expiresAt: string | null; downloadLimit: number | null;
-    downloadCount: number; hasPassword: boolean; fileCount: number; createdBy: string | null; createdAt: string;
+    downloadCount: number; hasPassword: boolean; fileCount: number; firstFileName: string | null;
+    createdBy: string | null; createdAt: string;
   }> {
     const rows = (
       createdBy === null
         ? this.db.prepare(
             `SELECT l.id, l.state, l.expires_at, l.download_limit, l.download_count, l.password_hash, l.created_by, l.created_at,
-              (SELECT COUNT(*) FROM share_link_items i WHERE i.share_link_id = l.id) AS file_count
+              (SELECT COUNT(*) FROM share_link_items i WHERE i.share_link_id = l.id) AS file_count,
+              (SELECT f.original_name FROM share_link_items i JOIN files f ON f.id = i.file_id
+                WHERE i.share_link_id = l.id ORDER BY f.original_name LIMIT 1) AS first_file_name
        FROM share_links l ORDER BY l.created_at DESC`,
           ).all()
         : this.db.prepare(
             `SELECT l.id, l.state, l.expires_at, l.download_limit, l.download_count, l.password_hash, l.created_by, l.created_at,
-              (SELECT COUNT(*) FROM share_link_items i WHERE i.share_link_id = l.id) AS file_count
+              (SELECT COUNT(*) FROM share_link_items i WHERE i.share_link_id = l.id) AS file_count,
+              (SELECT f.original_name FROM share_link_items i JOIN files f ON f.id = i.file_id
+                WHERE i.share_link_id = l.id ORDER BY f.original_name LIMIT 1) AS first_file_name
        FROM share_links l WHERE l.created_by = ? ORDER BY l.created_at DESC`,
           ).all(createdBy)
     ) as Array<{
       id: string; state: string; expires_at: string | null; download_limit: number | null;
-      download_count: number; password_hash: string | null; created_by: string | null; created_at: string; file_count: number;
+      download_count: number; password_hash: string | null; created_by: string | null; created_at: string;
+      file_count: number; first_file_name: string | null;
     }>;
     return rows.map((r) => ({
       id: r.id,
@@ -364,6 +370,7 @@ export class ShareService {
       downloadCount: r.download_count,
       hasPassword: r.password_hash !== null,
       fileCount: r.file_count,
+      firstFileName: r.first_file_name,
       createdBy: r.created_by,
       createdAt: r.created_at,
     }));

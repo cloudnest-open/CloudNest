@@ -20,6 +20,7 @@ interface LinkView {
   downloadCount: number;
   hasPassword: boolean;
   fileCount: number;
+  firstFileName: string | null;
   createdAt: string;
 }
 
@@ -385,7 +386,12 @@ export function SharedLinksPage() {
               {links.map((link) => (
                 <tr key={link.id}>
                   <td><Badge tone={link.state === 'active' ? 'ok' : 'muted'}>{shareStateLabel(link.state)}</Badge></td>
-                  <td>{link.fileCount}</td>
+                  <td>
+                    <span className="ellipsis" title={link.firstFileName ?? undefined}>
+                      {link.firstFileName ?? t.common.unknown}
+                      {link.fileCount > 1 ? ` ${tf(t.shares.list.moreFiles, { count: link.fileCount - 1 })}` : ''}
+                    </span>
+                  </td>
                   <td>
                     {link.downloadLimit !== null
                       ? tf(t.shares.list.withLimit, { count: link.downloadCount, limit: link.downloadLimit })

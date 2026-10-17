@@ -103,7 +103,7 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
         </div>
       )}
 
-      <table className="accounts-table">
+      <table className="accounts-table files-table">
         <thead>
           <tr>
             <th style={{ width: 36 }}>
