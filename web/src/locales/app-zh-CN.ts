@@ -1095,6 +1095,9 @@ export const appZhCn: AppStrings = {
   },
   dock: {
     aria: '进行中的传输',
+    expand: '显示传输',
+    collapse: '收起传输',
+    ariaCollapsed: '活动传输 — 已折叠，打开传输面板',
     uploadsOnly: { other: '{count} 个传输' },
     downloadsOnly: { other: '{count} 个传输' },
     both: '上传 {up} · 下载 {down}',

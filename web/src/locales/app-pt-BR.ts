@@ -1171,6 +1171,9 @@ export const appPtBr: AppStrings = {
   },
   dock: {
     aria: 'Transferências ativas',
+    expand: 'Mostrar transferências',
+    collapse: 'Ocultar transferências',
+    ariaCollapsed: 'Transferências ativas — recolhido, abrir o painel de transferências',
     uploadsOnly: { one: '{count} transferência', other: '{count} transferências' },
     downloadsOnly: { one: '{count} transferência', other: '{count} transferências' },
     both: '{up} enviando · {down} baixando',

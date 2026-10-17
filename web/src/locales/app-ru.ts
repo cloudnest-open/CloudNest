@@ -1166,6 +1166,9 @@ export const appRu: AppStrings = {
   },
   dock: {
     aria: 'Активные передачи',
+    expand: 'Показать передачи',
+    collapse: 'Скрыть передачи',
+    ariaCollapsed: 'Активные передачи — свёрнуто, откройте панель передач',
     uploadsOnly: { one: '{count} передача', other: '{count} передач' },
     downloadsOnly: { one: '{count} передача', other: '{count} передач' },
     both: 'загрузок: {up} · скачиваний: {down}',

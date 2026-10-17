@@ -238,6 +238,11 @@ body {
   flex: 1;
 }
 
+/* The expanded transfer dock is a fixed overlay; while it is open the content
+   keeps a bottom reserve so nothing near the page end hides behind it. The
+   collapsed pill needs no reserve. */
+.content-dock-reserve { padding-bottom: 320px; }
+
 /* --- Global search (top bar) --------------------------------------------- */
 .search-wrap { position: relative; width: min(470px, 100%); }
 
@@ -1624,6 +1629,18 @@ input:disabled, select:disabled, textarea:disabled {
   .sidebar-footer .status-line { display: none; }
   .sidebar-footer .btn-logout { height: 40px; padding: 0 8px; }
   .content { padding: 16px; }
+  /* Mobile dock = bottom sheet: full width, anchored to the screen bottom;
+     the expanded panel reserves more content space (it is taller here). */
+  .content-dock-reserve { padding-bottom: 380px; }
+  .transfer-dock {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 70vh;
+    border-radius: 14px 14px 0 0;
+  }
+  .transfer-dock-pill { right: 12px; bottom: 12px; }
   .topbar { padding: 0 16px; }
   .page-title { font-size: 22px; line-height: 30px; }
   .provider-grid { grid-template-columns: 1fr; }
@@ -2653,6 +2670,52 @@ input:disabled, select:disabled, textarea:disabled {
 .transfer-indicator:hover { background: var(--cn-primary-soft); }
 
 .transfer-count { font-size: 12px; }
+
+/* Collapsed dock: a small pill in the corner — icon, transfer count and a
+   micro progress ring of the aggregate bytes moved. Expanding it opens the
+   full panel and reserves content space (see .content-dock-reserve). */
+.transfer-dock-pill {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--cn-border);
+  border-radius: 999px;
+  background: var(--cn-surface);
+  color: var(--cn-primary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(23, 43, 77, 0.14);
+  z-index: 60;
+  transition: background-color 140ms ease;
+}
+
+.transfer-dock-pill:hover { background: var(--cn-primary-soft); }
+
+.dock-pill-ring { flex: 0 0 auto; }
+
+.dock-collapse-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cn-text-muted);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.dock-collapse-btn:hover { background: var(--cn-surface-muted); color: var(--cn-text); }
 
 .transfer-dock {
   position: fixed;

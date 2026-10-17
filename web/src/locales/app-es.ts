@@ -1162,6 +1162,9 @@ export const appEs: AppStrings = {
   },
   dock: {
     aria: 'Transferencias activas',
+    expand: 'Mostrar transferencias',
+    collapse: 'Ocultar transferencias',
+    ariaCollapsed: 'Transferencias activas — plegado, abrir el panel de transferencias',
     uploadsOnly: { one: '{count} transferencia', other: '{count} transferencias' },
     downloadsOnly: { one: '{count} transferencia', other: '{count} transferencias' },
     both: '{up} subiendo · {down} descargando',

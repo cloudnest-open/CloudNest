@@ -1149,6 +1149,9 @@ export const appJa: AppStrings = {
   },
   dock: {
     aria: '進行中の転送',
+    expand: '転送を表示',
+    collapse: '転送を隠す',
+    ariaCollapsed: 'アクティブな転送 — 折りたたみ済み、転送ドックを開く',
     uploadsOnly: { other: '{count} 件の転送' },
     downloadsOnly: { other: '{count} 件の転送' },
     both: 'アップロード {up} · ダウンロード {down}',

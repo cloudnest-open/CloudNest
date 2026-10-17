@@ -1172,6 +1172,9 @@ export const appFr: AppStrings = {
   },
   dock: {
     aria: 'Transferts actifs',
+    expand: 'Afficher les transferts',
+    collapse: 'Masquer les transferts',
+    ariaCollapsed: 'Transferts actifs — replié, ouvrir le dock de transfert',
     uploadsOnly: { one: '{count} transfert', other: '{count} transferts' },
     downloadsOnly: { one: '{count} transfert', other: '{count} transferts' },
     both: '{up} en téléversement · {down} en téléchargement',

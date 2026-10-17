@@ -1184,6 +1184,9 @@ export const appEn = {
 
   dock: {
     aria: 'Active transfers',
+    expand: 'Show transfers',
+    collapse: 'Hide transfers',
+    ariaCollapsed: 'Active transfers — collapsed, open the transfer dock',
     // The dock keeps paused and running rows together, so the heading counts
     // transfers instead of claiming they are all actively uploading.
     uploadsOnly: pl({ one: '{count} transfer', other: '{count} transfers' }),

@@ -1,4 +1,4 @@
-import { CloudUpload, Download, Upload } from 'lucide-react';
+import { ChevronDown, CloudUpload, Download, Upload } from 'lucide-react';
 import { formatBytes } from './ui.js';
 import { useI18n } from '../i18n-context.js';
 
@@ -7,6 +7,9 @@ import { useI18n } from '../i18n-context.js';
  * from the server's durable job state (never a local counter), so what the
  * dock shows is true on every page — including a job whose browser tab moved
  * away, whose frozen progress is exactly what the server still records.
+ * Session-21 batch-B: the dock defaults to a collapsed pill (icon + count +
+ * micro progress ring) so it stops eating the corner it sits in; expanding
+ * it reserves content space (the app adds .content-dock-reserve).
  */
 
 export interface UploadDockJob {
@@ -32,11 +35,15 @@ export function TransferDock({
   downloads,
   onOpenUploads,
   onOpenDownloads,
+  collapsed,
+  onToggleCollapsed,
 }: {
   uploads: UploadDockJob[];
   downloads: DownloadDockJob[];
   onOpenUploads: () => void;
   onOpenDownloads: () => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   const { t, tf, plural } = useI18n();
 
@@ -46,6 +53,41 @@ export function TransferDock({
 
   const percent = (done: number, total: number | null): number =>
     total !== null && total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
+  const count = visibleUploads.length + visibleDownloads.length;
+  // Aggregate ring on the collapsed pill: honest share of bytes moved over the
+  // bytes the durable jobs account for (0 while sizes are unknown).
+  const totalDone = [...visibleUploads, ...visibleDownloads].reduce<number>((sum, job) => sum + job.bytesCompleted, 0);
+  const totalSize = [
+    ...visibleUploads.map((job) => job.sizeBytes),
+    ...visibleDownloads.map((job) => job.requestedBytes),
+  ].reduce<number>((sum, size) => sum + (size ?? 0), 0);
+  const aggregate = percent(totalDone, totalSize > 0 ? totalSize : null);
+  const ring = 2 * Math.PI * 8;
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        className="transfer-dock-pill"
+        aria-label={t.dock.ariaCollapsed}
+        title={t.dock.expand}
+        onClick={onToggleCollapsed}
+      >
+        <CloudUpload size={16} aria-hidden="true" />
+        <span className="transfer-count">{count}</span>
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" className="dock-pill-ring">
+          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--cn-border)" strokeWidth="2.5" />
+          <circle
+            cx="10" cy="10" r="8" fill="none"
+            stroke="var(--cn-primary)" strokeWidth="2.5" strokeLinecap="round"
+            strokeDasharray={`${(aggregate / 100) * ring} ${ring}`}
+            transform="rotate(-90 10 10)"
+          />
+        </svg>
+      </button>
+    );
+  }
 
   return (
     <aside className="transfer-dock" aria-label={t.dock.aria}>
@@ -58,6 +100,15 @@ export function TransferDock({
               ? plural(t.dock.downloadsOnly, visibleDownloads.length)
               : tf(t.dock.both, { up: visibleUploads.length, down: visibleDownloads.length })}
         </strong>
+        <button
+          type="button"
+          className="dock-collapse-btn"
+          aria-label={t.dock.collapse}
+          title={t.dock.collapse}
+          onClick={onToggleCollapsed}
+        >
+          <ChevronDown size={16} aria-hidden="true" />
+        </button>
       </div>
       <ul className="dock-rows">
         {visibleUploads.map((job) => {

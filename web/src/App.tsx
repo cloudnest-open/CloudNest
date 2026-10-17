@@ -20,6 +20,7 @@ import { LanguageMenu } from './components/LanguageMenu.js';
 import { ModeChooser } from './components/ModeChooser.js';
 import { useI18n } from './i18n-context.js';
 import { useUiMode } from './ui-mode-context.js';
+import { readStoredDockCollapsed, storeDockCollapsed } from './dock-state.js';
 import { formatBytes } from './i18n.js';
 import { currentTheme, toggleTheme } from './theme.js';
 import { setConfirmDestructivePreference, ConfirmHost } from './confirm.js';
@@ -104,6 +105,15 @@ export default function App() {
   // durable server rows only.
   const [dockUploads, setDockUploads] = useState<UploadDockJob[]>([]);
   const [dockDownloads, setDockDownloads] = useState<DownloadDockJob[]>([]);
+  // Session-21 batch-B: the dock starts as a collapsed pill; expanding it
+  // reserves content space so the panel stops eating the page corner.
+  const [dockCollapsed, setDockCollapsed] = useState<boolean>(readStoredDockCollapsed);
+  function toggleDockCollapsed(): void {
+    setDockCollapsed((prev) => {
+      storeDockCollapsed(!prev);
+      return !prev;
+    });
+  }
   // Global search over CloudNest-managed files (real data; never a fake index).
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -708,7 +718,7 @@ export default function App() {
             )}
           </div>
         </header>
-        <main className="content">
+        <main className={`content${dockCollapsed ? '' : ' content-dock-reserve'}`}>
           {notice && (
             <div className="card notice-card" role="status">
               <p>{notice}</p>
@@ -768,6 +778,8 @@ export default function App() {
       downloads={dockDownloads}
       onOpenUploads={() => setActive('Uploads')}
       onOpenDownloads={() => setActive('Downloads')}
+      collapsed={dockCollapsed}
+      onToggleCollapsed={toggleDockCollapsed}
     />
     </FileActionsProvider>
     </ToastProvider>

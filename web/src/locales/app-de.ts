@@ -1170,6 +1170,9 @@ export const appDe: AppStrings = {
   },
   dock: {
     aria: 'Aktive Übertragungen',
+    expand: 'Übertragungen anzeigen',
+    collapse: 'Übertragungen ausblenden',
+    ariaCollapsed: 'Aktive Übertragungen — eingeklappt, Transfer-Dock öffnen',
     uploadsOnly: { one: '{count} Transfer', other: '{count} Transfers' },
     downloadsOnly: { one: '{count} Transfer', other: '{count} Transfers' },
     both: '{up} Uploads · {down} Downloads',
