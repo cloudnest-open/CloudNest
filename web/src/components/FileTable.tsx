@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, FolderInput, Info, Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
 import { useFileActions } from './FileActionsProvider.js';
-import { Badge, TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS, fileTypeName, fileTypeDisplay } from './ui.js';
+import { Badge, RowMenu, RowMenuItem, TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS, fileTypeName, fileTypeDisplay } from './ui.js';
 import { ProviderLogo } from './ProviderLogo.js';
 import { useI18n } from '../i18n-context.js';
 
@@ -103,7 +103,8 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
         </div>
       )}
 
-      <table className="accounts-table files-table">
+      <div className="table-scroll-container">
+        <table className="accounts-table files-table">
         <thead>
           <tr>
             <th style={{ width: 36 }}>
@@ -183,50 +184,45 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                     <ShareIcon size={14} aria-hidden="true" />
                     {t.table.share}
                   </button>
-                  <details className="row-action-disclosure">
-                    <summary className="row-action-summary btn-secondary">{t.table.actions}</summary>
-                    <span className="row-action-items">
-                      {onDetails && (
-                        <button type="button" className="btn-inline" onClick={() => onDetails(file)}>
-                          <Info size={14} aria-hidden="true" />
-                          {t.table.details}
-                        </button>
-                      )}
-                      <button type="button" className="btn-inline" onClick={() => actions.rename(file, reload)}>
-                        <Pencil size={14} aria-hidden="true" />
-                        {t.table.rename}
-                      </button>
-                      <button type="button" className="btn-inline" onClick={() => actions.move([file], reload)}>
-                        <FolderInput size={14} aria-hidden="true" />
-                        {t.table.move}
-                      </button>
-                      {/* Phase 5 §4.5: a completed file can gain a second copy. */}
-                      <button
-                        type="button"
-                        className="btn-inline"
-                        disabled={file.state !== 'completed'}
-                        onClick={() => actions.mirror(file, reload)}
-                      >
-                        <Copy size={14} aria-hidden="true" />
-                        {t.table.mirror}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-inline btn-inline-danger"
-                        disabled={file.state === 'deleted'}
-                        onClick={() => actions.remove(file, reload)}
-                      >
-                        <Trash2 size={14} aria-hidden="true" />
-                        {t.table.delete}
-                      </button>
-                    </span>
-                  </details>
+                  <RowMenu label={t.table.actions}>
+                    {onDetails && (
+                      <RowMenuItem onSelect={() => onDetails(file)}>
+                        <Info size={14} aria-hidden="true" />
+                        {t.table.details}
+                      </RowMenuItem>
+                    )}
+                    <RowMenuItem onSelect={() => actions.rename(file, reload)}>
+                      <Pencil size={14} aria-hidden="true" />
+                      {t.table.rename}
+                    </RowMenuItem>
+                    <RowMenuItem onSelect={() => actions.move([file], reload)}>
+                      <FolderInput size={14} aria-hidden="true" />
+                      {t.table.move}
+                    </RowMenuItem>
+                    {/* Phase 5 §4.5: a completed file can gain a second copy. */}
+                    <RowMenuItem
+                      disabled={file.state !== 'completed'}
+                      onSelect={() => actions.mirror(file, reload)}
+                    >
+                      <Copy size={14} aria-hidden="true" />
+                      {t.table.mirror}
+                    </RowMenuItem>
+                    <RowMenuItem
+                      danger
+                      disabled={file.state === 'deleted'}
+                      onSelect={() => actions.remove(file, reload)}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      {t.table.delete}
+                    </RowMenuItem>
+                  </RowMenu>
                 </span>
               </td>
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
       {footer}
     </>
   );

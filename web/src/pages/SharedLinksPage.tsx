@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
-import { Badge, formatBytes, formatDateTime, pageList, SkeletonRows } from '../components/ui.js';
+import { Badge, RowMenu, RowMenuItem, formatBytes, formatDateTime, pageList, SkeletonRows } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
 
 /**
@@ -372,6 +372,7 @@ export function SharedLinksPage() {
         ) : links.length === 0 ? (
           <p className="muted">{t.shares.list.none}</p>
         ) : (
+          <div className="table-scroll-container">
           <table className="accounts-table">
             <thead>
               <tr>
@@ -402,13 +403,16 @@ export function SharedLinksPage() {
                     {link.expiresAt ? ` · ${tf(t.shares.list.expires, { when: formatDateTime(link.expiresAt) })}` : ''}
                   </td>
                   <td className="actions">
-                    <button type="button" className="btn-secondary" disabled={link.state !== 'active' || linkBusyId !== null} onClick={() => void rotate(link.id)}>{t.shares.list.rotate}</button>
-                    <button type="button" className="btn-danger" disabled={link.state !== 'active' || linkBusyId !== null} onClick={() => void revoke(link.id)}>{t.shares.list.revoke}</button>
+                    <RowMenu label={t.shares.list.actions}>
+                      <RowMenuItem disabled={link.state !== 'active' || linkBusyId !== null} onSelect={() => void rotate(link.id)}>{t.shares.list.rotate}</RowMenuItem>
+                      <RowMenuItem danger disabled={link.state !== 'active' || linkBusyId !== null} onSelect={() => void revoke(link.id)}>{t.shares.list.revoke}</RowMenuItem>
+                    </RowMenu>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
         {createdUrl && createdUrlContext === 'rotate' && (
           <section ref={createdUrlRef} className="share-created-url" tabIndex={-1} aria-labelledby="share-rotated-url-title">

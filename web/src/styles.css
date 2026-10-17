@@ -566,30 +566,54 @@ body {
    the viewport (the previous nowrap exception pushed the Cloud Accounts
    actions column past the page edge at laptop widths). */
 .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.row-action-disclosure { display: inline-block; min-width: 0; }
-.row-action-disclosure[open] { flex: 1 1 100%; }
-.row-action-summary {
+/* Row action menu: the trigger is a compact "⋯" button; the panel is rendered
+   through a portal with fixed coordinates (see ui.tsx), so no overflow or
+   scroll container can clip it. */
+.row-menu-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  list-style: none;
-  cursor: pointer;
-  white-space: nowrap;
+  width: 36px;
+  padding: 0;
 }
-.row-action-summary::-webkit-details-marker { display: none; }
-.row-action-items {
+.accounts-table .actions .row-menu-trigger { height: 34px; padding: 0; }
+.row-menu-items {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 176px;
+  padding: 6px;
+  border: 1px solid var(--cn-border);
+  border-radius: 10px;
+  background: var(--cn-surface);
+  box-shadow: 0 10px 18px rgb(16 24 40 / 10%);
+}
+.row-menu-item {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
-  width: max-content;
-  max-width: min(520px, 75vw);
-  padding: 8px;
-  margin-top: 6px;
-  border: 1px solid var(--cn-border);
-  border-radius: 8px;
-  background: var(--cn-surface-muted);
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--cn-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
 }
+.row-menu-item:hover:not(:disabled) { background: var(--cn-surface-muted); }
+.row-menu-item:disabled { opacity: 0.5; cursor: not-allowed; }
+.row-menu-item-danger { color: var(--cn-danger); }
+.row-menu-item-danger:hover:not(:disabled) { background: var(--cn-danger-bg); }
 .accounts-table .actions .btn-primary,
 .accounts-table .actions .btn-secondary,
 .accounts-table .actions .btn-danger {
@@ -705,16 +729,13 @@ input:disabled, select:disabled, textarea:disabled {
 .empty-state .actions { justify-content: center; margin-top: 6px; }
 
 /* --- Tables -------------------------------------------------------------- */
-/* The table element itself is the horizontal scroll region: wide tables (the
-   6-column Cloud Accounts rows, the 7-column file rows) scroll inside their
-   own card instead of pushing the whole page out of bounds. This replaces the
-   old mobile-only rule and applies at every viewport; when the content fits
-   there is no scrollbar and the rendering is unchanged. */
+/* Real table layout: head and body columns share one grid, so column widths
+   (percent or min-width) are trustworthy and cells never silently clip their
+   content the way the old display:block self-scrolling table did. Tables that
+   can exceed the card width sit inside .table-scroll-container, which owns
+   the horizontal scrolling instead. */
 .accounts-table {
-  display: block;
   width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 14px;
@@ -969,10 +990,10 @@ input:disabled, select:disabled, textarea:disabled {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
-.table-scroll-container .accounts-table {
-  display: table;
-  width: 100%;
-  overflow: visible;
+/* Percent-based column plans hold only under the fixed layout algorithm;
+   tables without a column-width plan keep the auto layout and size by
+   content. */
+.uploads-jobs-table, .download-available-table, .download-transfers-table {
   table-layout: fixed;
 }
 .uploads-jobs-table { min-width: 900px; }
@@ -1600,7 +1621,6 @@ input:disabled, select:disabled, textarea:disabled {
   .topbar { padding: 0 16px; }
   .page-title { font-size: 22px; line-height: 30px; }
   .provider-grid { grid-template-columns: 1fr; }
-  .row-action-items { max-width: calc(100vw - 64px); }
   /* Files rows on phones keep checkbox + name + actions; the middle columns
      (type/size/stored-in/modified) would otherwise squeeze the actions out of
      reach. */

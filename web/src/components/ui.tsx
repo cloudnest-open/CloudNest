@@ -2,8 +2,9 @@ import {
   createContext, useCallback, useContext, useEffect, useRef, useState,
   type ReactNode, type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  AlertTriangle, CheckCircle2, Info, X, Cloud, Folder, FileText, FileArchive,
+  AlertTriangle, CheckCircle2, Info, MoreHorizontal, X, Cloud, Folder, FileText, FileArchive,
   FileSpreadsheet, FileImage, Presentation, File, Trash2, type LucideIcon,
 } from 'lucide-react';
 import {
@@ -246,6 +247,118 @@ export function ConfirmDialog({ title, lines, confirmLabel, onConfirm, onClose }
         </div>
       </div>
     </Dialog>
+  );
+}
+
+/* --- row action menu ("⋯" popover) --------------------------------------- */
+
+/**
+ * Per-row secondary actions. The panel renders through a portal with fixed
+ * viewport coordinates, so it is independent of table overflow and scroll
+ * containers — the in-row <details> strip this replaces could stretch cells
+ * and end up past the table's own horizontal scroll reach. Closing on scroll
+ * keeps the fixed panel from drifting away from its trigger.
+ */
+export function RowMenu({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  function toggle(): void {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const r = triggerRef.current?.getBoundingClientRect();
+    if (!r) return;
+    // The panel opens below the trigger, flipped above it when it would run
+    // past the viewport bottom (240px ≈ five items).
+    const estHeight = 240;
+    const top = r.bottom + 6 + estHeight > window.innerHeight
+      ? Math.max(8, r.top - estHeight - 6)
+      : r.bottom + 6;
+    setPos({ top, right: Math.max(8, window.innerWidth - r.right) });
+    setOpen(true);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    const close = () => setOpen(false);
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  function closeAndRefocus(): void {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn-secondary row-menu-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+        ref={triggerRef}
+        onClick={toggle}
+      >
+        <MoreHorizontal size={16} aria-hidden="true" />
+      </button>
+      {open && pos && createPortal(
+        <div
+          className="row-menu-items"
+          role="menu"
+          aria-label={label}
+          ref={menuRef}
+          style={{ top: pos.top, right: pos.right }}
+          onClick={closeAndRefocus}
+        >
+          {children}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+export function RowMenuItem({ onSelect, disabled, danger, children }: {
+  onSelect: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={`row-menu-item${danger ? ' row-menu-item-danger' : ''}`}
+      disabled={disabled}
+      onClick={onSelect}
+    >
+      {children}
+    </button>
   );
 }
 
