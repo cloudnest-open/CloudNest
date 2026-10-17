@@ -150,6 +150,13 @@ export const appJa: AppStrings = {
       connect: '接続',
       manage: '管理',
     },
+    health: {
+      healthy: '正常',
+      degraded: '低下',
+      down: '停止中',
+      unconfigured: '未設定',
+      lastCheck: '最終確認 {when}',
+    },
     recent: {
       title: '最近のファイル',
       searchLabel: 'ファイルを検索',
@@ -307,6 +314,7 @@ export const appJa: AppStrings = {
     delete: '削除',
     move: 'フォルダへ移動',
     moveSelected: '選択を移動',
+    mirror: 'ミラー',
   },
 
   fileActions: {
@@ -376,6 +384,22 @@ export const appJa: AppStrings = {
       trashedBody: '7日以内ならゴミ箱タブから復元できます。完全削除するまでクラウドアカウントには触れません。',
       errorTitle: 'ゴミ箱へ移動できませんでした',
       errorBody: 'ファイルはライブラリに残っています（{code}）。',
+    },
+    mirror: {
+      title: 'このファイルをミラーする（2 コピー）',
+      desc: 'このファイルの全チャンクを第 2 のクラウドアカウントへコピーします。片方のアカウントを失っても読み出せなくなります。',
+      detail: 'コピーはサーバー側で実行され、チャンクごとに検証されます。このファイルの使用容量は 2 倍になります。',
+      confirm: 'ミラーを開始',
+      starting: '開始中…',
+      retrying: 'ミラーを再試行',
+      queuedTitle: 'ミラーをキューに追加しました',
+      queuedBody: '「{name}」を永続エンジン上でミラーしています。検証済みのコピーから順に表示されます。',
+      noTarget: 'このファイルの保存階層でコピーを受けられる第 2 の接続済みアカウントがありません。先に別のアカウントを接続してください。',
+      error: 'ミラーは拒否されました（{code}）。',
+      statusCompleted: 'ミラー済み：{total} チャンク中 {done} チャンクに第 2 コピーがあります。',
+      statusFailed: '前回のミラーは {total} チャンク中 {done} で停止しました（{code}）。再試行では不足分のみ完了させます。',
+      statusActive: 'ミラー実行中：{total} チャンク中 {done} をコピー済み。',
+      statusCopies: '{count} 個のチャンクには既に第 2 コピーがあります。',
     },
     move: {
       title: 'フォルダへ移動',

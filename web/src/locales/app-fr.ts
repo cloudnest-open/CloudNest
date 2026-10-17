@@ -151,6 +151,13 @@ export const appFr: AppStrings = {
       connect: 'Connecter',
       manage: 'Gérer',
     },
+    health: {
+      healthy: 'En bonne santé',
+      degraded: 'Dégradé',
+      down: 'Hors service',
+      unconfigured: 'Non configuré',
+      lastCheck: 'dernière vérification {when}',
+    },
     recent: {
       title: 'Fichiers récents',
       searchLabel: 'Rechercher des fichiers',
@@ -312,6 +319,7 @@ export const appFr: AppStrings = {
     delete: 'Supprimer',
     move: 'Déplacer vers un dossier',
     moveSelected: 'Déplacer la sélection',
+    mirror: 'Dupliquer',
   },
 
   fileActions: {
@@ -382,6 +390,22 @@ export const appFr: AppStrings = {
       trashedBody: 'Restaurez-les depuis l’onglet Corbeille sous 7 jours ; les comptes cloud restent intacts jusqu’à la suppression définitive.',
       errorTitle: 'Impossible de déplacer vers la corbeille',
       errorBody: 'Le fichier est toujours dans votre bibliothèque ({code}).',
+    },
+    mirror: {
+      title: 'Dupliquer ce fichier (2 copies)',
+      desc: 'Copie chaque segment de ce fichier vers un second compte cloud ; perdre un compte ne le rend donc plus illisible.',
+      detail: "La copie s'exécute côté serveur et est vérifiée segment par segment. Elle double l'espace de stockage utilisé par ce fichier.",
+      confirm: 'Lancer la duplication',
+      starting: 'Démarrage…',
+      retrying: 'Relancer la duplication',
+      queuedTitle: "Duplication en file d'attente",
+      queuedBody: '« {name} » est en cours de duplication sur le moteur durable. Les copies apparaissent au fur et à mesure de leur vérification.',
+      noTarget: "Aucun second compte connecté dans le niveau de stockage de ce fichier peut accueillir la copie. Connectez d'abord un autre compte.",
+      error: 'La duplication a été refusée ({code}).',
+      statusCompleted: 'Déjà dupliqué : {done} segments sur {total} possèdent une seconde copie.',
+      statusFailed: "La dernière duplication s'est arrêtée à {done} sur {total} segments ({code}). Une relance ne termine que les manquants.",
+      statusActive: 'Une duplication est en cours : {done} segments sur {total} copiés.',
+      statusCopies: '{count} segment(s) possèdent déjà une seconde copie.',
     },
     move: {
       title: 'Déplacer vers un dossier',

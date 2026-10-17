@@ -5,6 +5,7 @@ import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
 import type { ShareService } from '../shares/share-service.js';
+import { recordProviderCall } from '../metrics/provider-metrics.js';
 
 /**
  * Logical file deletion (M11.d).
@@ -104,9 +105,14 @@ export class DeletionService {
       : this.store.getConfig(account.provider)?.config ?? undefined;
     try {
       await adapter.deleteAppObject(bundle, root?.remote_root_id ?? '', placement.remoteObjectId, appConfig);
+      recordProviderCall(account.provider, true, null);
       return 'deleted';
     } catch (err) {
-      if (err instanceof ProviderError && err.safeCode === 'provider_object_missing') return 'not_found';
+      if (err instanceof ProviderError && err.safeCode === 'provider_object_missing') {
+        recordProviderCall(account.provider, true, null);
+        return 'not_found';
+      }
+      recordProviderCall(account.provider, false, err instanceof ProviderError ? err.safeCode : null);
       return 'failed';
     }
   }

@@ -39,6 +39,8 @@ export interface PlacementRow {
   state: string;
   is_active: number;
   confirmed_size_bytes: number | null;
+  /** Roadmap Phase 5: 'primary' | 'mirror'; NULL on pre-mirror rows means primary. */
+  placement_role: string | null;
 }
 
 export function makeDownloadQueries(db: Database.Database) {

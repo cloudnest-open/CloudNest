@@ -32,6 +32,9 @@ import { FolderService } from './files/folder-service.js';
 import { TrashService } from './files/trash-service.js';
 import { NotificationService } from './notifications/notification-service.js';
 import type { NotificationKind } from './notifications/notification-service.js';
+import { MirrorService } from './mirroring/mirror-service.js';
+import { ProviderMetrics, configureProviderMetrics } from './metrics/provider-metrics.js';
+import { metricsRouter } from './routes/metrics.js';
 import { filesRouter } from './routes/files.js';
 import { contentDisposition } from './downloads/range.js';
 import { settingsRouter } from './routes/settings.js';
@@ -199,6 +202,13 @@ export function createApp(options: {
   // 3b. RAW CHUNK UPLOAD — mounted here (after sessions/CSRF, before any body
   //     parser) so nothing buffers a chunk body. The plan forbids express.raw
   //     and multer memory storage for this route.
+  // Roadmap Phase 5: the one process-wide provider-metrics recorder. Services
+  // record calls/bytes through the module functions; before this line they
+  // are honest no-ops.
+  const providerMetrics = new ProviderMetrics(options.db);
+  configureProviderMetrics(providerMetrics);
+  app.set('providerMetrics', providerMetrics);
+
   // Roadmap Phase 4: the notification feed exists before the services that
   // emit into it; null user means "every active admin" (account events).
   const notifications = new NotificationService(options.db);
@@ -209,6 +219,17 @@ export function createApp(options: {
   });
   app.use(rawChunkRouter({ queries, csrf, uploads, store: credentialsStore, settings }));
   app.set('uploads', uploads);
+
+  // Roadmap Phase 5: the mirror engine reuses the upload planner's own
+  // capacity math and the upload path's lazy root creation — never a
+  // parallel copy of either.
+  const mirror = new MirrorService(
+    options.db,
+    credentialsStore,
+    (tier) => uploads.capacityInputs(tier),
+    (accountId) => uploads.ensureOrCreateRoot(accountId),
+  );
+  app.set('mirror', mirror);
 
   // 2. bounded JSON parser (8 KiB cap on auth/setup bodies; 400 on malformed)
   app.use(
@@ -292,8 +313,13 @@ export function createApp(options: {
   app.set('deletions', deletions);
 
   // Roadmap Phase 4: folders, trash and the bell's feed (principal-scoped;
-  // mutations CSRF-protected inside the router).
-  app.use(filesRouter({ queries, csrf, folders, trash, notifications, uploads }));
+  // mutations CSRF-protected inside the router). Phase 5 adds the mirror
+  // endpoints on the same principal+CSRF discipline.
+  app.use(filesRouter({ queries, csrf, folders, trash, notifications, uploads, mirror }));
+
+  // Roadmap Phase 5: per-provider reliability metrics for the health badge
+  // (admin-only inside the router — accounts are admin knowledge).
+  app.use(metricsRouter({ queries, metrics: providerMetrics, accounts: accountService }));
 
   // 4e. backup/restore, diagnostics and the optional tunnel (settings and the
   //     tunnel service itself are created above so the upload path and the

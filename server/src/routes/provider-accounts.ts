@@ -10,6 +10,9 @@ import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
 import { startOAuthFlow, makePkcePair } from '../providers/oauth-state.js';
 import { callbackUri, oauthEndpoints } from '../providers/oauth-endpoints.js';
+// Roadmap Phase 5: the ONE quota-refresh path, shared with the background
+// scheduler — the router keeps the audit trail, the module owns the logic.
+import { refreshOneAccountQuota, refreshAllAccountQuotas } from '../services/quota-refresh.js';
 
 /** Public shape: never includes tokens, ciphertext, or key material. */
 function toPublic(row: ProviderAccountRow) {
@@ -55,21 +58,6 @@ function toPublic(row: ProviderAccountRow) {
   };
 }
 
-/** Bounded concurrency helper (max 3 concurrent quota reads). */
-async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++;
-      const item = items[index] as T;
-      results[index] = await fn(item);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
 export function providerAccountsRouter(deps: {
   queries: Queries;
   csrf: CsrfBundle;
@@ -95,36 +83,13 @@ export function providerAccountsRouter(deps: {
   });
 
   async function refreshOne(row: ProviderAccountRow) {
-    // S3-compatible accounts have no provider quota API: the truthful numbers
-    // are the owner-set cap plus CloudNest-tracked placement bytes, computed
-    // locally (roadmap Phase 1). Adapter refresh simply does not apply.
-    if (row.provider === 's3') {
-      const tracked = accounts.s3QuotaOverrides().get(row.id);
-      const quota = tracked && tracked.totalBytes !== null
-        ? { totalBytes: tracked.totalBytes, usedBytes: tracked.usedBytes ?? 0, status: 'current' as const }
-        : { totalBytes: null, usedBytes: null, status: 'unknown' as const, safeErrorCode: 'quota_unavailable' as const };
-      accounts.applyQuotaResult(row.id, quota);
-      return { id: row.id, ok: quota.status === 'current', status: quota.status, code: quota.safeErrorCode ?? null };
+    const result = await refreshOneAccountQuota(row, accounts, store);
+    // same audit shape as before the extraction: the failure lands here, the
+    // single-account route adds its own success/failure row on top
+    if (!result.ok) {
+      queries.recordAudit('provider_quota_refresh', false, result.code ?? 'provider_unavailable', { accountId: row.id });
     }
-    const adapter = getAdapter(row.provider);
-    if (!adapter) return { id: row.id, ok: false, code: 'provider_unavailable' };
-    try {
-      const bundle = store.loadAccountBundle(row);
-      if (!bundle) return { id: row.id, ok: false, code: 'needs_reauth' };
-      // coerce-expire handling lives in the adapter
-      const appConfig = row.provider === 'mega' || row.provider === 'pcloud' ? undefined : store.getConfig(row.provider)?.config;
-      const refreshed = await adapter.ensureValidCredentials(bundle, appConfig);
-      if (JSON.stringify(refreshed) !== JSON.stringify(bundle)) accounts.saveRefreshedBundle(row, refreshed);
-      const quota = await adapter.getQuota(refreshed, appConfig);
-      accounts.applyQuotaResult(row.id, quota);
-      return { id: row.id, ok: true, status: quota.status, code: quota.safeErrorCode ?? null };
-    } catch (err) {
-      const code = err instanceof ProviderError ? err.safeCode : 'provider_unavailable';
-      if (code === 'needs_reauth') accounts.markNeedsReauth(row.id, code);
-      else accounts.applyQuotaResult(row.id, { totalBytes: null, usedBytes: null, status: 'unknown', safeErrorCode: 'quota_unavailable' });
-      queries.recordAudit('provider_quota_refresh', false, code, { accountId: row.id });
-      return { id: row.id, ok: false, code };
-    }
+    return result;
   }
 
   router.post('/api/provider-accounts/:id/refresh-quota', adminOnly, csrf.doubleCsrfProtection, refreshLimiter, async (req, res) => {
@@ -140,7 +105,7 @@ export function providerAccountsRouter(deps: {
 
   router.post('/api/provider-accounts/refresh-quotas', adminOnly, csrf.doubleCsrfProtection, refreshLimiter, async (req, res) => {
     const rows = accounts.list().filter((r) => r.credential_ciphertext !== null);
-    const results = await mapWithConcurrency(rows, 3, refreshOne);
+    const results = await refreshAllAccountQuotas(rows, accounts, store);
     queries.recordAudit('provider_quota_refresh_all', true, 'batch', { count: results.length });
     res.json({ results });
   });

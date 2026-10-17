@@ -8,6 +8,8 @@ import type { TrashService } from '../files/trash-service.js';
 import { TrashError, TRASH_RETENTION_MS } from '../files/trash-service.js';
 import type { NotificationService } from '../notifications/notification-service.js';
 import type { UploadService } from '../uploads/upload-service.js';
+import type { MirrorService } from '../mirroring/mirror-service.js';
+import { MirrorError } from '../mirroring/mirror-service.js';
 
 /**
  * Roadmap Phase 4 — folders, trash and the notification feed. Every route is
@@ -24,6 +26,7 @@ interface FilesRouterDeps {
   trash: TrashService;
   notifications: NotificationService;
   uploads: UploadService;
+  mirror: MirrorService;
 }
 
 function folderError(res: Response, err: unknown): void {
@@ -36,6 +39,14 @@ function folderError(res: Response, err: unknown): void {
 
 function trashError(res: Response, err: unknown): void {
   if (err instanceof TrashError) {
+    res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode });
+    return;
+  }
+  res.status(500).json({ error: 'internal_error', code: 'internal_error' });
+}
+
+function mirrorError(res: Response, err: unknown): void {
+  if (err instanceof MirrorError) {
     res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode });
     return;
   }
@@ -197,6 +208,58 @@ export function filesRouter(deps: FilesRouterDeps): Router {
     } catch (err) {
       trashError(res, err);
     }
+  });
+
+  // ---- mirror (roadmap Phase 5, §4.5) ----
+
+  /**
+   * Queue (or re-drive) a chunk mirror for a completed file. POSTing over a
+   * FAILED mirror job retries it; any other active job answers 409. The copy
+   * runs in the background on the same durable engine; the client polls GET.
+   */
+  router.post('/api/files/:fileId/mirror', principalOnly, deps.csrf.doubleCsrfProtection, async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const principal = req.principal!;
+    const fileId = String(req.params['fileId']);
+    const file = deps.uploads.getFile(fileId);
+    if (!file || (principal.role !== 'admin' && file.user_id !== principal.id)) {
+      res.status(404).json({ error: 'file_not_found', code: 'file_not_found' });
+      return;
+    }
+    try {
+      const latest = deps.mirror.jobForFile(fileId);
+      if (latest && latest.state === 'failed') {
+        const result = await deps.mirror.retry(latest.jobId);
+        res.status(202).json({ ok: true, jobId: latest.jobId, state: result.state });
+        return;
+      }
+      const queued = deps.mirror.enqueue(principal.role === 'admin' ? null : principal.id, fileId);
+      // fire-and-forget: the job row is durable, the scheduler and this kick
+      // both drive it, and a crash can never lose the work
+      void deps.mirror.process(queued.jobId).catch(() => {
+        // stays recorded; the sweep or an explicit POST drives it again
+      });
+      res.status(202).json({ ok: true, jobId: queued.jobId, state: queued.state });
+    } catch (err) {
+      mirrorError(res, err);
+    }
+  });
+
+  router.get('/api/files/:fileId/mirror', principalOnly, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const principal = req.principal!;
+    const fileId = String(req.params['fileId']);
+    const file = deps.uploads.getFile(fileId);
+    if (!file || (principal.role !== 'admin' && file.user_id !== principal.id)) {
+      res.status(404).json({ error: 'file_not_found', code: 'file_not_found' });
+      return;
+    }
+    const job = deps.mirror.jobForFile(fileId);
+    res.json({
+      job,
+      chunkCount: file.chunk_count,
+      mirroredChunks: deps.mirror.mirroredChunkCount(fileId),
+    });
   });
 
   // ---- notification feed ----

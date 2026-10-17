@@ -166,6 +166,13 @@ export const appEn = {
       connect: 'Connect',
       manage: 'Manage',
     },
+    health: {
+      healthy: 'Healthy',
+      degraded: 'Degraded',
+      down: 'Down',
+      unconfigured: 'Not configured',
+      lastCheck: 'last check {when}',
+    },
     recent: {
       title: 'Recent Files',
       searchLabel: 'Search files',
@@ -327,6 +334,7 @@ export const appEn = {
     delete: 'Delete',
     move: 'Move to folder',
     moveSelected: 'Move selected',
+    mirror: 'Mirror',
   },
 
   fileActions: {
@@ -412,6 +420,22 @@ export const appEn = {
       partialTitle: 'Move finished with exceptions',
       partialBody: '{moved} moved, {failed} refused (wrong owner, trashed, or missing).',
       error: 'The move was refused ({code}).',
+    },
+    mirror: {
+      title: 'Mirror this file (2 copies)',
+      desc: 'Copies every chunk of this file to a second cloud account, so losing one account no longer makes it unreadable.',
+      detail: 'The copy runs on the server and is verified chunk by chunk. It doubles the storage this file uses.',
+      confirm: 'Start mirror',
+      starting: 'Starting…',
+      retrying: 'Retry mirror',
+      queuedTitle: 'Mirror queued',
+      queuedBody: '“{name}” is being mirrored on the durable engine. Its copies appear as they are verified.',
+      noTarget: 'No second connected account in this file\'s storage tier can take the copy. Connect another account first.',
+      error: 'The mirror was refused ({code}).',
+      statusCompleted: 'Already mirrored: {done} of {total} chunks carry a second copy.',
+      statusFailed: 'The last mirror stopped at {done} of {total} chunks ({code}). Retrying finishes only the missing ones.',
+      statusActive: 'A mirror is running: {done} of {total} chunks copied so far.',
+      statusCopies: '{count} chunk(s) already carry a second copy.',
     },
   },
 

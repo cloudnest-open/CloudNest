@@ -217,6 +217,14 @@ export const api = {
   markNotificationRead: (id: string) => request('POST', `/api/notifications/${id}/read`, {}),
   markAllNotificationsRead: () => request('POST', '/api/notifications/read-all', {}),
 
+  // ---- reliability: mirror + provider health (roadmap Phase 5) ----
+  /** Queue (or retry) the chunk mirror for a completed file; 202 + a durable job. */
+  mirrorFile: (fileId: string) => request('POST', `/api/files/${fileId}/mirror`, {}),
+  /** The file's latest mirror job, with the honest mirrored-chunk count. */
+  mirrorStatus: (fileId: string) => request('GET', `/api/files/${fileId}/mirror`),
+  /** Per-provider reliability summary behind the Dashboard health badge (admin). */
+  providerHealth: () => request('GET', '/api/metrics/providers'),
+
   // ---- settings, maintenance, tunnel (Step 6 / M12) ----
   getSettings: () => request('GET', '/api/settings'),
   saveSettings: (patch: Record<string, unknown>) => request('PATCH', '/api/settings', patch),

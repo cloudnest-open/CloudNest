@@ -141,6 +141,9 @@ interface ProviderSlot {
   unlimited: boolean;
   experimental: boolean;
   action: 'connect' | 'manage';
+  /** Phase 5 §4.5: derived reliability badge + the latest quota check. */
+  health?: 'healthy' | 'degraded' | 'down' | 'unconfigured';
+  lastCheckAt?: string | null;
 }
 
 function buildProviderSlots(accounts: AccountDetail[]): ProviderSlot[] {
@@ -225,6 +228,9 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
   const [page, setPage] = useState(0);
   const [fileSearch, setFileSearch] = useState('');
   const [appliedFileSearch, setAppliedFileSearch] = useState('');
+  // Roadmap Phase 5 (§4.5): per-provider health behind the provider cards.
+  // Admin-only data — members never fetch (or see) it.
+  const [providerHealth, setProviderHealth] = useState<Record<string, { health: string; lastCheckAt: string | null }> | null>(null);
 
   const loadSummary = useCallback(async () => {
     setLoading(true);
@@ -243,6 +249,23 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
+  }, []);
+
+  const loadHealth = useCallback(async () => {
+    try {
+      const res = await api.providerHealth();
+      if (res.status !== 200) {
+        setProviderHealth(null);
+        return;
+      }
+      const body = res.data as { providers: Array<{ provider: string; health: string; lastCheckAt: string | null }> };
+      const map: Record<string, { health: string; lastCheckAt: string | null }> = {};
+      for (const row of body.providers ?? []) map[row.provider] = { health: row.health, lastCheckAt: row.lastCheckAt };
+      setProviderHealth(map);
+    } catch {
+      // the badge is additive: a failed read just hides it
+      setProviderHealth(null);
+    }
   }, []);
 
   const loadFiles = useCallback(async () => {
@@ -269,7 +292,9 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
 
   useEffect(() => {
     void loadSummary();
-  }, [loadSummary]);
+    // §4.5: the health badge rides the same reload cycle (admin only)
+    if (!isMember) void loadHealth();
+  }, [loadSummary, loadHealth, isMember]);
 
   useEffect(() => {
     void loadFiles();
@@ -301,7 +326,12 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
   );
   const connected = accounts.filter((a) => a.status === 'connected').length;
   const attention = accounts.filter((a) => a.status !== 'connected' || a.quotaStatus !== 'current').length;
-  const slots = buildProviderSlots(accounts);
+  const slots = buildProviderSlots(accounts).map((slot) => {
+    const health = providerHealth?.[slot.provider];
+    return health
+      ? { ...slot, health: health.health as ProviderSlot['health'], lastCheckAt: health.lastCheckAt }
+      : slot;
+  });
 
   const fileRows: FileTableRow[] = files.map((f) => ({
     id: f.id,
@@ -479,6 +509,20 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
                       />
                       {t.dashboard.slot[slot.statusKey]}
                     </p>
+                    {/* Phase 5 §4.5: the honest reliability badge — derived from
+                        real error counters and account states, never invented. */}
+                    {slot.health && slot.health !== 'unconfigured' && (
+                      <p className="small muted provider-health">
+                        <span
+                          className={`status-dot status-${slot.health === 'healthy' ? 'ok' : slot.health === 'degraded' ? 'warn' : 'down'}`}
+                          aria-hidden="true"
+                        />
+                        {t.dashboard.health[slot.health]}
+                        {slot.lastCheckAt && (
+                          <span> · {tf(t.dashboard.health.lastCheck, { when: formatDateTime(slot.lastCheckAt) })}</span>
+                        )}
+                      </p>
+                    )}
                     <button
                       type="button"
                       className="btn-secondary btn-block"

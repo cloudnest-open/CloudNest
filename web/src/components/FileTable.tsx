@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderInput, Info, Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
+import { Copy, FolderInput, Info, Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
 import { useFileActions } from './FileActionsProvider.js';
 import { Badge, TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS, fileTypeName, fileTypeDisplay } from './ui.js';
 import { ProviderLogo } from './ProviderLogo.js';
@@ -199,6 +199,16 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                       <button type="button" className="btn-inline" onClick={() => actions.move([file], reload)}>
                         <FolderInput size={14} aria-hidden="true" />
                         {t.table.move}
+                      </button>
+                      {/* Phase 5 §4.5: a completed file can gain a second copy. */}
+                      <button
+                        type="button"
+                        className="btn-inline"
+                        disabled={file.state !== 'completed'}
+                        onClick={() => actions.mirror(file, reload)}
+                      >
+                        <Copy size={14} aria-hidden="true" />
+                        {t.table.mirror}
                       </button>
                       <button
                         type="button"

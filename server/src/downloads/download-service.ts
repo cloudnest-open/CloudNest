@@ -8,6 +8,7 @@ import { SETTINGS_DEFAULTS, WORKER_LIMITS, type SettingsService } from '../setti
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
+import { recordProviderCall, recordProviderBytes } from '../metrics/provider-metrics.js';
 
 /**
  * Download and reconstruction (M10.a/b).
@@ -223,6 +224,13 @@ export class DownloadService {
    * The caller owns the returned `release` and must call it exactly once, from a
    * `finally`. Keeping the reservation alive is what makes the prefetch bound
    * meaningful: bytes that are read ahead still occupy the shared budget.
+   *
+   * Roadmap Phase 5: a mirrored chunk holds TWO active placements. The copies
+   * are tried in order (primary first, verified before uploaded); a provider
+   * failure or hash mismatch on one copy falls through to the next, so losing
+   * one account no longer breaks the read. A cancellation is final — no copy
+   * is tried after an abort. The file is marked needs_repair only when NO copy
+   * verifies and at least one mismatched.
    */
   private async readVerifiedChunkHolding(
     fileId: string,
@@ -230,65 +238,116 @@ export class DownloadService {
     signal?: AbortSignal,
     handle?: ReadHandle,
   ): Promise<VerifiedChunk> {
-    const resolved = this.activePlacement(slice.chunkIndex, fileId);
-    if (!resolved) throw new DownloadError('chunk_missing', 409);
-    const placements = resolved.placement;
+    const resolved = this.placementCandidates(slice.chunkIndex, fileId);
+    if (!resolved || resolved.placements.length === 0) throw new DownloadError('chunk_missing', 409);
 
     const release = await this.budget.acquire(slice.chunkSizeBytes);
-    try {
-      const account = this.providerQ.getAccount.get(placements.provider_account_id) as
-        | { id: string; provider: string; status: string }
-        | undefined;
-      if (!account) throw new DownloadError('provider_needs_reauth', 409);
-      const adapter = getAdapter(account.provider);
-      if (!adapter?.downloadObjectStream) throw new DownloadError('provider_unavailable', 502);
-      const bundle = this.loadBundle(account.id);
-      const appConfig = account.provider === 'mega' || account.provider === 'pcloud'
-        ? undefined
-        : this.store.getConfig(account.provider)?.config ?? undefined;
-      const remoteId = placements.remote_object_id;
-      if (!remoteId) throw new DownloadError('chunk_missing', 409);
-
-      const out = await adapter.downloadObjectStream(bundle, remoteId, appConfig);
-      // expose the live stream so an abandoned read can be destroyed promptly
-      if (handle) handle.stream = out.stream;
-      const parts: Buffer[] = [];
-      let received = 0;
-      for await (const piece of out.stream) {
-        if (signal?.aborted) throw new DownloadError('download_cancelled', 499);
-        const buf = Buffer.isBuffer(piece) ? piece : Buffer.from(piece as unknown as Uint8Array);
-        received += buf.length;
-        if (received > slice.chunkSizeBytes) {
-          throw new DownloadError('chunk_hash_mismatch', 502);
+    let lastError: unknown = null;
+    let sawMismatch = false;
+    for (const placement of resolved.placements) {
+      let openedStream: NodeJS.ReadableStream | null = null;
+      try {
+        const verified = await this.readFromPlacement(
+          placement,
+          resolved.chunk,
+          slice,
+          signal,
+          handle,
+          (s) => { openedStream = s; },
+        );
+        recordProviderBytes(
+          this.providerQ.getAccount.get(placement.provider_account_id)?.provider ?? '',
+          'down',
+          verified.bytes.length,
+        );
+        // the outer reservation travels with the chunk: the prefetch caller
+        // releases exactly once, no matter which copy produced the bytes
+        return { bytes: verified.bytes, meta: slice, release };
+      } catch (err) {
+        destroyStream(openedStream);
+        if (err instanceof DownloadError && err.safeCode === 'download_cancelled') {
+          // an abort is final: no further copy is tried
+          release();
+          throw err;
         }
-        parts.push(buf);
+        if (err instanceof DownloadError && err.safeCode === 'chunk_hash_mismatch') sawMismatch = true;
+        lastError = err;
       }
-      const payload = Buffer.concat(parts);
-      if (payload.length !== slice.chunkSizeBytes) {
-        throw new DownloadError('chunk_hash_mismatch', 502);
-      }
-      // the ONLY authority on integrity is our own digest of the received bytes
-      const digest = crypto.createHash('sha256').update(payload).digest('hex');
-      if (digest !== resolved.chunk.sha256) {
-        this.markChunkProblem(fileId, slice.chunkIndex);
-        throw new DownloadError('chunk_hash_mismatch', 502);
-      }
-      return { bytes: payload, meta: slice, release };
-    } catch (err) {
-      // a failed read must not leak its reservation
-      release();
-      throw err;
     }
+    release();
+    if (sawMismatch) this.markChunkProblem(fileId, slice.chunkIndex);
+    throw lastError instanceof Error
+      ? lastError
+      : new DownloadError('chunk_missing', 409);
   }
 
-  /** Resolve the active placement and its chunk for a slice. */
-  private activePlacement(chunkIndex: number, fileId: string): { chunk: ChunkRow; placement: PlacementRow } | null {
+  /** Read + verify one chunk from ONE placement (no fallback, no marking). */
+  private async readFromPlacement(
+    placement: PlacementRow,
+    chunk: ChunkRow,
+    slice: ChunkSlice,
+    signal: AbortSignal | undefined,
+    handle: ReadHandle | undefined,
+    onStream: (stream: NodeJS.ReadableStream) => void,
+  ): Promise<{ bytes: Buffer }> {
+    const account = this.providerQ.getAccount.get(placement.provider_account_id) as
+      | { id: string; provider: string; status: string }
+      | undefined;
+    if (!account) throw new DownloadError('provider_needs_reauth', 409);
+    const adapter = getAdapter(account.provider);
+    if (!adapter?.downloadObjectStream) throw new DownloadError('provider_unavailable', 502);
+    const bundle = this.loadBundle(account.id);
+    const appConfig = account.provider === 'mega' || account.provider === 'pcloud'
+      ? undefined
+      : this.store.getConfig(account.provider)?.config ?? undefined;
+    const remoteId = placement.remote_object_id;
+    if (!remoteId) throw new DownloadError('chunk_missing', 409);
+
+    const out = await adapter.downloadObjectStream(bundle, remoteId, appConfig);
+    onStream(out.stream);
+    // expose the live stream so an abandoned read can be destroyed promptly
+    if (handle) handle.stream = out.stream;
+    const parts: Buffer[] = [];
+    let received = 0;
+    for await (const piece of out.stream) {
+      if (signal?.aborted) throw new DownloadError('download_cancelled', 499);
+      const buf = Buffer.isBuffer(piece) ? piece : Buffer.from(piece as unknown as Uint8Array);
+      received += buf.length;
+      if (received > slice.chunkSizeBytes) {
+        throw new DownloadError('chunk_hash_mismatch', 502);
+      }
+      parts.push(buf);
+    }
+    const payload = Buffer.concat(parts);
+    if (payload.length !== slice.chunkSizeBytes) {
+      throw new DownloadError('chunk_hash_mismatch', 502);
+    }
+    // the ONLY authority on integrity is our own digest of the received bytes
+    const digest = crypto.createHash('sha256').update(payload).digest('hex');
+    if (digest !== chunk.sha256) {
+      throw new DownloadError('chunk_hash_mismatch', 502);
+    }
+    recordProviderCall(account.provider, true, null);
+    return { bytes: payload };
+  }
+
+  /**
+   * Roadmap Phase 5: resolve ALL active placements of a chunk, ordered so the
+   * best copy is tried first — primary before mirror, verified before
+   * uploaded, stable otherwise.
+   */
+  private placementCandidates(chunkIndex: number, fileId: string): { chunk: ChunkRow; placements: PlacementRow[] } | null {
     const chunk = this.q.getChunk.get(fileId, chunkIndex) as ChunkRow | undefined;
     if (!chunk) return null;
     const placements = this.q.activePlacements.all(chunk.id) as unknown as PlacementRow[];
-    const placement = placements.find((p) => p.state === 'verified' || p.state === 'uploaded') ?? placements[0];
-    if (!placement) return null;
-    return { chunk, placement };
+    const rank = (p: PlacementRow): number => {
+      const roleRank = p.placement_role === 'mirror' ? 1 : 0;
+      const stateRank = p.state === 'verified' ? 0 : p.state === 'uploaded' ? 1 : 2;
+      return roleRank * 10 + stateRank;
+    };
+    const ordered = placements.sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id));
+    if (ordered.length === 0) return null;
+    return { chunk, placements: ordered };
   }
 
   private markChunkProblem(fileId: string, chunkIndex: number): void {

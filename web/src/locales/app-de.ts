@@ -151,6 +151,13 @@ export const appDe: AppStrings = {
       connect: 'Verbinden',
       manage: 'Verwalten',
     },
+    health: {
+      healthy: 'Gesund',
+      degraded: 'Eingeschränkt',
+      down: 'Ausgefallen',
+      unconfigured: 'Nicht eingerichtet',
+      lastCheck: 'zuletzt geprüft {when}',
+    },
     recent: {
       title: 'Neueste Dateien',
       searchLabel: 'Dateien durchsuchen',
@@ -312,6 +319,7 @@ export const appDe: AppStrings = {
     delete: 'Löschen',
     move: 'In Ordner verschieben',
     moveSelected: 'Auswahl verschieben',
+    mirror: 'Spiegeln',
   },
 
   fileActions: {
@@ -382,6 +390,22 @@ export const appDe: AppStrings = {
       trashedBody: 'Innerhalb von 7 Tagen im Papierkorb-Tab wiederherstellbar; die Cloud-Konten bleiben bis zum endgültigen Löschen unberührt.',
       errorTitle: 'Verschieben in den Papierkorb fehlgeschlagen',
       errorBody: 'Die Datei ist noch in Ihrer Bibliothek ({code}).',
+    },
+    mirror: {
+      title: 'Diese Datei spiegeln (2 Kopien)',
+      desc: 'Kopiert jeden Chunk dieser Datei auf ein zweites Cloud-Konto, sodass der Verlust eines Kontos die Datei nicht unlesbar macht.',
+      detail: 'Die Kopie läuft auf dem Server und wird Chunk für Chunk verifiziert. Sie verdoppelt den Speicherplatz dieser Datei.',
+      confirm: 'Spiegelung starten',
+      starting: 'Wird gestartet…',
+      retrying: 'Spiegelung wiederholen',
+      queuedTitle: 'Spiegelung in Warteschlange',
+      queuedBody: '„{name}“ wird auf der dauerhaften Engine gespiegelt. Die Kopien erscheinen, sobald sie verifiziert sind.',
+      noTarget: 'Kein zweites verbundenes Konto in diesem Speicher-Tier kann die Kopie aufnehmen. Verbinde zuerst ein anderes Konto.',
+      error: 'Die Spiegelung wurde abgelehnt ({code}).',
+      statusCompleted: 'Bereits gespiegelt: {done} von {total} Chunks haben eine zweite Kopie.',
+      statusFailed: 'Die letzte Spiegelung blieb bei {done} von {total} Chunks stehen ({code}). Eine Wiederholung vervollständigt nur die fehlenden.',
+      statusActive: 'Eine Spiegelung läuft: {done} von {total} Chunks kopiert.',
+      statusCopies: '{count} Chunk(s) haben bereits eine zweite Kopie.',
     },
     move: {
       title: 'In Ordner verschieben',

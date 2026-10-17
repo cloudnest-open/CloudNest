@@ -150,6 +150,13 @@ export const appEs: AppStrings = {
       connect: 'Conectar',
       manage: 'Gestionar',
     },
+    health: {
+      healthy: 'Saludable',
+      degraded: 'Degradado',
+      down: 'Caído',
+      unconfigured: 'Sin configurar',
+      lastCheck: 'última comprobación {when}',
+    },
     recent: {
       title: 'Archivos recientes',
       searchLabel: 'Buscar archivos',
@@ -310,6 +317,7 @@ export const appEs: AppStrings = {
     delete: 'Eliminar',
     move: 'Mover a carpeta',
     moveSelected: 'Mover selección',
+    mirror: 'Replicar',
   },
 
   fileActions: {
@@ -378,6 +386,22 @@ export const appEs: AppStrings = {
       trashedBody: 'Restáuralos desde la pestaña Papelera dentro de 7 días; las cuentas en la nube no se tocan hasta la eliminación definitiva.',
       errorTitle: 'No se pudo mover a la papelera',
       errorBody: 'El archivo sigue en tu biblioteca ({code}).',
+    },
+    mirror: {
+      title: 'Replicar este archivo (2 copias)',
+      desc: 'Copia cada fragmento de este archivo en una segunda cuenta de la nube, de modo que perder una cuenta no lo haga ilegible.',
+      detail: 'La copia se ejecuta en el servidor y se verifica fragmento a fragmento. Duplica el almacenamiento que usa este archivo.',
+      confirm: 'Iniciar replicación',
+      starting: 'Iniciando…',
+      retrying: 'Reintentar replicación',
+      queuedTitle: 'Replicación en cola',
+      queuedBody: '«{name}» se está replicando en el motor durable. Las copias aparecen a medida que se verifican.',
+      noTarget: 'Ninguna segunda cuenta conectada en el nivel de almacenamiento de este archivo puede alojar la copia. Conecta otra cuenta primero.',
+      error: 'La replicación fue rechazada ({code}).',
+      statusCompleted: 'Ya replicado: {done} de {total} fragmentos tienen una segunda copia.',
+      statusFailed: 'La última replicación se detuvo en {done} de {total} fragmentos ({code}). Reintentar completa solo los que faltan.',
+      statusActive: 'Hay una replicación en curso: {done} de {total} fragmentos copiados.',
+      statusCopies: '{count} fragmento(s) ya tienen una segunda copia.',
     },
     move: {
       title: 'Mover a carpeta',

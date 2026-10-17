@@ -50,7 +50,8 @@ export class CapacityInsufficientError extends UploadError {
   }
 }
 
-const PROVIDER_UPLOAD_READY = new Set(['google_drive', 'dropbox', 'onedrive', 'pcloud', 's3']);
+/** Providers whose connector can stream uploads (Phase 5: mirror targets draw from the same set). */
+export const PROVIDER_UPLOAD_READY = new Set(['google_drive', 'dropbox', 'onedrive', 'pcloud', 's3']);
 
 /** §9: approved Step-4 per-account cap for chunks in flight (global cap is client-side). */
 export const MAX_PER_ACCOUNT_INFLIGHT = 2;
@@ -241,7 +242,8 @@ export class UploadService {
     return map;
   }
 
-  private capacityInputs(tier: AccountTier): AccountCapacityInput[] {
+  /** Public since Phase 5: the mirror engine reuses the exact same capacity inputs. */
+  capacityInputs(tier: AccountTier): AccountCapacityInput[] {
     const accounts = this.providerQ.listAccounts.all() as Array<{
       id: string; provider: string; display_label: string; status: string; tier: AccountTier;
       quota_status: string; quota_total_bytes: number | null; used_bytes: number | null;

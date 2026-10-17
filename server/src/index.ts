@@ -4,6 +4,7 @@ import { loadConfig } from './config/env.js';
 import { openDatabase, runMigrations } from './db/index.js';
 import { allMigrations } from './db/migrations.js';
 import { loadOrCreateSessionSecret } from './config/secret.js';
+import { createBackgroundScheduler } from './scheduler/background-scheduler.js';
 
 /**
  * CloudNest server entry point (Step 1).
@@ -51,46 +52,33 @@ if (uploads) {
   }
 }
 
-// BE-03: bounded, periodic cleanup of expired session rows, share download
-// sessions, and unlock grants. Previously these only died lazily when read,
-// so long-running instances accumulated dead rows forever.
-const shares = app.get('shares') as {
-  cleanupExpiredSessions?: () => number;
-  cleanupExpiredUnlockGrants?: () => number;
-} | undefined;
-const sessionStoreCleanup = (app.get('sessionStore') as { cleanupExpired?: () => number } | undefined)?.cleanupExpired;
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // hourly is plenty for metadata rows
-function sweepExpiredRows(): void {
-  try {
-    let swept = 0;
-    if (sessionStoreCleanup) swept += sessionStoreCleanup();
-    if (shares?.cleanupExpiredSessions) swept += shares.cleanupExpiredSessions();
-    if (shares?.cleanupExpiredUnlockGrants) swept += shares.cleanupExpiredUnlockGrants();
-    if (swept > 0) console.log(`[cloudnest] cleanup: expired ${swept} session/grant row(s)`);
-  } catch {
-    // cleanup is best-effort; rows remain for the next sweep
-  }
-  // Roadmap Phase 4: trash past its restore window goes to the durable
-  // deletion engine; queued jobs are driven exactly like startup recovery.
-  try {
-    const trash = app.get('trash') as { purgeExpired: () => number } | undefined;
-    const purged = trash?.purgeExpired() ?? 0;
-    if (purged > 0) {
-      console.log(`[cloudnest] trash: ${purged} file(s) past the restore window, queued for deletion`);
-      const deletions = app.get('deletions') as
-        | { resumePending: () => Promise<{ attempted: number; completed: number }> }
-        | undefined;
-      void deletions?.resumePending().catch(() => {
-        // pending obligations remain recorded for the next sweep
-      });
-    }
-  } catch {
-    // best-effort; expired rows remain queued for the next sweep
-  }
-}
-sweepExpiredRows();
-const cleanupTimer = setInterval(sweepExpiredRows, CLEANUP_INTERVAL_MS);
-cleanupTimer.unref();
+// BE-03 + Roadmap Phase 5: the background scheduler — the extended form of
+// the hourly sweep. One module owns every recurring task: the original
+// expired-row sweep (behaviour and logs unchanged), the cleanup-obligation
+// retry (upload cleanups, pending deletions, interrupted mirrors), the 6-hour
+// quota refresh, and the metrics prune/summary. Tasks are best-effort and
+// every timer is unref'd so none can hold the process open.
+const scheduler = createBackgroundScheduler({
+  sessionStore: app.get('sessionStore') as { cleanupExpired?: () => number } | undefined,
+  shares: app.get('shares') as
+    | { cleanupExpiredSessions?: () => number; cleanupExpiredUnlockGrants?: () => number }
+    | undefined,
+  trash: app.get('trash') as { purgeExpired: () => number } | undefined,
+  deletions: app.get('deletions') as
+    | { resumePending: () => Promise<{ attempted: number; completed: number }> }
+    | undefined,
+  uploads: app.get('uploads') as
+    | { retryPendingCleanups: () => Promise<{ retried: number; cleaned: number; stillPending: number }> }
+    | undefined,
+  mirror: app.get('mirror') as
+    | { resumePending: () => Promise<{ attempted: number; completed: number }> }
+    | undefined,
+  accounts: app.get('providerAccounts') as import('./services/provider-account-service.js').ProviderAccountService | undefined,
+  store: app.get('credentialsStore') as import('./providers/credentials-store.js').CredentialsStore | undefined,
+  metrics: app.get('providerMetrics') as import('./metrics/provider-metrics.js').ProviderMetrics | undefined,
+});
+void scheduler.runAllOnce();
+scheduler.start();
 
 // deletions that were interrupted must not be silently abandoned
 const deletions = app.get('deletions') as { resumePending: () => Promise<{ attempted: number; completed: number }> } | undefined;

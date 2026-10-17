@@ -150,6 +150,13 @@ export const appPtBr: AppStrings = {
       connect: 'Conectar',
       manage: 'Gerenciar',
     },
+    health: {
+      healthy: 'Saudável',
+      degraded: 'Degradado',
+      down: 'Fora do ar',
+      unconfigured: 'Não configurado',
+      lastCheck: 'última verificação {when}',
+    },
     recent: {
       title: 'Arquivos recentes',
       searchLabel: 'Pesquisar arquivos',
@@ -311,6 +318,7 @@ export const appPtBr: AppStrings = {
     delete: 'Excluir',
     move: 'Mover para pasta',
     moveSelected: 'Mover seleção',
+    mirror: 'Espelhar',
   },
 
   fileActions: {
@@ -381,6 +389,22 @@ export const appPtBr: AppStrings = {
       trashedBody: 'Restaure na aba Lixeira em até 7 dias; as contas de nuvem ficam intocadas até a exclusão definitiva.',
       errorTitle: 'Não foi possível mover para a lixeira',
       errorBody: 'O arquivo ainda está na sua biblioteca ({code}).',
+    },
+    mirror: {
+      title: 'Espelhar este arquivo (2 cópias)',
+      desc: 'Copia cada pedaço deste arquivo para uma segunda conta de nuvem, de modo que perder uma conta não o torne ilegível.',
+      detail: 'A cópia roda no servidor e é verificada pedaço a pedaço. Ela dobra o armazenamento que este arquivo usa.',
+      confirm: 'Iniciar espelhamento',
+      starting: 'Iniciando…',
+      retrying: 'Repetir espelhamento',
+      queuedTitle: 'Espelhamento na fila',
+      queuedBody: '“{name}” está sendo espelhado no mecanismo durável. As cópias aparecem conforme são verificadas.',
+      noTarget: 'Nenhuma segunda conta conectada na camada de armazenamento deste arquivo pode receber a cópia. Conecte outra conta primeiro.',
+      error: 'O espelhamento foi recusado ({code}).',
+      statusCompleted: 'Já espelhado: {done} de {total} pedaços têm uma segunda cópia.',
+      statusFailed: 'O último espelhamento parou em {done} de {total} pedaços ({code}). Repetir conclui apenas os que faltam.',
+      statusActive: 'Um espelhamento está em andamento: {done} de {total} pedaços copiados.',
+      statusCopies: '{count} pedaço(s) já têm uma segunda cópia.',
     },
     move: {
       title: 'Mover para pasta',

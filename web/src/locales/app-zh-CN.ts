@@ -150,6 +150,13 @@ export const appZhCn: AppStrings = {
       connect: '连接',
       manage: '管理',
     },
+    health: {
+      healthy: '健康',
+      degraded: '降级',
+      down: '已停用',
+      unconfigured: '未配置',
+      lastCheck: '上次检查 {when}',
+    },
     recent: {
       title: '最近文件',
       searchLabel: '搜索文件',
@@ -306,6 +313,7 @@ export const appZhCn: AppStrings = {
     delete: '删除',
     move: '移动到文件夹',
     moveSelected: '移动所选',
+    mirror: '镜像副本',
   },
 
   fileActions: {
@@ -373,6 +381,22 @@ export const appZhCn: AppStrings = {
       trashedBody: '7 天内可在“回收站”标签页恢复；在彻底删除之前，云端账户不受影响。',
       errorTitle: '无法移入回收站',
       errorBody: '文件仍在文件库中（{code}）。',
+    },
+    mirror: {
+      title: '镜像此文件（2 份副本）',
+      desc: '将此文件的每个分块复制到第二个云账号，因此丢失一个账号也不会导致文件无法读取。',
+      detail: '副本在服务器上运行，并逐块校验。它会使此文件占用的存储翻倍。',
+      confirm: '开始镜像',
+      starting: '正在启动…',
+      retrying: '重试镜像',
+      queuedTitle: '镜像已排队',
+      queuedBody: '“{name}”正在持久引擎上进行镜像。副本通过校验后会逐个显示。',
+      noTarget: '该文件所在存储层级中没有第二个已连接账号可以承接副本。请先连接其他账号。',
+      error: '镜像被拒绝（{code}）。',
+      statusCompleted: '已镜像：{total} 个分块中有 {done} 个拥有第二副本。',
+      statusFailed: '上次镜像在 {total} 个分块中的第 {done} 个处停止（{code}）。重试只会补齐缺失的部分。',
+      statusActive: '镜像进行中：已复制 {total} 个分块中的 {done} 个。',
+      statusCopies: '{count} 个分块已拥有第二副本。',
     },
     move: {
       title: '移动到文件夹',

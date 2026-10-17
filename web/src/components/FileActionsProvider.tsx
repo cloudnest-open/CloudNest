@@ -37,6 +37,8 @@ interface FileActionsApi {
   removeMany: (files: ActionableFile[], reload?: Reload) => void;
   /** Opens the folder picker; the chosen destination gets the files. */
   move: (files: ActionableFile[], reload?: Reload) => void;
+  /** Opens the mirror dialog for one completed file (roadmap Phase 5 §4.5). */
+  mirror: (file: ActionableFile, reload?: Reload) => void;
 }
 
 const FileActionsContext = createContext<FileActionsApi | null>(null);
@@ -294,7 +296,63 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
     void openMove(files, reload);
   }
 
-  const actions: FileActionsApi = { share, shareMany, rename, remove, removeMany, move };
+  // Roadmap Phase 5 (§4.5): the mirror dialog. It opens with the file's REAL
+  // mirror state (or none), and the confirm button starts — or retries — the
+  // durable mirror job. The copy itself runs server-side; the dialog never
+  // claims completion, only that the work is queued on the engine.
+  const [mirrorTarget, setMirrorTarget] = useState<Pending | null>(null);
+  const [mirrorBusy, setMirrorBusy] = useState(false);
+  const [mirrorError, setMirrorError] = useState<string | null>(null);
+  const [mirrorExisting, setMirrorExisting] = useState<{
+    state: string; chunksCompleted: number; chunksTotal: number; mirroredChunks: number; safeErrorCode: string | null;
+  } | null>(null);
+
+  async function openMirror(file: ActionableFile, reload: Reload): Promise<void> {
+    setMirrorError(null);
+    setMirrorExisting(null);
+    setMirrorTarget({ file, reload });
+    try {
+      const res = await api.mirrorStatus(file.id);
+      if (res.status === 200) {
+        const body = res.data as { job: { state: string; chunksCompleted: number; chunksTotal: number; safeErrorCode: string | null } | null; mirroredChunks: number };
+        setMirrorExisting(body.job
+          ? { ...body.job, mirroredChunks: body.mirroredChunks }
+          : { state: 'none', chunksCompleted: 0, chunksTotal: 0, mirroredChunks: body.mirroredChunks, safeErrorCode: null });
+      }
+    } catch {
+      // an unreachable status read still allows the dialog; the POST re-checks
+    }
+  }
+
+  async function confirmMirror(): Promise<void> {
+    const target = mirrorTarget;
+    if (!target) return;
+    setMirrorBusy(true);
+    setMirrorError(null);
+    try {
+      const res = await api.mirrorFile(target.file.id);
+      if (res.status === 202) {
+        const body = res.data as { state: string };
+        toast.push({
+          kind: 'success',
+          title: t.fileActions.mirror.queuedTitle,
+          body: tf(t.fileActions.mirror.queuedBody, { name: target.file.originalName }),
+        });
+        void body;
+        await target.reload?.();
+        setMirrorTarget(null);
+      } else {
+        const body = res.data as { code?: string };
+        setMirrorError(body.code === 'mirror_no_target'
+          ? t.fileActions.mirror.noTarget
+          : tf(t.fileActions.mirror.error, { code: body.code ?? 'unknown' }));
+      }
+    } finally {
+      setMirrorBusy(false);
+    }
+  }
+
+  const actions: FileActionsApi = { share, shareMany, rename, remove, removeMany, move, mirror: (file, reload) => void openMirror(file, reload) };
 
   return (
     <FileActionsContext.Provider value={actions}>
@@ -419,6 +477,46 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
               </>
             )}
             {moveError && <p className="form-error" role="alert">{moveError}</p>}
+          </div>
+        </Dialog>
+      )}
+
+      {mirrorTarget && (
+        <Dialog
+          title={t.fileActions.mirror.title}
+          description={t.fileActions.mirror.desc}
+          onClose={() => { if (!mirrorBusy) setMirrorTarget(null); }}
+          footer={
+            <>
+              <button type="button" className="btn-secondary" disabled={mirrorBusy} onClick={() => setMirrorTarget(null)}>
+                {t.dialog.cancel}
+              </button>
+              <button type="button" className="btn-primary" disabled={mirrorBusy} onClick={() => void confirmMirror()}>
+                {mirrorBusy
+                  ? t.fileActions.mirror.starting
+                  : mirrorExisting?.state === 'failed'
+                    ? t.fileActions.mirror.retrying
+                    : t.fileActions.mirror.confirm}
+              </button>
+            </>
+          }
+        >
+          <div className="upload-form">
+            <p><strong>{mirrorTarget.file.originalName}</strong></p>
+            {mirrorExisting && mirrorExisting.state !== 'none' && (
+              <p className="small muted">{
+                mirrorExisting.state === 'completed'
+                  ? tf(t.fileActions.mirror.statusCompleted, { done: mirrorExisting.mirroredChunks, total: mirrorExisting.chunksTotal })
+                  : mirrorExisting.state === 'failed'
+                    ? tf(t.fileActions.mirror.statusFailed, { done: mirrorExisting.mirroredChunks, total: mirrorExisting.chunksTotal, code: mirrorExisting.safeErrorCode ?? 'unknown' })
+                    : tf(t.fileActions.mirror.statusActive, { done: mirrorExisting.chunksCompleted, total: mirrorExisting.chunksTotal })
+              }</p>
+            )}
+            {mirrorExisting && mirrorExisting.state === 'none' && mirrorExisting.mirroredChunks > 0 && (
+              <p className="small muted">{tf(t.fileActions.mirror.statusCopies, { count: mirrorExisting.mirroredChunks })}</p>
+            )}
+            <p className="small muted">{t.fileActions.mirror.detail}</p>
+            {mirrorError && <p className="form-error" role="alert">{mirrorError}</p>}
           </div>
         </Dialog>
       )}

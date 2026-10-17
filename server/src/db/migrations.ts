@@ -921,6 +921,100 @@ const M0014_FOLDERS_TRASH_NOTIFICATIONS: Migration = {
   },
 };
 
+const M0015_MIRROR_AND_PROVIDER_METRICS: Migration = {
+  version: 15,
+  name: '0015-mirror-and-provider-metrics',
+  // Roadmap Phase 5 (reliability):
+  // - transfer_jobs.job_type widens with 'mirror': a mirror job copies every
+  //   chunk of a completed file to a SECOND same-tier account, so losing one
+  //   account no longer makes a file unusable. SQLite cannot widen a CHECK in
+  //   place, and upload_chunk_allocations / upload_attempts /
+  //   deletion_attempts reference transfer_jobs with ON DELETE RESTRICT, so
+  //   the rebuild follows the documented altertable §7 procedure with foreign
+  //   keys disabled — the same exception M0012/M0013 use.
+  // - chunk_placements: one chunk may now hold TWO active placements (its
+  //   primary copy and its mirror copy) on DIFFERENT accounts. The unique
+  //   index keyed on chunk_id alone becomes (chunk_id, provider_account_id),
+  //   so the same account can still never hold two active copies of one chunk.
+  //   placement_role records which copy is the original; NULL on pre-mirror
+  //   rows means primary.
+  // - provider_metrics: per-provider DAILY call/error/byte counters behind the
+  //   health badge and the scheduler's structured summary log. Aggregated
+  //   buckets, never per-request rows, so the table stays bounded and the
+  //   scheduler prunes days past the retention window.
+  requiresForeignKeysOff: true,
+  up: (db) => {
+    // retry safety: an interrupted earlier run can only have left the staging
+    // table behind; every other statement is part of the checked sequence
+    db.exec('DROP TABLE IF EXISTS transfer_jobs_new;');
+    db.exec(`
+      CREATE TABLE transfer_jobs_new (
+        id TEXT PRIMARY KEY,
+        file_id TEXT REFERENCES files(id) ON DELETE RESTRICT,
+        job_type TEXT NOT NULL CHECK(job_type IN ('upload','download','delete','repair','reconcile','mirror')),
+        state TEXT NOT NULL CHECK(state IN ('queued','running','paused','failed','completed','cancelled','deletion_pending')),
+        chunks_completed INTEGER NOT NULL DEFAULT 0 CHECK(chunks_completed >= 0),
+        chunks_total INTEGER NOT NULL DEFAULT 0 CHECK(chunks_total >= 0),
+        bytes_completed INTEGER NOT NULL DEFAULT 0 CHECK(bytes_completed >= 0),
+        retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count >= 0),
+        last_safe_error_code TEXT,
+        idempotency_key TEXT,
+        request_fingerprint TEXT,
+        requested_range_start_bytes INTEGER CHECK(requested_range_start_bytes IS NULL OR requested_range_start_bytes >= 0),
+        requested_range_end_bytes INTEGER CHECK(requested_range_end_bytes IS NULL OR requested_range_end_bytes >= 0),
+        requested_bytes INTEGER CHECK(requested_bytes IS NULL OR requested_bytes >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK(file_id IS NOT NULL OR job_type = 'reconcile')
+      );
+    `);
+    db.exec(`
+      INSERT INTO transfer_jobs_new
+        (id, file_id, job_type, state, chunks_completed, chunks_total, bytes_completed, retry_count,
+         last_safe_error_code, idempotency_key, request_fingerprint,
+         requested_range_start_bytes, requested_range_end_bytes, requested_bytes, created_at, updated_at)
+      SELECT id, file_id, job_type, state, chunks_completed, chunks_total, bytes_completed, retry_count,
+         last_safe_error_code, idempotency_key, request_fingerprint,
+         requested_range_start_bytes, requested_range_end_bytes, requested_bytes, created_at, updated_at
+      FROM transfer_jobs;
+    `);
+    db.exec('DROP TABLE transfer_jobs;');
+    db.exec('ALTER TABLE transfer_jobs_new RENAME TO transfer_jobs;');
+    db.exec('CREATE INDEX idx_transfer_jobs_state ON transfer_jobs(state, updated_at);');
+    db.exec('CREATE UNIQUE INDEX idx_transfer_jobs_idempotency ON transfer_jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;');
+
+    // one chunk, at most one ACTIVE copy per account, two accounts max
+    db.exec('DROP INDEX IF EXISTS idx_chunk_placements_active;');
+    db.exec(
+      'CREATE UNIQUE INDEX idx_chunk_placements_active ON chunk_placements(chunk_id, provider_account_id) WHERE is_active = 1;',
+    );
+    db.exec(`
+      ALTER TABLE chunk_placements ADD COLUMN placement_role TEXT CHECK(placement_role IN ('primary','mirror'));
+    `);
+
+    db.exec(`
+      CREATE TABLE provider_metrics (
+        provider TEXT NOT NULL,
+        day TEXT NOT NULL,
+        requests_total INTEGER NOT NULL DEFAULT 0 CHECK(requests_total >= 0),
+        requests_failed INTEGER NOT NULL DEFAULT 0 CHECK(requests_failed >= 0),
+        bytes_uploaded INTEGER NOT NULL DEFAULT 0 CHECK(bytes_uploaded >= 0),
+        bytes_downloaded INTEGER NOT NULL DEFAULT 0 CHECK(bytes_downloaded >= 0),
+        last_error_code TEXT,
+        last_error_at TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (provider, day)
+      );
+      CREATE INDEX idx_provider_metrics_day ON provider_metrics(day);
+    `);
+
+    const violations = db.pragma('foreign_key_check', { simple: true });
+    if (violations) {
+      throw new Error('foreign_key_check failed after the mirror/metrics migration');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -936,4 +1030,5 @@ export const allMigrations: readonly Migration[] = [
   M0012_S3_BUSINESS_TIER,
   M0013_MULTI_USER,
   M0014_FOLDERS_TRASH_NOTIFICATIONS,
+  M0015_MIRROR_AND_PROVIDER_METRICS,
 ];

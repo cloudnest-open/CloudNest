@@ -14,6 +14,7 @@ import type { FolderService } from '../files/folder-service.js';
 import { getAdapter } from '../providers/registry.js';
 import { ProviderError } from '../providers/types.js';
 import { isS3Bundle, presignUploadUrl } from '../providers/s3-files.js';
+import { recordProviderCall, recordProviderBytes } from '../metrics/provider-metrics.js';
 
 /**
  * Upload API (M9).
@@ -227,6 +228,8 @@ export function rawChunkRouter(deps: {
           providerChecksumType: ref.providerChecksum?.type,
           providerChecksumValue: ref.providerChecksum?.value,
         });
+        recordProviderCall(uploadedProviderId, true, null);
+        recordProviderBytes(uploadedProviderId, 'up', bytes);
         void attemptId;
         res.json({
           ok: true,
@@ -252,6 +255,7 @@ export function rawChunkRouter(deps: {
           const safeCode = err instanceof UploadError || err instanceof ProviderError
             ? err.safeCode
             : 'upload_failed';
+          recordProviderCall(uploadedProviderId, false, safeCode);
           let remoteObjectId: string | null = null;
           if (err instanceof ProviderError && AMBIGUOUS_UPLOAD_CODES.has(err.safeCode)) {
             remoteObjectId = await probeAmbiguousObject(uploadedProviderId, uploadedAccountId, rootIdForProbe, objectKey);
