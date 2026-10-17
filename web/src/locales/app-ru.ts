@@ -46,6 +46,18 @@ export const appRu: AppStrings = {
     settings: 'Настройки',
   },
 
+  uiMode: {
+    chooserTitle: 'Как вы будете использовать CloudNest?',
+    chooserDesc: 'Выберите подходящее — переключить можно в любой момент в боковой панели.',
+    personal: 'Личный',
+    personalDesc: 'Ваши собственные OAuth-аккаунты: Google Drive, Dropbox, OneDrive, pCloud (MEGA — экспериментально).',
+    business: 'Бизнес',
+    businessDesc: 'S3-совместимые bucket-ы с ключами доступа — прямая передача фрагментов из браузера.',
+    switchAria: 'Режим интерфейса',
+    personalActive: 'Личный режим',
+    businessActive: 'Бизнес-режим',
+  },
+
   shell: {
     lang: {
       label: 'Сменить язык',

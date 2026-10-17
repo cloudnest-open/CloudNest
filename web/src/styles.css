@@ -862,6 +862,87 @@ input:disabled, select:disabled, textarea:disabled {
 .settings-nav { min-width: 0; }
 .project-links { margin-top: 12px; }
 .project-links a.btn-secondary { text-decoration: none; }
+
+/* --- UI mode chooser + sidebar switch (personal vs business surfaces) ----- */
+.mode-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--cn-surface-muted);
+}
+.mode-panel {
+  width: 100%;
+  max-width: 560px;
+  background: var(--cn-surface);
+  border: 1px solid var(--cn-border);
+  border-radius: 16px;
+  padding: 32px;
+  text-align: center;
+}
+.mode-brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: var(--cn-primary);
+  color: var(--cn-primary-on);
+  margin-bottom: 12px;
+}
+.mode-title { font-size: 22px; margin: 0 0 6px; }
+.mode-desc { color: var(--cn-text-muted); font-size: 14px; margin: 0 0 20px; }
+.mode-cards { display: flex; gap: 12px; }
+.mode-card {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 16px;
+  border: 1px solid var(--cn-border);
+  border-radius: 12px;
+  background: var(--cn-surface);
+  color: var(--cn-text);
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.mode-card:hover { border-color: var(--cn-primary); background: var(--cn-primary-soft); }
+.mode-card svg { color: var(--cn-primary); }
+.mode-card small { color: var(--cn-text-muted); font-size: 13px; line-height: 1.45; }
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--cn-border);
+  border-radius: 999px;
+  background: var(--cn-surface);
+}
+.mode-seg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cn-text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mode-seg.active { background: var(--cn-primary); color: var(--cn-primary-on); }
+@media (max-width: 767px) {
+  .mode-cards { flex-direction: column; }
+}
 .settings-tabs {
   display: flex;
   flex-direction: column;

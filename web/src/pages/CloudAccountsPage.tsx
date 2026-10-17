@@ -4,6 +4,8 @@ import { confirmDestructive } from '../confirm.js';
 import { Dialog, formatBytes, formatDateTime } from '../components/ui.js';
 import { ProviderLogo } from '../components/ProviderLogo.js';
 import { useI18n } from '../i18n-context.js';
+import { useUiMode } from '../ui-mode-context.js';
+import { providerTier } from '../ui-mode.js';
 
 /**
  * Cloud Accounts: real database rows only. Unknown quota is shown as unknown,
@@ -60,7 +62,13 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   const [megaPassword, setMegaPassword] = useState('');
   // Roadmap Phase 1: two tiers, one engine — the list is filtered by the
   // selected tier tab, and S3-compatible buckets connect through the form below.
-  const [tierTab, setTierTab] = useState<'personal' | 'business'>('personal');
+  // UI mode (personal vs business) decides which tier tab exists at all; the
+  // tab follows the mode whenever the sidebar switch changes it.
+  const { uiMode } = useUiMode();
+  const [tierTab, setTierTab] = useState<'personal' | 'business'>(uiMode ?? 'personal');
+  useEffect(() => {
+    if (uiMode) setTierTab(uiMode);
+  }, [uiMode]);
   const [s3Open, setS3Open] = useState(false);
   const [s3Endpoint, setS3Endpoint] = useState('');
   const [s3Region, setS3Region] = useState('');
@@ -356,7 +364,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
         <section className="card">
           <h2>{t.accounts.picker.title}</h2>
           <div className="provider-grid">
-            {providers.map((p) => {
+            {providers.filter((p) => providerTier(p.id) === uiMode).map((p) => {
               const s = setupSummary(p);
               return (
                 <div key={p.id} className="provider-card">
@@ -470,7 +478,9 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
           )}
         </div>
         <div className="tabs account-tier-tabs" role="tablist" aria-label={t.accounts.tabs.aria}>
-          {(['personal', 'business'] as const).map((tier) => (
+          {(['personal', 'business'] as const)
+            .filter((tier) => tier === uiMode)
+            .map((tier) => (
             <button
               key={tier}
               type="button"

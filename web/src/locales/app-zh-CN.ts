@@ -46,6 +46,18 @@ export const appZhCn: AppStrings = {
     settings: '设置',
   },
 
+  uiMode: {
+    chooserTitle: '您将如何使用 CloudNest？',
+    chooserDesc: '选择适合的方式——可随时在侧边栏切换。',
+    personal: '个人',
+    personalDesc: '您自己的 OAuth 账户：Google Drive、Dropbox、OneDrive、pCloud（MEGA 为实验性）。',
+    business: '商业',
+    businessDesc: '使用访问密钥的 S3 兼容存储桶——浏览器直传分块。',
+    switchAria: '界面模式',
+    personalActive: '个人模式',
+    businessActive: '商业模式',
+  },
+
   shell: {
     lang: {
       label: '更改语言',

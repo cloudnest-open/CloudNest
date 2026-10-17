@@ -61,6 +61,18 @@ export const appEn = {
     settings: 'Settings',
   },
 
+  uiMode: {
+    chooserTitle: 'How will you use CloudNest?',
+    chooserDesc: 'Pick what fits — you can switch anytime from the sidebar.',
+    personal: 'Personal',
+    personalDesc: 'Your own OAuth accounts: Google Drive, Dropbox, OneDrive, pCloud (MEGA experimental).',
+    business: 'Business',
+    businessDesc: 'S3-compatible buckets with access keys — browser-direct chunk transfers.',
+    switchAria: 'UI mode',
+    personalActive: 'Personal mode',
+    businessActive: 'Business mode',
+  },
+
   shell: {
     lang: {
       label: 'Change language',

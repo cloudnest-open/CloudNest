@@ -46,6 +46,18 @@ export const appJa: AppStrings = {
     settings: '設定',
   },
 
+  uiMode: {
+    chooserTitle: 'CloudNest をどのように使いますか？',
+    chooserDesc: '合うものを選んでください。サイドバーからいつでも切り替えられます。',
+    personal: 'パーソナル',
+    personalDesc: '自分の OAuth アカウント：Google Drive、Dropbox、OneDrive、pCloud（MEGA は実験的機能）。',
+    business: 'ビジネス',
+    businessDesc: 'アクセスキーで使う S3 互換バケット — ブラウザから直接チャンクを転送します。',
+    switchAria: 'UI モード',
+    personalActive: 'パーソナルモード',
+    businessActive: 'ビジネスモード',
+  },
+
   shell: {
     lang: {
       label: '言語を変更',

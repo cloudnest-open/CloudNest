@@ -3,6 +3,7 @@ import { CloudUpload, FolderPlus, Pause, Play, RotateCcw, X } from 'lucide-react
 import { api, presignedPut } from '../api.js';
 import { formatBytes, formatDateTime } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
+import { useUiMode } from '../ui-mode-context.js';
 
 /**
  * Uploads (Step 4 / M9.e).
@@ -108,8 +109,13 @@ export function UploadsPage() {
   const [jobs, setJobs] = useState<JobView[]>([]);
   const [selected, setSelected] = useState<File | null>(null);
   const [chunkMiB, setChunkMiB] = useState<number>(DEFAULT_CHUNK_MIB);
-  // roadmap Phase 1: the storage tier picks the pool (personal OAuth vs business S3)
-  const [tier, setTier] = useState<'personal' | 'business'>('personal');
+  // roadmap Phase 1: the storage tier picks the pool (personal OAuth vs business S3).
+  // The UI mode decides the tier — the sidebar switch is the single place it changes.
+  const { uiMode } = useUiMode();
+  const [tier, setTier] = useState<'personal' | 'business'>(uiMode ?? 'personal');
+  useEffect(() => {
+    if (uiMode) setTier(uiMode);
+  }, [uiMode]);
   const [plannedChunks, setPlannedChunks] = useState<ChunkPlanEntry[] | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   /** FE-01: the job picked from Recent uploads for a restart resume. */
@@ -845,14 +851,17 @@ export function UploadsPage() {
             <p className="muted small dropzone-hint">{t.uploads.keepHint}</p>
           )}
           <label htmlFor="upload-tier">{t.uploads.tierLabel}</label>
+          {/* The UI mode locks the tier: one option per mode, so the pool can
+              never silently disagree with the chosen mode. */}
           <select
             id="upload-tier"
             value={tier}
             onChange={(e) => setTier(e.target.value as 'personal' | 'business')}
             disabled={Boolean(plannedChunks) || Boolean(resumeTarget) || uploading}
           >
-            <option value="personal">{t.uploads.tierPersonal}</option>
-            <option value="business">{t.uploads.tierBusiness}</option>
+            {tier === 'personal'
+              ? <option value="personal">{t.uploads.tierPersonal}</option>
+              : <option value="business">{t.uploads.tierBusiness}</option>}
           </select>
           <label htmlFor="upload-chunk-size">{t.uploads.maxChunkSize}</label>
           <select

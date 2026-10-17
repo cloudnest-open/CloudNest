@@ -17,7 +17,9 @@ import { SettingsPage } from './pages/SettingsPage.js';
 import { Dialog, EmptyState, ToastProvider, formatDateTime } from './components/ui.js';
 import { FileActionsProvider } from './components/FileActionsProvider.js';
 import { LanguageMenu } from './components/LanguageMenu.js';
+import { ModeChooser } from './components/ModeChooser.js';
 import { useI18n } from './i18n-context.js';
+import { useUiMode } from './ui-mode-context.js';
 import { formatBytes } from './i18n.js';
 import { currentTheme, toggleTheme } from './theme.js';
 import { setConfirmDestructivePreference, ConfirmHost } from './confirm.js';
@@ -78,6 +80,7 @@ interface Health {
 
 export default function App() {
   const { t, tf } = useI18n();
+  const { uiMode, setUiMode } = useUiMode();
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [active, setActive] = useState<NavItem>('Dashboard');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -360,6 +363,11 @@ export default function App() {
   if (authState === 'loading') {
     return <div className="auth-card">{t.shell.loading}</div>;
   }
+  // First login on this browser: ask once how the person will use the app.
+  // A UI preference, not a security boundary — switchable from the sidebar.
+  if (!uiMode) {
+    return <ModeChooser onChoose={setUiMode} />;
+  }
 
   const navLabel = (item: NavItem): string => t.nav[NAV_KEYS[item]];
 
@@ -427,6 +435,26 @@ export default function App() {
               {health ? tf(t.shell.status.connected, { version: health.version }) : t.shell.status.down}
             </span>
           </span>
+          {/* UI mode switch: personal vs business provider surfaces — the same
+              preference the post-login chooser sets, changeable anytime. */}
+          <div className="mode-pill" role="group" aria-label={t.uiMode.switchAria}>
+            <button
+              type="button"
+              className={`mode-seg${uiMode === 'personal' ? ' active' : ''}`}
+              aria-pressed={uiMode === 'personal'}
+              onClick={() => setUiMode('personal')}
+            >
+              {t.uiMode.personal}
+            </button>
+            <button
+              type="button"
+              className={`mode-seg${uiMode === 'business' ? ' active' : ''}`}
+              aria-pressed={uiMode === 'business'}
+              onClick={() => setUiMode('business')}
+            >
+              {t.uiMode.business}
+            </button>
+          </div>
           <button
             type="button"
             className="btn-logout"

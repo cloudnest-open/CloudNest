@@ -3,6 +3,8 @@ import { Check } from 'lucide-react';
 import { api, type ProviderInfo } from '../api.js';
 import { ProviderLogo } from './ProviderLogo.js';
 import { useI18n } from '../i18n-context.js';
+import { useUiMode } from '../ui-mode-context.js';
+import { providerTier } from '../ui-mode.js';
 
 /**
  * Settings → Provider Setup: one-time app credentials per provider
@@ -15,6 +17,7 @@ import { useI18n } from '../i18n-context.js';
  */
 export function ProviderSetupCard({ onChanged, onGoToCloudAccounts }: { onChanged: () => void; onGoToCloudAccounts?: () => void }) {
   const { t, tf } = useI18n();
+  const { uiMode } = useUiMode();
   const ps = t.settings.providerSetup;
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -147,7 +150,7 @@ export function ProviderSetupCard({ onChanged, onGoToCloudAccounts }: { onChange
       {error && <p className="form-error" role="alert">{error}</p>}
 
       <div className="setup-list">
-        {providers.map((p) => {
+        {providers.filter((p) => providerTier(p.id) === uiMode).map((p) => {
           const pill = statusPill(p);
           return (
             <div key={p.id} className="setup-row">
