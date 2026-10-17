@@ -250,7 +250,9 @@ export const appRu: AppStrings = {
       deleteDetail: 'Удалять можно только пустые папки. Файлы и подпапки внутри никогда не удаляются.',
       emptyTitle: 'Эта папка пуста',
       emptyBody: 'Переместите сюда файлы, создайте подпапку или загрузите файлы прямо сюда.',
-      itemCount: '{folders} папок · {files} файлов',
+      itemCount: '{folders} · {files}',
+      foldersCount: { one: '{count} папка', other: '{count} папок' },
+      filesCount: { one: '{count} файл', other: '{count} файлов' },
     },
     trash: {
       tab: 'Корзина',

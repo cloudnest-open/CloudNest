@@ -247,7 +247,9 @@ export const appJa: AppStrings = {
       deleteDetail: '削除できるのは空のフォルダだけです。中のファイルやサブフォルダは決して削除されません。',
       emptyTitle: 'このフォルダは空です',
       emptyBody: 'ファイルをここへ移動するか、サブフォルダを作成するか、直接ここへアップロードしてください。',
-      itemCount: 'フォルダ {folders} · ファイル {files}',
+      itemCount: '{folders} · {files}',
+      foldersCount: { other: '{count} フォルダ' },
+      filesCount: { other: '{count} ファイル' },
     },
     trash: {
       tab: 'ゴミ箱',

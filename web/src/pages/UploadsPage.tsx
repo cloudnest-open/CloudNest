@@ -863,6 +863,7 @@ export function UploadsPage() {
               ? <option value="personal">{t.uploads.tierPersonal}</option>
               : <option value="business">{t.uploads.tierBusiness}</option>}
           </select>
+          <p className="muted small upload-chunk-note">{t.uploads.tierNote}</p>
           <label htmlFor="upload-chunk-size">{t.uploads.maxChunkSize}</label>
           <select
             id="upload-chunk-size"
@@ -874,6 +875,7 @@ export function UploadsPage() {
               <option key={size} value={size}>{size} MiB</option>
             ))}
           </select>
+          <p className="muted small upload-chunk-note">{t.uploads.maxChunkNote}</p>
           {/* Roadmap Phase 4 (§4.4): the auto-spread toggle drives the routing
               strategy sent with every plan; continuous sync stays an honest
               placeholder until that separate, later piece of work lands. */}
@@ -897,8 +899,6 @@ export function UploadsPage() {
             </label>
             <p className="muted small">{t.uploads.queue.continuousSyncNote}</p>
           </div>
-          <p className="muted small upload-chunk-note">{t.uploads.tierNote}</p>
-          <p className="muted small upload-chunk-note">{t.uploads.maxChunkNote}</p>
         </div>
 
         {selected && !resumeTarget && (

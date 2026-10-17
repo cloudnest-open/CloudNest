@@ -251,7 +251,9 @@ export const appPtBr: AppStrings = {
       deleteDetail: 'Só pastas vazias podem ser excluídas. Arquivos e subpastas dentro nunca são removidos.',
       emptyTitle: 'Esta pasta está vazia',
       emptyBody: 'Mova arquivos para cá, crie uma subpasta ou envie diretamente nela.',
-      itemCount: '{folders} pastas · {files} arquivos',
+      itemCount: '{folders} · {files}',
+      foldersCount: { one: '{count} pasta', other: '{count} pastas' },
+      filesCount: { one: '{count} arquivo', other: '{count} arquivos' },
     },
     trash: {
       tab: 'Lixeira',

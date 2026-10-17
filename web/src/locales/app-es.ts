@@ -250,7 +250,9 @@ export const appEs: AppStrings = {
       deleteDetail: 'Solo se pueden eliminar carpetas vacías. Los archivos y subcarpetas dentro nunca se eliminan.',
       emptyTitle: 'Esta carpeta está vacía',
       emptyBody: 'Mueve archivos aquí, crea una subcarpeta o sube directamente en ella.',
-      itemCount: '{folders} carpetas · {files} archivos',
+      itemCount: '{folders} · {files}',
+      foldersCount: { one: '{count} carpeta', other: '{count} carpetas' },
+      filesCount: { one: '{count} archivo', other: '{count} archivos' },
     },
     trash: {
       tab: 'Papelera',

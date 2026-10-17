@@ -560,10 +560,20 @@ body {
   font-size: 13px;
 }
 
-.btn-primary:disabled, .btn-secondary:disabled, .btn-danger:disabled, .btn-inline:disabled,
-.btn-danger-solid:disabled {
+.btn-primary:disabled, .btn-secondary:disabled, .btn-inline:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* A disabled destructive action must read as clearly unavailable — the old
+   50%-opacity red kept the danger colour and looked enabled at a glance.
+   Disabled danger falls back to the muted outline instead. */
+.btn-danger:disabled, .btn-danger-solid:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  color: var(--cn-text-muted);
+  background: var(--cn-surface-muted);
+  border-color: var(--cn-border);
 }
 
 /* Compact actions inside table rows and dense toolbars. Wrapping is allowed:
@@ -1069,7 +1079,10 @@ input:disabled, select:disabled, textarea:disabled {
 /* --- Provider cards, metrics, previews ----------------------------------- */
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(182px, 1fr));
+  /* auto-fill at 220px: 5 personal cards land 3+2 and 6 business cards 3+3 —
+     the old auto-fit at 182px stretched to 4 columns and left one card alone
+     on the second row at laptop widths. */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
 }
 
@@ -1604,7 +1617,9 @@ input:disabled, select:disabled, textarea:disabled {
     border-right: none;
     border-bottom: 1px solid var(--cn-border);
     overflow: visible;
-    z-index: 20;
+    /* Above the sticky topbar's z-index 20: at a tie the DOM order made the
+       topbar paint over the opened nav drawer and its first item (Dashboard). */
+    z-index: 30;
   }
   .brand { padding: 8px 14px; min-height: 56px; flex: 1 1 auto; }
   .mobile-nav-toggle { display: inline-flex; }

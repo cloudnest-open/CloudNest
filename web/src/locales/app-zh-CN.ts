@@ -247,7 +247,9 @@ export const appZhCn: AppStrings = {
       deleteDetail: '只有空文件夹可以删除。其中的文件和子文件夹绝不会被移除。',
       emptyTitle: '此文件夹为空',
       emptyBody: '将文件移动到这里、创建子文件夹，或直接上传到此处。',
-      itemCount: '{folders} 个文件夹 · {files} 个文件',
+      itemCount: '{folders} · {files}',
+      foldersCount: { other: '{count} 个文件夹' },
+      filesCount: { other: '{count} 个文件' },
     },
     trash: {
       tab: '回收站',

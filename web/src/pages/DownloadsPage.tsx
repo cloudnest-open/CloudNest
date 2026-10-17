@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { formatBytes, formatDateTime } from '../components/ui.js';
+import { formatBytes, formatDateTime, useToast } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
 
 /**
@@ -37,6 +37,7 @@ interface FileView {
 
 export function DownloadsPage() {
   const { t, tf } = useI18n();
+  const toast = useToast();
   const [downloads, setDownloads] = useState<DownloadView[]>([]);
   const [files, setFiles] = useState<FileView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,7 +87,10 @@ export function DownloadsPage() {
 
   async function startDownload(file: FileView) {
     // FE-08: fetch first so a failed download surfaces IN-APP instead of
-    // replacing the whole page with a raw JSON error document.
+    // replacing the whole page with a raw JSON error document. The start
+    // feedback is a toast (session-21 batch-C): the primary action deserves
+    // feedback that survives scrolling, not only the in-page notice line.
+    toast.push({ kind: 'info', title: tf(t.downloads.starting, { name: file.originalName }) });
     setNotice(tf(t.downloads.starting, { name: file.originalName }));
     try {
       const res = await fetch(api.downloadUrl(file.id));

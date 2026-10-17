@@ -55,7 +55,7 @@ interface Crumb { id: string; name: string }
 const PAGE_SIZE = 100;
 
 export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploads }: { initialSearch?: string; onGoToCloudAccounts?: () => void; onGoToUploads?: () => void } = {}) {
-  const { t, tf } = useI18n();
+  const { t, tf, plural } = useI18n();
   const [view, setView] = useState<'files' | 'trash'>('files');
   const [files, setFiles] = useState<FileView[]>([]);
   const [folders, setFolders] = useState<FolderView[]>([]);
@@ -412,7 +412,10 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
                         <Folder size={17} aria-hidden="true" />
                         <span className="ellipsis">{folder.name}</span>
                         <span className="muted small">
-                          {tf(t.files.folders.itemCount, { folders: folder.counts.folders, files: folder.counts.files })}
+                          {tf(t.files.folders.itemCount, {
+                            folders: plural(t.files.folders.foldersCount, folder.counts.folders),
+                            files: plural(t.files.folders.filesCount, folder.counts.files),
+                          })}
                         </span>
                       </button>
                       {folder.owned && (

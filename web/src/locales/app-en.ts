@@ -266,7 +266,9 @@ export const appEn = {
       deleteDetail: 'Only empty folders can be deleted. Files and subfolders inside it are never removed.',
       emptyTitle: 'This folder is empty',
       emptyBody: 'Move files here, create a subfolder, or upload directly into it.',
-      itemCount: '{folders} folders · {files} files',
+      itemCount: '{folders} · {files}',
+      foldersCount: pl({ one: '{count} folder', other: '{count} folders' }),
+      filesCount: pl({ one: '{count} file', other: '{count} files' }),
     },
     trash: {
       tab: 'Trash',

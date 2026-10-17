@@ -252,7 +252,9 @@ export const appFr: AppStrings = {
       deleteDetail: 'Seuls les dossiers vides peuvent être supprimés. Les fichiers et sous-dossiers qu’il contient ne sont jamais retirés.',
       emptyTitle: 'Ce dossier est vide',
       emptyBody: 'Déplacez des fichiers ici, créez un sous-dossier ou téléversez directement dedans.',
-      itemCount: '{folders} dossiers · {files} fichiers',
+      itemCount: '{folders} · {files}',
+      foldersCount: { one: '{count} dossier', other: '{count} dossiers' },
+      filesCount: { one: '{count} fichier', other: '{count} fichiers' },
     },
     trash: {
       tab: 'Corbeille',

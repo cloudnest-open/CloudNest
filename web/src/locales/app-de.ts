@@ -252,7 +252,9 @@ export const appDe: AppStrings = {
       deleteDetail: 'Nur leere Ordner können gelöscht werden. Dateien und Unterordner darin werden nie entfernt.',
       emptyTitle: 'Dieser Ordner ist leer',
       emptyBody: 'Verschieben Sie Dateien hierher, erstellen Sie einen Unterordner oder laden Sie direkt hier hoch.',
-      itemCount: '{folders} Ordner · {files} Dateien',
+      itemCount: '{folders} · {files}',
+      foldersCount: { one: '{count} Ordner', other: '{count} Ordner' },
+      filesCount: { one: '{count} Datei', other: '{count} Dateien' },
     },
     trash: {
       tab: 'Papierkorb',
