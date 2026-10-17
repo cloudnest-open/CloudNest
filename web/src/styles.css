@@ -1629,18 +1629,10 @@ input:disabled, select:disabled, textarea:disabled {
   .sidebar-footer .status-line { display: none; }
   .sidebar-footer .btn-logout { height: 40px; padding: 0 8px; }
   .content { padding: 16px; }
-  /* Mobile dock = bottom sheet: full width, anchored to the screen bottom;
-     the expanded panel reserves more content space (it is taller here). */
+  /* The expanded dock reserves more content space on phones (the sheet is
+     taller); the sheet geometry itself lives with the dock styles below so it
+     wins the cascade over the base dock rules. */
   .content-dock-reserve { padding-bottom: 380px; }
-  .transfer-dock {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: 100%;
-    max-height: 70vh;
-    border-radius: 14px 14px 0 0;
-  }
-  .transfer-dock-pill { right: 12px; bottom: 12px; }
   .topbar { padding: 0 16px; }
   .page-title { font-size: 22px; line-height: 30px; }
   .provider-grid { grid-template-columns: 1fr; }
@@ -2716,6 +2708,21 @@ input:disabled, select:disabled, textarea:disabled {
 }
 
 .dock-collapse-btn:hover { background: var(--cn-surface-muted); color: var(--cn-text); }
+
+/* Mobile dock = bottom sheet: full width, anchored to the screen bottom.
+   The element-qualified selectors keep the override above the base dock rules
+   regardless of how the minifier orders the merged media blocks. */
+@media (max-width: 767px) {
+  aside.transfer-dock {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 70vh;
+    border-radius: 14px 14px 0 0;
+  }
+  button.transfer-dock-pill { right: 12px; bottom: 12px; }
+}
 
 .transfer-dock {
   position: fixed;
