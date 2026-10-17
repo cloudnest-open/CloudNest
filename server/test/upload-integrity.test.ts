@@ -63,8 +63,10 @@ test('M9.f: two accounts cannot jointly over-reserve the same free space', () =>
   try {
     // one account with exactly 16 MiB free
     seedAccount(db, 'acc-a', 'google_drive', 16 * MIB, 0);
+    // 12 MiB ≤ the 20 MiB single-object threshold and the account can hold the
+    // whole file, so it plans as ONE whole-file chunk reserving all 12 MiB
     const first = service.plan({ originalName: 'a.bin', sizeBytes: 12 * MIB, chunkSizeMiB: 8, idempotencyKey: 'k1' });
-    assert.equal(first.chunkCount, 2);
+    assert.equal(first.chunkCount, 1);
     // only 4 MiB usable remains, so a second 12 MiB plan must be refused
     assert.throws(
       () => service.plan({ originalName: 'b.bin', sizeBytes: 12 * MIB, chunkSizeMiB: 8, idempotencyKey: 'k2' }),

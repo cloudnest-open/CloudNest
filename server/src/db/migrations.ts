@@ -1015,6 +1015,24 @@ const M0015_MIRROR_AND_PROVIDER_METRICS: Migration = {
   },
 };
 
+const M0016_ACCOUNT_PARTICIPATION: Migration = {
+  version: 16,
+  name: '0016-account-participation',
+  // Owner-controlled upload participation: a connected account can now be
+  // marked OUT of the upload/mirror/reassign pool without disconnecting it.
+  // Default 1 (participating) keeps the pre-existing behaviour for every
+  // existing row; existing chunks stay readable and downloads are unaffected —
+  // the flag only gates NEW placements (plan/reassign/mirror all draw their
+  // pool from capacityInputs()).
+  // NOT NULL with a DEFAULT is directly ADD COLUMN-able in SQLite (same shape
+  // M0014 used for files.trashed_at); no table rebuild, no foreign keys off.
+  up: (db) => {
+    db.exec(
+      'ALTER TABLE provider_accounts ADD COLUMN participates_in_uploads INTEGER NOT NULL DEFAULT 1 CHECK(participates_in_uploads IN (0, 1));',
+    );
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -1031,4 +1049,5 @@ export const allMigrations: readonly Migration[] = [
   M0013_MULTI_USER,
   M0014_FOLDERS_TRASH_NOTIFICATIONS,
   M0015_MIRROR_AND_PROVIDER_METRICS,
+  M0016_ACCOUNT_PARTICIPATION,
 ];

@@ -201,6 +201,20 @@ export class ProviderAccountService {
     return this.queries.getAccount.get(id) as ProviderAccountRow;
   }
 
+  /**
+   * M0016: mark the account into/out of the upload pool. Out = the account
+   * takes no NEW placements (plan/reassign/mirror); its existing chunks stay
+   * readable and downloads are unaffected — this never deletes anything.
+   */
+  setParticipation(id: string, participates: boolean): ProviderAccountRow {
+    this.queries.updateParticipation.run({
+      id,
+      participates_in_uploads: participates ? 1 : 0,
+      updated_at: new Date().toISOString(),
+    });
+    return this.queries.getAccount.get(id) as ProviderAccountRow;
+  }
+
   /** Update the owner-set capacity cap (S3-compatible accounts only). */
   setCapacityCap(id: string, capBytes: number | null): ProviderAccountRow {
     this.queries.setCapacityCap.run({ id, capacity_cap_bytes: capBytes, updated_at: new Date().toISOString() });

@@ -95,17 +95,19 @@ test('a valid plan returns geometry only (no provider details)', async () => {
   const { app, client } = await authed();
   try {
     seedAccount(app.dbPath, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    // 24 MiB sits above the 20 MiB single-object threshold: a multi-allocation
+    // plan, so the geometry/leak assertions cover the interesting shape
     const res = await client.post(
       '/api/uploads/plan',
-      { originalName: 'video.mp4', sizeBytes: 10 * MIB, chunkSizeMiB: 8, mimeType: 'video/mp4' },
+      { originalName: 'video.mp4', sizeBytes: 24 * MIB, chunkSizeMiB: 8, mimeType: 'video/mp4' },
       { 'idempotency-key': crypto.randomUUID() },
     );
     assert.equal(res.status, 201);
     const body = res.body as {
       jobId: string; chunkCount: number; allocations: Array<{ chunkIndex: number; offsetBytes: number; sizeBytes: number; accountId?: string }>;
     };
-    assert.equal(body.chunkCount, 2);
-    assert.equal(body.allocations.length, 2);
+    assert.equal(body.chunkCount, 3);
+    assert.equal(body.allocations.length, 3);
     // the client gets its own chunk geometry but never the account/provider choice
     for (const a of body.allocations) {
       assert.equal(a.accountId, undefined, 'the allocated account id is never exposed');

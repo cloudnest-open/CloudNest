@@ -199,6 +199,15 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     });
   }
 
+  // M0016: in/out of the upload pool. Out stops NEW placements only — existing
+  // chunks stay readable, so this is safe to flip freely.
+  async function toggleParticipation(account: AccountInfo) {
+    await withBusy(account.id, async () => {
+      await api.updateAccount(account.id, { participatesInUploads: !account.participatesInUploads });
+      await reload();
+    });
+  }
+
   async function reconnect(account: AccountInfo) {
     await withBusy(account.id, async () => {
       const res = await api.reconnect(account.id);
@@ -510,6 +519,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                     <td className="ellipsis">{a.displayLabel}</td>
                     <td>
                       <span className={`state state-${s.tone}`}>{s.text}</span>
+                      {!a.participatesInUploads && <div><span className="tag">{t.accounts.list.excludedBadge}</span></div>}
                       {a.lastErrorCode && <div className="muted small">{a.lastErrorCode}</div>}
                     </td>
                     <td>
@@ -542,6 +552,9 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                         <summary className="row-action-summary btn-secondary">{t.accounts.list.actions}</summary>
                         <span className="row-action-items">
                           <button type="button" className="btn-inline" disabled={busyId === a.id} onClick={() => void rename(a)}>{t.accounts.list.rename}</button>
+                          <button type="button" className="btn-inline" disabled={busyId === a.id} onClick={() => void toggleParticipation(a)}>
+                            {a.participatesInUploads ? t.accounts.list.excludeUploads : t.accounts.list.includeUploads}
+                          </button>
                           <button type="button" className="btn-inline" disabled={busyId === a.id} onClick={() => openScopeEditor(a)}>{t.accounts.sharedPool.manage}</button>
                           <button type="button" className="btn-inline btn-inline-danger" disabled={busyId === a.id} onClick={() => void disconnect(a)}>{t.accounts.list.disconnect}</button>
                         </span>

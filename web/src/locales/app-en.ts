@@ -737,6 +737,9 @@ export const appEn = {
       rename: 'Rename',
       reconnect: 'Reconnect',
       disconnect: 'Disconnect',
+      excludeUploads: 'Exclude from uploads',
+      includeUploads: 'Include in uploads',
+      excludedBadge: 'Not in uploads',
       renamePrompt: 'New label for this account:',
       footnote:
         'Provider-reported quotas can change outside CloudNest. “Available” is an estimate, not a reservation guarantee. Remote files are never deleted by disconnecting.',

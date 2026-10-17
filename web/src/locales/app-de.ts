@@ -727,6 +727,9 @@ export const appDe: AppStrings = {
       rename: 'Umbenennen',
       reconnect: 'Neu verbinden',
       disconnect: 'Trennen',
+      excludeUploads: 'Aus Uploads ausschließen',
+      includeUploads: 'In Uploads einschließen',
+      excludedBadge: 'Nicht in Uploads',
       renamePrompt: 'Neue Bezeichnung für dieses Konto:',
       footnote:
         'Anbietergemeldete Kontingente können sich außerhalb von CloudNest ändern. „Verfügbar“ ist eine Schätzung, keine Reservierungsgarantie. Beim Trennen werden Remote-Dateien nie gelöscht.',

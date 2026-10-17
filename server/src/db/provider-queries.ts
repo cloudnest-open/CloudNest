@@ -22,6 +22,9 @@ export interface ProviderAccountRow {
   capacity_cap_bytes: number | null;
   reserve_bytes: number;
   reserved_inflight_bytes: number;
+  /** Owner-controlled flag (M0016): 0 = the account takes no NEW placements
+   * (plan/reassign/mirror); existing chunks stay readable and unaffected. */
+  participates_in_uploads: 0 | 1;
   last_quota_check_at: string | null;
   last_quota_error_code: string | null;
   last_quota_error_at: string | null;
@@ -87,6 +90,9 @@ export function makeProviderQueries(db: Database.Database) {
     ),
     updateReserve: db.prepare(
       'UPDATE provider_accounts SET reserve_bytes = @reserve_bytes, updated_at = @updated_at WHERE id = @id',
+    ),
+    updateParticipation: db.prepare(
+      'UPDATE provider_accounts SET participates_in_uploads = @participates_in_uploads, updated_at = @updated_at WHERE id = @id',
     ),
     eraseCredentials: db.prepare(
       `UPDATE provider_accounts SET credential_ciphertext = NULL, credential_nonce = NULL,

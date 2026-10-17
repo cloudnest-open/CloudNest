@@ -370,13 +370,16 @@ test("notifications: a finished upload lands in the owner's feed with an unread 
   try {
     await withFake(async () => {
       seedAccount(app, { id: 'acc-up', token: 'tok-up', total: 32 * MIB });
+      // 24 MiB sits above the 20 MiB single-object threshold, so this stays a
+      // real multi-chunk upload (3 × 8 MiB) — which is what the feed test needs
       const plan = await client.post('/api/uploads/plan',
-        { originalName: 'notify.bin', sizeBytes: 16 * MIB, chunkSizeMiB: 8, mimeType: null, idempotencyKey: 'key-notify-1' },
+        { originalName: 'notify.bin', sizeBytes: 24 * MIB, chunkSizeMiB: 8, mimeType: null, idempotencyKey: 'key-notify-1' },
         { 'idempotency-key': 'key-notify-1' } as never);
       assert.equal(plan.status, 201, JSON.stringify(plan.body));
       const planBody = plan.body as { jobId: string };
       assert.equal(await putChunk(app, client, planBody.jobId, 0, crypto.randomBytes(8 * MIB)), 200);
       assert.equal(await putChunk(app, client, planBody.jobId, 1, crypto.randomBytes(8 * MIB)), 200);
+      assert.equal(await putChunk(app, client, planBody.jobId, 2, crypto.randomBytes(8 * MIB)), 200);
 
       const feed = await listNotifications(client);
       assert.equal(feed.unreadCount, 1, JSON.stringify(feed));

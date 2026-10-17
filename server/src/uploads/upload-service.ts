@@ -3,6 +3,9 @@ import type Database from 'better-sqlite3';
 import { makeUploadQueries, type JobRow, type FileRow, type AllocationRow } from '../db/upload-queries.js';
 import { makeProviderQueries } from '../db/provider-queries.js';
 import { planChunks, chunkBounds, sanitizeDisplayName, generateObjectKey, ChunkMathError, type ChunkSizeMiB } from './chunk-math.js';
+// Small files go out as one whole-file object on a single account (with a
+// chunk-split fallback when no account can hold the whole file).
+const SINGLE_OBJECT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
 import { preflight, allocateChunks, assessAccountCapacity, outstandingReservationBytes, suggestSmallerChunkSizeMiB, UNLIMITED_USABLE_BYTES, type AccountCapacityInput, type AccountCapacity, type RoutingStrategy } from './capacity.js';
 import type { CredentialsStore } from '../providers/credentials-store.js';
 import { getAdapter } from '../providers/registry.js';
@@ -248,11 +251,14 @@ export class UploadService {
       id: string; provider: string; display_label: string; status: string; tier: AccountTier;
       quota_status: string; quota_total_bytes: number | null; used_bytes: number | null;
       quota_unlimited: 0 | 1; quota_scope: string | null; reserve_bytes: number;
+      participates_in_uploads: 0 | 1;
     }>;
     const active = this.q.listAllActiveAllocations.all() as Array<{ provider_account_id: string; size_bytes: number; state: string }>;
     // roadmap Phase 1: a file draws capacity ONLY from its own tier's pool —
     // business files never land on personal OAuth accounts, nor the reverse.
-    const tierAccounts = accounts.filter((a) => (a.tier ?? 'personal') === tier);
+    // M0016: an account the owner marked out of upload participation takes no
+    // NEW placements (plan/reassign/mirror); its existing chunks stay readable.
+    const tierAccounts = accounts.filter((a) => (a.tier ?? 'personal') === tier && a.participates_in_uploads !== 0);
     const s3Quotas = this.s3QuotaOverrides();
     return tierAccounts
       .filter((a) => PROVIDER_UPLOAD_READY.has(a.provider))
@@ -330,6 +336,20 @@ export class UploadService {
     // an empty file needs no capacity and creates no remote object
     if (plan.chunkCount === 0) {
       return this.createEmptyFile(name, req, fingerprint, plan.chunkSizeBytes);
+    }
+
+    // Small files prefer a whole-file object on one good account: splitting a
+    // small file buys nothing (extra objects and per-chunk bookkeeping
+    // outweigh any spread benefit) and one object is the simpler, more honest
+    // layout. If no single eligible account can actually hold the whole file
+    // (a fragmented pool), fall back to the regular chunk split so a small
+    // upload is never made impossible — the pool, not the threshold, decides.
+    if (plan.fileSizeBytes <= SINGLE_OBJECT_UPLOAD_MAX_BYTES) {
+      const whole = planChunks(plan.fileSizeBytes, plan.fileSizeBytes);
+      const wholeCapacity = preflight(this.capacityInputs(req.tier ?? 'personal'), whole.fileSizeBytes);
+      if (wholeCapacity.assessment.eligible.some((a) => a.usableBytes >= whole.fileSizeBytes)) {
+        plan = whole;
+      }
     }
 
     const capacity = preflight(this.capacityInputs(req.tier ?? 'personal'), plan.fileSizeBytes);

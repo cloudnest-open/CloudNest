@@ -384,7 +384,9 @@ test('restart reconciles in-flight attempts without losing cleanup obligations',
   const { db, close, service } = setup();
   try {
     seedAccount(db, { id: 'acc', total: 1_000 * MIB, used: 0 });
-    const plan = service.plan({ originalName: 'f.bin', sizeBytes: 16 * MIB, chunkSizeMiB: 8, idempotencyKey: 'k1' });
+    // 24 MiB sits above the 20 MiB single-object threshold: three real chunks,
+    // so chunk indexes 0 and 1 below are both valid multi-chunk attempts
+    const plan = service.plan({ originalName: 'f.bin', sizeBytes: 24 * MIB, chunkSizeMiB: 8, idempotencyKey: 'k1' });
     const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc' });
     const a1 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 1, accountId: 'acc' });
     // chunk 1's response was lost: the provider may hold the object
@@ -400,7 +402,7 @@ test('restart reconciles in-flight attempts without losing cleanup obligations',
     assert.equal(service.pendingCleanups().length, 1, 'the obligation survives for retryPendingCleanups');
     // allocations of a paused job keep their reservations (the chunks are still owed)
     const reserved = db.prepare("SELECT COALESCE(SUM(size_bytes),0) AS n FROM upload_chunk_allocations WHERE job_id = ? AND state IN ('reserved','uploading')").get(plan.jobId) as { n: number };
-    assert.equal(reserved.n, 16 * MIB);
+    assert.equal(reserved.n, 24 * MIB);
   } finally {
     close();
   }

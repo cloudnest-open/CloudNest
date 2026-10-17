@@ -47,8 +47,10 @@ test('booting the real server repairs a crashed upload state (live-path recovery
   seedAccount(db, 'cr-acc', 100 * MIB);
   const store = new CredentialsStore(db, dir);
   const service = new UploadService(db, store);
+  // 24 MiB sits above the 20 MiB single-object threshold, so the plan really
+  // splits into 8 MiB chunks and both attempt indexes below are valid
   const plan = service.plan({
-    originalName: 'crashed.bin', sizeBytes: 10 * MIB, chunkSizeMiB: 8, idempotencyKey: 'cr-restart-1',
+    originalName: 'crashed.bin', sizeBytes: 24 * MIB, chunkSizeMiB: 8, idempotencyKey: 'cr-restart-1',
   });
   service.markRunning(plan.jobId);
   // two mid-flight attempts: without a remote id (plain failure) and with one
@@ -113,7 +115,7 @@ test('booting the real server repairs a crashed upload state (live-path recovery
     const account = reopened.db.prepare(
       'SELECT reserved_inflight_bytes FROM provider_accounts WHERE id = ?',
     ).get('cr-acc') as { reserved_inflight_bytes: number };
-    assert.equal(account.reserved_inflight_bytes, 10 * MIB, 'reservations were rebuilt from durable allocation rows');
+    assert.equal(account.reserved_inflight_bytes, 24 * MIB, 'reservations were rebuilt from durable allocation rows');
 
     const attempts = reopened.db.prepare(
       'SELECT id, state FROM upload_attempts WHERE job_id = ?',

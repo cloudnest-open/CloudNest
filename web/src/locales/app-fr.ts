@@ -727,6 +727,9 @@ export const appFr: AppStrings = {
       rename: 'Renommer',
       reconnect: 'Reconnecter',
       disconnect: 'Déconnecter',
+      excludeUploads: 'Exclure des téléversements',
+      includeUploads: 'Inclure dans les téléversements',
+      excludedBadge: 'Hors des téléversements',
       renamePrompt: 'Nouveau libellé pour ce compte :',
       footnote:
         'Les quotas rapportés par les fournisseurs peuvent évoluer en dehors de CloudNest. « Disponible » est une estimation, pas une garantie de réservation. Déconnecter ne supprime jamais les fichiers distants.',

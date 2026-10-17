@@ -46,20 +46,21 @@ test('plan creates a file, a job and one allocation per chunk — atomically', (
   const { db, close, service, q } = setup();
   try {
     seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    // 24 MiB sits above the 20 MiB single-object threshold: three real chunks
     const plan = service.plan({
-      originalName: 'video.mp4', sizeBytes: 10 * MIB, chunkSizeMiB: 8, mimeType: 'video/mp4', idempotencyKey: KEY,
+      originalName: 'video.mp4', sizeBytes: 24 * MIB, chunkSizeMiB: 8, mimeType: 'video/mp4', idempotencyKey: KEY,
     });
-    assert.equal(plan.chunkCount, 2);
+    assert.equal(plan.chunkCount, 3);
     assert.equal(plan.chunkSizeBytes, 8 * MIB);
-    assert.equal(plan.allocations.length, 2, 'one allocation per chunk');
-    assert.deepEqual(plan.allocations.map((a) => a.sizeBytes), [8 * MIB, 2 * MIB], 'the final chunk is short');
+    assert.equal(plan.allocations.length, 3, 'one allocation per chunk');
+    assert.deepEqual(plan.allocations.map((a) => a.sizeBytes), [8 * MIB, 8 * MIB, 8 * MIB], 'one whole chunk per allocation');
 
     const job = q.getJob.get(plan.jobId) as { state: string; chunks_total: number };
     assert.equal(job.state, 'queued');
-    assert.equal(job.chunks_total, 2);
+    assert.equal(job.chunks_total, 3);
     const file = q.getFile.get(plan.fileId) as { state: string; chunk_count: number };
     assert.equal(file.state, 'uploading');
-    assert.equal(file.chunk_count, 2);
+    assert.equal(file.chunk_count, 3);
   } finally {
     close();
   }
@@ -235,7 +236,8 @@ test('committing chunks completes the file and records a versioned manifest hash
   const { db, close, service, q } = setup();
   try {
     seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
-    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 10 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    // 24 MiB sits above the 20 MiB single-object threshold: three real chunks
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 24 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
 
     const sha0 = crypto.createHash('sha256').update('chunk-0').digest('hex');
     const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
@@ -250,17 +252,25 @@ test('committing chunks completes the file and records a versioned manifest hash
     const a1 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 1, accountId: 'acc-a' });
     const r1 = service.commitChunk({
       jobId: plan.jobId, chunkIndex: 1, accountId: 'acc-a', objectKey: a1.objectKey,
-      remoteObjectId: 'remote-1', sha256: sha1, sizeBytes: 2 * MIB,
+      remoteObjectId: 'remote-1', sha256: sha1, sizeBytes: 8 * MIB,
     });
-    assert.equal(r1.fileCompleted, true);
-    assert.equal(r1.bytesCompleted, 10 * MIB);
+    assert.equal(r1.fileCompleted, false);
+
+    const sha2 = crypto.createHash('sha256').update('chunk-2').digest('hex');
+    const a2 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 2, accountId: 'acc-a' });
+    const r2 = service.commitChunk({
+      jobId: plan.jobId, chunkIndex: 2, accountId: 'acc-a', objectKey: a2.objectKey,
+      remoteObjectId: 'remote-2', sha256: sha2, sizeBytes: 8 * MIB,
+    });
+    assert.equal(r2.fileCompleted, true);
+    assert.equal(r2.bytesCompleted, 24 * MIB);
 
     const job = q.getJob.get(plan.jobId) as { state: string; chunks_completed: number };
     assert.equal(job.state, 'completed');
     const file = q.getFile.get(plan.fileId) as { state: string; manifest_hash: string };
     assert.equal(file.state, 'completed');
     // the manifest hash is versioned and deterministic, not a whole-file digest
-    assert.equal(file.manifest_hash, manifestHash([{ size_bytes: 8 * MIB, sha256: sha0 }, { size_bytes: 2 * MIB, sha256: sha1 }]));
+    assert.equal(file.manifest_hash, manifestHash([{ size_bytes: 8 * MIB, sha256: sha0 }, { size_bytes: 8 * MIB, sha256: sha1 }, { size_bytes: 8 * MIB, sha256: sha2 }]));
     assert.match(file.manifest_hash, /^[0-9a-f]{64}$/);
 
     // exactly one active placement per chunk
@@ -637,7 +647,8 @@ test('a reselected source that does not match is rejected as source_changed', as
   const { db, close, service } = setup();
   try {
     seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
-    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 16 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    // 24 MiB sits above the 20 MiB single-object threshold: chunk indexes 0/1 exist
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 24 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
     const original = Buffer.alloc(8 * MIB, 7);
     const digest = crypto.createHash('sha256').update(original).digest('hex');
     const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });

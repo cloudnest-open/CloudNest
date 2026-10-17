@@ -72,6 +72,8 @@ export interface AccountInfo {
   };
   reserveBytes: number;
   reservedInflightBytes: number;
+  /** M0016: false = the account takes no NEW placements (plan/reassign/mirror). */
+  participatesInUploads: boolean;
   /** Owner-confirmed shared-pool key (§6.2); null = independent quota scope. */
   quotaScopeKey: string | null;
   /** Owner-set per-bucket cap (S3-compatible accounts); null elsewhere. */
@@ -143,7 +145,7 @@ export const api = {
   accounts: () => request('GET', '/api/provider-accounts'),
   refreshQuota: (id: string) => request('POST', `/api/provider-accounts/${id}/refresh-quota`),
   refreshAllQuotas: () => request('POST', '/api/provider-accounts/refresh-quotas'),
-  updateAccount: (id: string, body: { displayLabel?: string; reserveBytes?: number }) =>
+  updateAccount: (id: string, body: { displayLabel?: string; reserveBytes?: number; participatesInUploads?: boolean }) =>
     request('PATCH', `/api/provider-accounts/${id}`, body),
   reconnect: (id: string) => request('POST', `/api/provider-accounts/${id}/reconnect`),
   /** §6.2 owner-confirmed shared-pool grouping: explicit accountIds, or clear. */

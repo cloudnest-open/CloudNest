@@ -50,6 +50,8 @@ function toPublic(row: ProviderAccountRow) {
     capacityCapBytes: row.capacity_cap_bytes,
     reserveBytes: row.reserve_bytes,
     reservedInflightBytes: row.reserved_inflight_bytes,
+    /** M0016: false = the account takes no NEW placements (plan/reassign/mirror). */
+    participatesInUploads: row.participates_in_uploads !== 0,
     lastErrorCode: row.last_error_code,
     lastErrorAt: row.last_error_at,
     hasCredentials: row.credential_ciphertext !== null,
@@ -116,7 +118,7 @@ export function providerAccountsRouter(deps: {
       res.status(404).json({ error: 'Account not found.' });
       return;
     }
-    const body = (req.body ?? {}) as { displayLabel?: unknown; reserveBytes?: unknown };
+    const body = (req.body ?? {}) as { displayLabel?: unknown; reserveBytes?: unknown; participatesInUploads?: unknown };
     if (typeof body.displayLabel === 'string') {
       const label = body.displayLabel.trim();
       if (!label || label.length > 120) {
@@ -131,6 +133,11 @@ export function providerAccountsRouter(deps: {
         return;
       }
       accounts.updateReserve(row.id, body.reserveBytes);
+    }
+    // M0016: marking out of participation never deletes anything — it only
+    // stops NEW placements; existing chunks stay readable.
+    if (typeof body.participatesInUploads === 'boolean') {
+      accounts.setParticipation(row.id, body.participatesInUploads);
     }
     res.json({ account: toPublic(accounts.get(row.id) as ProviderAccountRow) });
   });

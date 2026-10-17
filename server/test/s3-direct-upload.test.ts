@@ -93,12 +93,15 @@ test('a business chunk flows begin → direct PUT → complete with an honest pl
 
     const planRes = await client.post(
       '/api/uploads/plan',
-      { originalName: 'direct.bin', sizeBytes: 10 * MIB, chunkSizeMiB: 8, mimeType: null, tier: 'business' },
+      // 24 MiB sits above the 20 MiB single-object threshold, so the business
+      // file really splits into three 8 MiB chunks — which is what the
+      // direct-chunk flow under test needs
+      { originalName: 'direct.bin', sizeBytes: 24 * MIB, chunkSizeMiB: 8, mimeType: null, tier: 'business' },
       { 'idempotency-key': 'direct-e2e-1' },
     );
     assert.equal(planRes.status, 201, JSON.stringify(planRes.body));
     const plan = planRes.body as { jobId: string; chunkCount: number; allocations: Array<Record<string, unknown>> };
-    assert.equal(plan.chunkCount, 2);
+    assert.equal(plan.chunkCount, 3);
     // the plan shape never names the account behind an allocation
     assert.ok(!JSON.stringify(plan).includes('accountId'));
 
@@ -140,8 +143,8 @@ test('a business chunk flows begin → direct PUT → complete with an honest pl
     const attempt0 = app.db.prepare('SELECT state FROM upload_attempts WHERE id = ?').get(direct0.attemptId) as { state: string };
     assert.equal(attempt0.state, 'committed');
 
-    // second (short) chunk completes the file
-    const bytes1 = crypto.randomBytes(2 * MIB);
+    // second chunk completes three-of-three; the file is not done yet
+    const bytes1 = crypto.randomBytes(8 * MIB);
     const digest1 = crypto.createHash('sha256').update(bytes1).digest('hex');
     const begin1 = await client.post(`/api/uploads/${plan.jobId}/chunks/1/begin`, {});
     assert.equal(begin1.status, 200);
@@ -153,7 +156,22 @@ test('a business chunk flows begin → direct PUT → complete with an honest pl
       attemptId: direct1.attemptId, sha256: digest1, etag: put1.headers.get('etag'),
     });
     assert.equal(complete1.status, 200);
-    assert.equal((complete1.body as { fileCompleted: boolean }).fileCompleted, true);
+    assert.equal((complete1.body as { fileCompleted: boolean }).fileCompleted, false);
+
+    // third (final) chunk completes the file
+    const bytes2 = crypto.randomBytes(8 * MIB);
+    const digest2 = crypto.createHash('sha256').update(bytes2).digest('hex');
+    const begin2 = await client.post(`/api/uploads/${plan.jobId}/chunks/2/begin`, {});
+    assert.equal(begin2.status, 200);
+    const direct2 = begin2.body as BeginDirect;
+    assert.equal(direct2.mode, 'direct');
+    const put2 = await fetch(direct2.url!, { method: 'PUT', body: bytes2 });
+    assert.equal(put2.status, 200);
+    const complete2 = await client.post(`/api/uploads/${plan.jobId}/chunks/2/complete`, {
+      attemptId: direct2.attemptId, sha256: digest2, etag: put2.headers.get('etag'),
+    });
+    assert.equal(complete2.status, 200);
+    assert.equal((complete2.body as { fileCompleted: boolean }).fileCompleted, true);
 
     const jobRes = await client.get(`/api/uploads/${plan.jobId}`);
     assert.equal((jobRes.body as { job: { state: string } }).job.state, 'completed');

@@ -721,6 +721,9 @@ export const appEs: AppStrings = {
       rename: 'Renombrar',
       reconnect: 'Reconectar',
       disconnect: 'Desconectar',
+      excludeUploads: 'Excluir de las subidas',
+      includeUploads: 'Incluir en las subidas',
+      excludedBadge: 'Fuera de las subidas',
       renamePrompt: 'Nueva etiqueta para esta cuenta:',
       footnote:
         'Las cuotas informadas por los proveedores pueden cambiar fuera de CloudNest. «Disponible» es una estimación, no una garantía de reserva. Desconectar nunca elimina archivos remotos.',

@@ -714,6 +714,9 @@ export const appJa: AppStrings = {
       rename: '名前の変更',
       reconnect: '再接続',
       disconnect: '接続解除',
+      excludeUploads: 'アップロードから除外',
+      includeUploads: 'アップロードに含める',
+      excludedBadge: 'アップロード外',
       renamePrompt: 'このアカウントの新しいラベル：',
       footnote:
         'プロバイダーが報告するクォータは CloudNest の外部で変化することがあります。「利用可能」は推定値であり、予約の保証ではありません。接続を解除してもリモートファイルは削除されません。',

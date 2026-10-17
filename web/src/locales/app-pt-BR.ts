@@ -726,6 +726,9 @@ export const appPtBr: AppStrings = {
       rename: 'Renomear',
       reconnect: 'Reconectar',
       disconnect: 'Desconectar',
+      excludeUploads: 'Excluir dos envios',
+      includeUploads: 'Incluir nos envios',
+      excludedBadge: 'Fora dos envios',
       renamePrompt: 'Novo rótulo para esta conta:',
       footnote:
         'As cotas informadas pelos provedores podem mudar fora do CloudNest. “Disponível” é uma estimativa, não uma garantia de reserva. Desconectar nunca exclui arquivos remotos.',

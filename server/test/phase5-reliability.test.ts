@@ -291,8 +291,8 @@ test('a failed mirror retries honestly and completes the missing chunks only', a
   const dropboxAdapter = {
     ...dropbox.adapter,
     async uploadObjectStream(bundle: ProviderCredentialBundle, params: UploadObjectStreamParams, cfg?: DecryptedProviderAppConfig) {
-      if (failSmallUploads && params.sizeBytes === 4 * MIB) {
-        throw new ProviderError('provider_unavailable', 502, 'injected second-chunk failure');
+      if (failSmallUploads && params.sizeBytes === 6 * MIB) {
+        throw new ProviderError('provider_unavailable', 502, 'injected final-chunk failure');
       }
       return realUpload(bundle, params, cfg);
     },
@@ -303,13 +303,14 @@ test('a failed mirror retries honestly and completes the missing chunks only', a
   try {
     seedAccount(app, { id: 'acc-a', provider: 'google_drive', token: 'tok-a' });
     seedAccount(app, { id: 'acc-b', provider: 'dropbox', token: 'tok-b' });
-    // 12 MiB with 8 MiB chunks = two chunks: 8 MiB + 4 MiB
-    const { fileId } = await uploadFile(app, client, { name: 'two-chunks.bin', sizeBytes: 12 * MIB });
+    // 30 MiB with 8 MiB chunks = four chunks (8+8+8+6): above the 20 MiB
+    // single-object threshold, so the file really splits and mirrors per chunk
+    const { fileId } = await uploadFile(app, client, { name: 'two-chunks.bin', sizeBytes: 30 * MIB });
 
     const started = await startMirror(client, fileId);
     assert.equal(started.status, 202);
     const failedView = await waitForMirrorState(client, fileId, ['failed']);
-    assert.equal(failedView.mirroredChunks, 1, 'the first chunk mirrored before the failure');
+    assert.equal(failedView.mirroredChunks, 3, 'the first three chunks mirrored before the failure');
     assert.equal(failedView.job?.safeErrorCode, 'provider_unavailable');
 
     // the same POST retries the failed job and finishes ONLY the missing chunk
@@ -317,7 +318,7 @@ test('a failed mirror retries honestly and completes the missing chunks only', a
     const retried = await startMirror(client, fileId);
     assert.equal(retried.status, 202);
     const doneView = await waitForMirrorState(client, fileId, ['completed']);
-    assert.equal(doneView.mirroredChunks, 2);
+    assert.equal(doneView.mirroredChunks, 4);
   } finally {
     clearTestAdapters();
     await app.close();
