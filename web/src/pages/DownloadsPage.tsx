@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { formatBytes, formatDateTime, useToast } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
+import { useUiMode } from '../ui-mode-context.js';
 
 /**
  * Downloads (Step 5 / M10.e).
@@ -37,6 +38,9 @@ interface FileView {
 
 export function DownloadsPage() {
   const { t, tf } = useI18n();
+  // mode = complete context: this page never sees the other tier's rows
+  const { uiMode } = useUiMode();
+  const tier = uiMode ?? 'personal';
   const toast = useToast();
   const [downloads, setDownloads] = useState<DownloadView[]>([]);
   const [files, setFiles] = useState<FileView[]>([]);
@@ -51,7 +55,7 @@ export function DownloadsPage() {
     setLoading(true);
     // FE-04: a failed load must explain itself and offer a retry path
     try {
-      const [d, f] = await Promise.all([api.listDownloads(50, 0), api.listFiles(100, 0)]);
+      const [d, f] = await Promise.all([api.listDownloads(50, 0, tier), api.listFiles(100, 0, '', undefined, tier)]);
       if (d.status === 200) setDownloads((d.data as { downloads: DownloadView[] }).downloads ?? []);
       if (f.status === 200) setFiles((f.data as { files: FileView[] }).files ?? []);
       if (d.status !== 200 && f.status !== 200) {
@@ -65,7 +69,7 @@ export function DownloadsPage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user/poll-driven; a language change must not re-fetch
-  }, []);
+  }, [tier]);
 
   useEffect(() => {
     void load();

@@ -10,6 +10,7 @@ import {
   formatBytes, formatDateTime, PROVIDER_LABELS,
 } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
+import { useUiMode } from '../ui-mode-context.js';
 
 /**
  * Dashboard (reference spec §5): Reference 01's primary hierarchy — heading,
@@ -217,6 +218,10 @@ const RECENT_PAGE_SIZE = 5;
 
 export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (page: Page) => void; isMember?: boolean }) {
   const { t, tf, plural } = useI18n();
+  // mode = complete context: the server scopes every section (accounts,
+  // storage math, counts, recent files) to the active tier — no client filter.
+  const { uiMode } = useUiMode();
+  const tier = uiMode ?? 'personal';
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -237,7 +242,7 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
     setLoading(true);
     // FE-04: network failures become a visible, recoverable error state
     try {
-      const res = await api.dashboardSummary();
+      const res = await api.dashboardSummary(tier);
       if (res.status === 200) {
         setSummary(res.data as Summary);
         setError(null);
@@ -250,7 +255,7 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
-  }, []);
+  }, [tier]);
 
   const loadHealth = useCallback(async () => {
     try {
@@ -275,7 +280,7 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
     setFiles([]);
     setFilesTotal(0);
     try {
-      const res = await api.listFiles(RECENT_PAGE_SIZE, page * RECENT_PAGE_SIZE, appliedFileSearch);
+      const res = await api.listFiles(RECENT_PAGE_SIZE, page * RECENT_PAGE_SIZE, appliedFileSearch, undefined, tier);
       if (res.status === 200) {
         const data = res.data as { files: RecentFile[]; total: number };
         setFiles(data.files ?? []);
@@ -289,7 +294,7 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
       setFilesLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads follow page/search changes
-  }, [page, appliedFileSearch]);
+  }, [page, appliedFileSearch, tier]);
 
   useEffect(() => {
     void loadSummary();
@@ -318,13 +323,11 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
     setFileSearch(value);
   }
 
-  // Storage-tier filter (owner request): Personal shows only personal-pool
-  // accounts, Business only S3-compatible ones; 'all' keeps the whole pool.
-  // The storage block below recomputes from the filtered rows with the same
-  // per-account sums the server uses for the unfiltered view.
-  const [storageMode, setStorageMode] = useState<'all' | 'personal' | 'business'>('all');
-  const allAccounts = summary?.accountsDetailed ?? [];
-  const accounts = storageMode === 'all' ? allAccounts : allAccounts.filter((a) => a.tier === storageMode);
+  // Mode = complete context: the server already scoped accounts to the active
+  // tier (the old client-side All/Personal/Business filter is gone — one mode,
+  // one truth). The storage block below sums the scoped rows exactly as the
+  // server does for its own numbers.
+  const accounts = summary?.accountsDetailed ?? [];
   // the member-scoped summary omits pool-level fields entirely — optional
   // chaining keeps their dashboard rendering without them
   const storage = summary ? buildDisplayStorage(accounts, summary.storage?.lastCheckedAt ?? null) : undefined;
@@ -364,19 +367,16 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
           <p className="muted">{t.dashboard.subtitle}</p>
         </div>
         <div className="page-head-actions">
-          <div className="mode-filter" role="group" aria-label={t.dashboard.modeFilterAria}>
-            {(['all', 'personal', 'business'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                className="mode-filter-btn"
-                aria-pressed={storageMode === m}
-                onClick={() => setStorageMode(m)}
-              >
-                {m === 'all' ? t.dashboard.modeAll : m === 'personal' ? t.uiMode.personal : t.uiMode.business}
-              </button>
-            ))}
-          </div>
+          <span
+            className="mode-filter"
+            role="status"
+            aria-label={t.uiMode.switchAria}
+            title={uiMode === 'business' ? t.uiMode.businessActive : t.uiMode.personalActive}
+          >
+            <button type="button" className="mode-filter-btn" aria-pressed="true" disabled>
+              {uiMode === 'business' ? t.uiMode.business : t.uiMode.personal}
+            </button>
+          </span>
           <button type="button" className="btn-secondary" onClick={reloadAll} disabled={loading || filesLoading}>
             <RefreshCw size={15} aria-hidden="true" />
             {loading || filesLoading ? t.common.refreshing : t.common.refresh}

@@ -154,12 +154,22 @@ export const api = {
   disconnect: (id: string) => request('POST', `/api/provider-accounts/${id}/disconnect`),
 
   // ---- uploads (Step 4 / M9) ----
-  dashboardSummary: () => request('GET', '/api/dashboard/summary'),
-  listFiles: (limit = 50, offset = 0, search = '', folderId?: 'root' | string) =>
-    request('GET', `/api/files?limit=${limit}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ''}${folderId !== undefined ? `&folderId=${encodeURIComponent(folderId)}` : ''}`),
+  /** Mode = complete context: every list accepts the active storage tier so
+   * the server never ships the other mode's rows. Omitting tier keeps the
+   * legacy whole-pool response (only diagnostics use that). */
+  dashboardSummary: (tier?: 'personal' | 'business') =>
+    request('GET', `/api/dashboard/summary${tier ? `?tier=${tier}` : ''}`),
+  listFiles: (limit = 50, offset = 0, search = '', folderId?: 'root' | string, tier?: 'personal' | 'business') =>
+    request('GET', `/api/files?limit=${limit}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ''}${folderId !== undefined ? `&folderId=${encodeURIComponent(folderId)}` : ''}${tier ? `&tier=${tier}` : ''}`),
   planUpload: (body: { originalName: string; sizeBytes: number; chunkSizeMiB: number; mimeType: string | null; tier?: 'personal' | 'business'; routingStrategy?: 'balanced' | 'capacity-aware'; parentId?: string | null }, idempotencyKey: string) =>
     request('POST', '/api/uploads/plan', body, { 'idempotency-key': idempotencyKey }),
-  listUploads: () => request('GET', '/api/uploads'),
+  listUploads: (tier?: 'personal' | 'business') => request('GET', `/api/uploads${tier ? `?tier=${tier}` : ''}`),
+  /** Honest live-upload count of one tier — what the switch warning shows. */
+  activeUploadJobsCount: (tier: 'personal' | 'business') =>
+    request('GET', `/api/uploads/active-jobs-count?tier=${tier}`),
+  /** Switch the UI mode away: PAUSE (never cancel) this tier's live uploads. */
+  pauseActiveUploads: (tier: 'personal' | 'business') =>
+    request('POST', '/api/uploads/pause-active', { tier }),
   getUploadJob: (jobId: string) => request('GET', `/api/uploads/${jobId}`),
   resumeManifest: (jobId: string, offset = 0, limit = 200) =>
     request('GET', `/api/uploads/${jobId}/resume-manifest?offset=${offset}&limit=${limit}`),
@@ -187,14 +197,17 @@ export const api = {
     request('POST', `/api/uploads/${jobId}/chunks/${chunkIndex}/fail`, { attemptId, code }),
 
   // ---- downloads + rename (Step 5 / M10) ----
-  fileDetails: (fileId: string) => request('GET', `/api/files/${fileId}`),
+  fileDetails: (fileId: string, tier?: 'personal' | 'business') =>
+    request('GET', `/api/files/${fileId}${tier ? `?tier=${tier}` : ''}`),
   renameFile: (fileId: string, name: string) => request('POST', `/api/files/${fileId}/rename`, { name }),
-  listDownloads: (limit = 50, offset = 0) => request('GET', `/api/downloads?limit=${limit}&offset=${offset}`),
+  listDownloads: (limit = 50, offset = 0, tier?: 'personal' | 'business') =>
+    request('GET', `/api/downloads?limit=${limit}&offset=${offset}${tier ? `&tier=${tier}` : ''}`),
   getDownload: (jobId: string) => request('GET', `/api/downloads/${jobId}`),
   cancelDownload: (jobId: string) => request('POST', `/api/downloads/${jobId}/cancel`),
 
   // ---- share links + deletion (Step 5 / M11) ----
-  listShareLinks: () => request('GET', '/api/share-links'),
+  listShareLinks: (tier?: 'personal' | 'business') =>
+    request('GET', `/api/share-links${tier ? `?tier=${tier}` : ''}`),
   createShareLink: (body: { fileIds: string[]; password?: string; expiresAt?: string | null; downloadLimit?: number | null }) =>
     request('POST', '/api/share-links', body),
   updateShareLink: (id: string, body: { expiresAt?: string | null; downloadLimit?: number | null }) =>
@@ -206,16 +219,20 @@ export const api = {
   retryDeletion: (jobId: string) => request('POST', `/api/deletions/${jobId}/retry`),
 
   // ---- folders, trash and the notification feed (roadmap Phase 4) ----
-  folderChildren: (folderId: 'root' | string) => request('GET', `/api/folders/${folderId === 'root' ? 'root' : folderId}/children`),
-  createFolder: (name: string, parentId: string | null) => request('POST', '/api/folders', { name, parentId }),
+  folderChildren: (folderId: 'root' | string, tier?: 'personal' | 'business') =>
+    request('GET', `/api/folders/${folderId === 'root' ? 'root' : folderId}/children${tier ? `?tier=${tier}` : ''}`),
+  createFolder: (name: string, parentId: string | null, tier: 'personal' | 'business') =>
+    request('POST', '/api/folders', { name, parentId, tier }),
   renameFolder: (id: string, name: string) => request('PATCH', `/api/folders/${id}`, { name }),
   deleteFolder: (id: string) => request('DELETE', `/api/folders/${id}`),
   moveFiles: (fileIds: string[], folderId: string | null) => request('POST', `/api/files/${fileIds[0] ?? ''}/move`, { fileIds, folderId }),
-  listTrash: (limit = 50, offset = 0) => request('GET', `/api/trash?limit=${limit}&offset=${offset}`),
+  listTrash: (limit = 50, offset = 0, tier?: 'personal' | 'business') =>
+    request('GET', `/api/trash?limit=${limit}&offset=${offset}${tier ? `&tier=${tier}` : ''}`),
   emptyTrash: () => request('POST', '/api/trash/empty', {}),
   restoreFile: (fileId: string) => request('POST', `/api/files/${fileId}/restore`, {}),
   purgeFile: (fileId: string) => request('POST', `/api/files/${fileId}/purge`, {}),
-  listNotifications: (limit = 30, offset = 0) => request('GET', `/api/notifications?limit=${limit}&offset=${offset}`),
+  listNotifications: (limit = 30, offset = 0, tier?: 'personal' | 'business') =>
+    request('GET', `/api/notifications?limit=${limit}&offset=${offset}${tier ? `&tier=${tier}` : ''}`),
   markNotificationRead: (id: string) => request('POST', `/api/notifications/${id}/read`, {}),
   markAllNotificationsRead: () => request('POST', '/api/notifications/read-all', {}),
 

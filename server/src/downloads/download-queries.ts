@@ -60,18 +60,24 @@ export function makeDownloadQueries(db: Database.Database) {
     finishJob: db.prepare(
       'UPDATE transfer_jobs SET state = @state, last_safe_error_code = @last_safe_error_code, updated_at = @updated_at WHERE id = @id',
     ),
+    // Tier param (mode = complete context): NULL lists every tier.
     listDownloadJobs: db.prepare(
-      "SELECT * FROM transfer_jobs WHERE job_type = 'download' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+      `SELECT j.* FROM transfer_jobs j LEFT JOIN files f ON f.id = j.file_id
+       WHERE j.job_type = 'download' AND (? IS NULL OR f.tier = ?) ORDER BY j.created_at DESC LIMIT ? OFFSET ?`,
     ),
-    countDownloadJobs: db.prepare("SELECT COUNT(*) AS n FROM transfer_jobs WHERE job_type = 'download'"),
+    countDownloadJobs: db.prepare(
+      `SELECT COUNT(*) AS n FROM transfer_jobs j LEFT JOIN files f ON f.id = j.file_id
+       WHERE j.job_type = 'download' AND (? IS NULL OR f.tier = ?)`,
+    ),
     // Phase 3: a member's download history is their own files' jobs only.
     listDownloadJobsForUser: db.prepare(
       `SELECT j.* FROM transfer_jobs j JOIN files f ON f.id = j.file_id
-       WHERE j.job_type = 'download' AND f.user_id = ? ORDER BY j.created_at DESC LIMIT ? OFFSET ?`,
+       WHERE j.job_type = 'download' AND f.user_id = ? AND (? IS NULL OR f.tier = ?)
+       ORDER BY j.created_at DESC LIMIT ? OFFSET ?`,
     ),
     countDownloadJobsForUser: db.prepare(
       `SELECT COUNT(*) AS n FROM transfer_jobs j JOIN files f ON f.id = j.file_id
-       WHERE j.job_type = 'download' AND f.user_id = ?`,
+       WHERE j.job_type = 'download' AND f.user_id = ? AND (? IS NULL OR f.tier = ?)`,
     ),
     getJobOwnerUserId: db.prepare(
       'SELECT f.user_id AS user_id FROM transfer_jobs j JOIN files f ON f.id = j.file_id WHERE j.id = ?',

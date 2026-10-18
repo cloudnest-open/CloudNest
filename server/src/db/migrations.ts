@@ -1098,6 +1098,28 @@ const M0017_TRANSFER_JOB_TYPE_INDEX: Migration = {
   },
 };
 
+const M0018_MODE_CONTEXT_TIER: Migration = {
+  version: 18,
+  name: '0018-mode-context-tier',
+  // The approved "mode = complete context" design: every section of the UI
+  // shows only the active storage tier's data. files.tier existed since M0013;
+  // two row kinds still had no tier of their own:
+  //  - folders gain a NOT NULL DEFAULT 'personal' tier (plain ADD COLUMN, the
+  //    M0016 shape): the entire pre-existing tree honestly is personal, and
+  //    new folders inherit the creating session's mode. The unique-name index
+  //    stays keyed on (user, parent, name) — a name still collides across
+  //    tiers within one parent, which keeps tree behaviour unchanged.
+  //  - notifications gain a NULLABLE tier: a concrete tier scopes the row to
+  //    that mode, and NULL (e.g. a share link holding files of both tiers)
+  //    stays visible in both — hiding it anywhere would hide real events.
+  up: (db) => {
+    db.exec(
+      "ALTER TABLE folders ADD COLUMN tier TEXT NOT NULL DEFAULT 'personal' CHECK(tier IN ('personal','business'));",
+    );
+    db.exec('ALTER TABLE notifications ADD COLUMN tier TEXT;');
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -1116,4 +1138,5 @@ export const allMigrations: readonly Migration[] = [
   M0015_MIRROR_AND_PROVIDER_METRICS,
   M0016_ACCOUNT_PARTICIPATION,
   M0017_TRANSFER_JOB_TYPE_INDEX,
+  M0018_MODE_CONTEXT_TIER,
 ];

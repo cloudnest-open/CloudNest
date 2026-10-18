@@ -56,6 +56,12 @@ export const appFr: AppStrings = {
     switchAria: 'Mode de l’interface',
     personalActive: 'Mode personnel',
     businessActive: 'Mode professionnel',
+    activeUploads: { one: '{count} envoi en cours ou en attente', other: '{count} envois en cours ou en attente' },
+    switchConfirmTitle: 'Changer de mode de stockage ?',
+    switchConfirmBody: 'Le changement met ces envois en pause — rien n’est annulé. Reprenez-les à votre retour. Les tâches serveur en arrière-plan (miroir, nettoyage, actualisation des quotas) continuent.',
+    switchPauseAndSwitch: 'Mettre en pause et changer',
+    switchStay: 'Rester',
+    uploadsPaused: { one: '{count} envoi mis en pause', other: '{count} envois mis en pause' },
   },
 
   shell: {
@@ -130,8 +136,6 @@ export const appFr: AppStrings = {
   },
 
   dashboard: {
-    modeFilterAria: 'Filtrer le tableau de bord par niveau de stockage',
-    modeAll: 'Tous',
     title: 'Tableau de bord',
     subtitle: 'Gérez vos fichiers, vos comptes cloud et votre stockage auprès de plusieurs fournisseurs.',
     errorLoad: 'Le tableau de bord n’a pas pu être chargé. Le serveur n’a pas renvoyé de données réelles.',

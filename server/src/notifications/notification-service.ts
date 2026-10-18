@@ -23,34 +23,37 @@ export interface NotificationRow {
 export class NotificationService {
   constructor(private readonly db: Database.Database) {}
 
-  push(userId: string, kind: NotificationKind, payload: Record<string, unknown>): string {
+  /** `tier` (M0018): which storage mode the event belongs to. NULL rows stay
+   * visible in both modes (e.g. an event whose context spans both tiers). */
+  push(userId: string, kind: NotificationKind, payload: Record<string, unknown>, tier?: string | null): string {
     const id = crypto.randomUUID();
     this.db.prepare(
-      `INSERT INTO notifications (id, user_id, kind, payload, read_at, created_at)
-       VALUES (?, ?, ?, ?, NULL, ?)`,
-    ).run(id, userId, kind, JSON.stringify(payload), new Date().toISOString());
+      `INSERT INTO notifications (id, user_id, kind, payload, tier, read_at, created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(id, userId, kind, JSON.stringify(payload), tier ?? null, new Date().toISOString());
     return id;
   }
 
   /** Account events (quota staleness) are admin knowledge: every active admin. */
-  pushToAdmins(kind: NotificationKind, payload: Record<string, unknown>): number {
+  pushToAdmins(kind: NotificationKind, payload: Record<string, unknown>, tier?: string | null): number {
     const admins = this.db.prepare(
       "SELECT id FROM users WHERE role = 'admin' AND status = 'active'",
     ).all() as Array<{ id: string }>;
-    for (const admin of admins) this.push(admin.id, kind, payload);
+    for (const admin of admins) this.push(admin.id, kind, payload, tier);
     return admins.length;
   }
 
-  list(userId: string, limit: number, offset: number): NotificationRow[] {
+  list(userId: string, limit: number, offset: number, tier: string | null = null): NotificationRow[] {
     return this.db.prepare(
-      'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?',
-    ).all(userId, limit, offset) as NotificationRow[];
+      `SELECT * FROM notifications WHERE user_id = ? AND (? IS NULL OR tier IS NULL OR tier = ?)
+       ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+    ).all(userId, tier, tier, limit, offset) as NotificationRow[];
   }
 
-  unreadCount(userId: string): number {
+  unreadCount(userId: string, tier: string | null = null): number {
     return (this.db.prepare(
-      'SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL',
-    ).get(userId) as { n: number }).n;
+      'SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL AND (? IS NULL OR tier IS NULL OR tier = ?)',
+    ).get(userId, tier, tier) as { n: number }).n;
   }
 
   markRead(userId: string, id: string): boolean {

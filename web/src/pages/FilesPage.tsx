@@ -7,6 +7,7 @@ import { api } from '../api.js';
 import { FileTable, type FileTableRow } from '../components/FileTable.js';
 import { ConfirmDialog, Dialog, EmptyState, SkeletonRows, formatBytes, formatDateTime, pageList } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
+import { useUiMode } from '../ui-mode-context.js';
 
 /**
  * Files (design pack §8, roadmap Phase 4 §4.4): a real folder tree with a
@@ -56,6 +57,9 @@ const PAGE_SIZE = 100;
 
 export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploads }: { initialSearch?: string; onGoToCloudAccounts?: () => void; onGoToUploads?: () => void } = {}) {
   const { t, tf, plural } = useI18n();
+  // mode = complete context: this page never sees the other tier's rows
+  const { uiMode } = useUiMode();
+  const tier = uiMode ?? 'personal';
   const [view, setView] = useState<'files' | 'trash'>('files');
   const [files, setFiles] = useState<FileView[]>([]);
   const [folders, setFolders] = useState<FolderView[]>([]);
@@ -99,7 +103,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
     setError(null);
     try {
       if (view === 'trash') {
-        const res = await api.listTrash(PAGE_SIZE, 0);
+        const res = await api.listTrash(PAGE_SIZE, 0, tier);
         if (res.status === 200) {
           const data = res.data as { files: TrashView[]; total: number; retentionDays: number };
           setTrashFiles(data.files ?? []);
@@ -110,7 +114,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
         }
       } else if (searching) {
         // search stays global: it spans the whole (own) library, not one folder
-        const res = await api.listFiles(PAGE_SIZE, page * PAGE_SIZE, appliedSearch);
+        const res = await api.listFiles(PAGE_SIZE, page * PAGE_SIZE, appliedSearch, undefined, tier);
         if (res.status === 200) {
           const data = res.data as { files: FileView[]; total: number };
           setFiles(data.files ?? []);
@@ -122,8 +126,8 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
         }
       } else {
         const [folderRes, filesRes] = await Promise.all([
-          api.folderChildren(currentFolder === null ? 'root' : currentFolder),
-          api.listFiles(PAGE_SIZE, page * PAGE_SIZE, '', currentFolder === null ? 'root' : currentFolder),
+          api.folderChildren(currentFolder === null ? 'root' : currentFolder, tier),
+          api.listFiles(PAGE_SIZE, page * PAGE_SIZE, '', currentFolder === null ? 'root' : currentFolder, tier),
         ]);
         if (folderRes.status === 200 && filesRes.status === 200) {
           const folderData = folderRes.data as { folders: FolderView[]; breadcrumb: Crumb[] };
@@ -142,7 +146,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
-  }, [view, page, appliedSearch, currentFolder, searching]);
+  }, [view, page, appliedSearch, currentFolder, searching, tier]);
 
   useEffect(() => {
     void load();
@@ -192,7 +196,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
     setFolderBusy(true);
     setFolderError(null);
     try {
-      const res = await api.createFolder(name, currentFolder);
+      const res = await api.createFolder(name, currentFolder, tier);
       if (res.status === 201) {
         setNewFolderOpen(false);
         setNewFolderName('');

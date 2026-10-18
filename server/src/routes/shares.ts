@@ -168,7 +168,12 @@ export function sharesRouter(deps: {
   router.get('/api/share-links', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
     const principal = req.principal!;
-    res.json({ links: deps.shares.listLinks(principal.role === 'admin' ? null : principal.id) });
+    // mode = complete context: a link stays visible only where it carries at
+    // least one file of the active tier; absent tier = legacy whole listing
+    const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+      ? (req.query['tier'] as string)
+      : null;
+    res.json({ links: deps.shares.listLinks(principal.role === 'admin' ? null : principal.id, tier) });
   });
 
   router.get('/api/share-links/:id', principalOnly, (req, res) => {

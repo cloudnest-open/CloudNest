@@ -111,8 +111,8 @@ test('M9.f: a rolled-back plan leaves no reservation behind', () => {
     );
     const account = db.prepare('SELECT reserved_inflight_bytes FROM provider_accounts WHERE id = ?').get('acc-a') as { reserved_inflight_bytes: number };
     assert.equal(account.reserved_inflight_bytes, 0, 'no partial reservation survives');
-    assert.equal((q.listFiles.all(50, 0) as unknown[]).length, 0, 'no file row was written');
-    assert.equal((q.listJobs.all(50) as unknown[]).length, 0, 'no job row was written');
+    assert.equal((q.listFiles.all(null, null, 50, 0) as unknown[]).length, 0, 'no file row was written');
+    assert.equal((q.listJobs.all(null, null, 50) as unknown[]).length, 0, 'no job row was written');
   } finally {
     close();
   }

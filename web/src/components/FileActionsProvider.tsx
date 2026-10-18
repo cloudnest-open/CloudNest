@@ -3,6 +3,7 @@ import { Folder } from 'lucide-react';
 import { api } from '../api.js';
 import { ConfirmDialog, Dialog, useToast } from './ui.js';
 import { useI18n } from '../i18n-context.js';
+import { useUiMode } from '../ui-mode-context.js';
 
 /**
  * One place for the file actions, so the Dashboard, the Files page and any
@@ -54,6 +55,9 @@ interface Pending { file: ActionableFile; reload: Reload }
 export function FileActionsProvider({ children }: { children: ReactNode }) {
   const { t, tf, plural } = useI18n();
   const toast = useToast();
+  // mode = complete context: the move-picker walks only the active tier's tree
+  const { uiMode } = useUiMode();
+  const tier = uiMode ?? 'personal';
 
   const [renameTarget, setRenameTarget] = useState<Pending | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -85,7 +89,7 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
       const collected: Array<{ id: string; name: string; depth: number }> = [];
       const walk = async (parentId: string | null, depth: number): Promise<void> => {
         if (depth > 10 || collected.length > 500) return;
-        const res = await api.folderChildren(parentId === null ? 'root' : parentId);
+        const res = await api.folderChildren(parentId === null ? 'root' : parentId, tier);
         if (res.status !== 200) return;
         const body = res.data as { folders: Array<{ id: string; name: string }> };
         for (const folder of body.folders ?? []) {

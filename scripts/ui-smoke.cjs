@@ -95,11 +95,27 @@ async function postJson(apiPath, body, phase) {
     await page.waitForSelector('.shell', { timeout: 15000 });
     console.log('SMOKE PASS login → shell');
 
-    // the dashboard renders with its storage-tier filter (three segments)
+    // the dashboard renders in the chosen complete-context mode: one active
+    // tier chip (server-scoped rows), no cross-mode All filter anymore
     await page.waitForSelector('.mode-filter', { timeout: 15000 });
     const segments = await page.$$('.mode-filter button');
-    if (segments.length !== 3) fail(`mode filter has ${segments.length} segments, expected 3`);
-    else console.log('SMOKE PASS dashboard mode filter (3 segments)');
+    if (segments.length !== 1) fail(`mode chip has ${segments.length} buttons, expected 1`);
+    const chipPressed = await page.$eval('.mode-filter button', (el) => el.getAttribute('aria-pressed'));
+    if (chipPressed !== 'true') fail(`mode chip aria-pressed=${chipPressed}, expected true`);
+    else console.log('SMOKE PASS dashboard single active-mode chip');
+    // the sidebar pill switch keeps working (empty tier → instant switch)
+    await page.click('.mode-pill .mode-seg:has-text("Business")');
+    await page.waitForFunction(
+      () => document.querySelector('.mode-filter button')?.textContent?.includes('Business'),
+      { timeout: 15000 },
+    );
+    console.log('SMOKE PASS mode switch → Business context');
+    await page.click('.mode-pill .mode-seg:has-text("Personal")');
+    await page.waitForFunction(
+      () => document.querySelector('.mode-filter button')?.textContent?.includes('Personal'),
+      { timeout: 15000 },
+    );
+    console.log('SMOKE PASS mode switch → Personal context');
     await page.screenshot({ path: path.join(dataDir, 'smoke-dashboard.png') });
 
     if (pageErrors.length > 0) fail(`page errors: ${pageErrors.join(' | ')}`);

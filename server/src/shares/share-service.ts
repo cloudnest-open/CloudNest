@@ -48,7 +48,7 @@ export interface ShareLinkRow {
 export class ShareService {
   constructor(
     private readonly db: Database.Database,
-    private readonly notify?: (kind: 'upload_completed' | 'share_used' | 'quota_stale', userId: string | null, payload: Record<string, unknown>) => void,
+    private readonly notify?: (kind: 'upload_completed' | 'share_used' | 'quota_stale', userId: string | null, payload: Record<string, unknown>, tier?: string | null) => void,
   ) {}
 
   /** Create a link for one or more complete files; returns the raw URL once.
@@ -216,8 +216,8 @@ export class ShareService {
       'SELECT 1 AS present FROM share_link_items WHERE share_link_id = ? AND file_id = ?',
     ).get(link.id, fileId) as { present: number } | undefined;
     if (!membership) throw new ShareError('file_not_found', 404);
-    const file = this.db.prepare('SELECT id, state, original_name FROM files WHERE id = ?').get(fileId) as
-      | { id: string; state: string; original_name: string }
+    const file = this.db.prepare('SELECT id, state, original_name, tier FROM files WHERE id = ?').get(fileId) as
+      | { id: string; state: string; original_name: string; tier: string }
       | undefined;
     if (!file || file.state !== 'completed') throw new ShareError('file_not_complete', 409);
 
@@ -241,7 +241,7 @@ export class ShareService {
         fileName: file.original_name,
         linkId: link.id,
         downloads: link.download_count + 1,
-      });
+      }, file.tier);
     }
 
     const rawSession = crypto.randomBytes(32).toString('base64url');
@@ -335,28 +335,45 @@ export class ShareService {
   }
 
   /** Admin listing: no token, no password hash. `createdBy` scopes a member
-   * to their own links; null (admin) lists everything. */
-  listLinks(createdBy: string | null = null): Array<{
+   * to their own links; null (admin) lists everything. `tier` (mode = complete
+   * context) keeps only links that carry at least one file of that tier, and
+   * the per-link counts/first-name reflect only those items. */
+  listLinks(createdBy: string | null = null, tier: string | null = null): Array<{
     id: string; state: string; expiresAt: string | null; downloadLimit: number | null;
     downloadCount: number; hasPassword: boolean; fileCount: number; firstFileName: string | null;
     createdBy: string | null; createdAt: string;
   }> {
+    // the guard text appears three times per query (file_count, first_file_name,
+    // EXISTS) — the bind list must repeat the tier to match
+    const itemGuard = tier === null
+      ? ''
+      : ' AND f.tier = ?';
+    const itemArgs = tier === null ? [] : [tier, tier, tier];
     const rows = (
       createdBy === null
         ? this.db.prepare(
             `SELECT l.id, l.state, l.expires_at, l.download_limit, l.download_count, l.password_hash, l.created_by, l.created_at,
-              (SELECT COUNT(*) FROM share_link_items i WHERE i.share_link_id = l.id) AS file_count,
+              (SELECT COUNT(*) FROM share_link_items i JOIN files f ON f.id = i.file_id
+                WHERE i.share_link_id = l.id${itemGuard}) AS file_count,
               (SELECT f.original_name FROM share_link_items i JOIN files f ON f.id = i.file_id
-                WHERE i.share_link_id = l.id ORDER BY f.original_name LIMIT 1) AS first_file_name
-       FROM share_links l ORDER BY l.created_at DESC`,
-          ).all()
+                WHERE i.share_link_id = l.id${itemGuard} ORDER BY f.original_name LIMIT 1) AS first_file_name
+       FROM share_links l
+       WHERE EXISTS (SELECT 1 FROM share_link_items i JOIN files f ON f.id = i.file_id
+                     WHERE i.share_link_id = l.id${itemGuard})
+       ORDER BY l.created_at DESC`,
+          ).all(...itemArgs)
         : this.db.prepare(
             `SELECT l.id, l.state, l.expires_at, l.download_limit, l.download_count, l.password_hash, l.created_by, l.created_at,
-              (SELECT COUNT(*) FROM share_link_items i WHERE i.share_link_id = l.id) AS file_count,
+              (SELECT COUNT(*) FROM share_link_items i JOIN files f ON f.id = i.file_id
+                WHERE i.share_link_id = l.id${itemGuard}) AS file_count,
               (SELECT f.original_name FROM share_link_items i JOIN files f ON f.id = i.file_id
-                WHERE i.share_link_id = l.id ORDER BY f.original_name LIMIT 1) AS first_file_name
-       FROM share_links l WHERE l.created_by = ? ORDER BY l.created_at DESC`,
-          ).all(createdBy)
+                WHERE i.share_link_id = l.id${itemGuard} ORDER BY f.original_name LIMIT 1) AS first_file_name
+       FROM share_links l
+       WHERE l.created_by = ?
+         AND EXISTS (SELECT 1 FROM share_link_items i JOIN files f ON f.id = i.file_id
+                     WHERE i.share_link_id = l.id${itemGuard})
+       ORDER BY l.created_at DESC`,
+          ).all(createdBy, ...itemArgs)
     ) as Array<{
       id: string; state: string; expires_at: string | null; download_limit: number | null;
       download_count: number; password_hash: string | null; created_by: string | null; created_at: string;

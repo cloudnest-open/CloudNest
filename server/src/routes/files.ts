@@ -68,14 +68,16 @@ export function filesRouter(deps: FilesRouterDeps): Router {
   router.post('/api/folders', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
     res.set('Cache-Control', 'no-store');
     const principal = req.principal!;
-    const body = (req.body ?? {}) as { name?: unknown; parentId?: unknown };
+    const body = (req.body ?? {}) as { name?: unknown; parentId?: unknown; tier?: unknown };
     if (typeof body.name !== 'string') {
       res.status(400).json({ error: 'invalid_folder_name', code: 'invalid_folder_name' });
       return;
     }
+    // mode = complete context: the creating session's mode decides the tier
+    const tier = body.tier === 'business' ? 'business' : 'personal';
     try {
       const parentId = folderIdOrRoot(body.parentId);
-      const folder = deps.folders.create(principal.id, parentId, body.name);
+      const folder = deps.folders.create(principal.id, parentId, body.name, tier);
       res.status(201).json({ folder });
     } catch (err) {
       folderError(res, err);
@@ -87,22 +89,27 @@ export function filesRouter(deps: FilesRouterDeps): Router {
     const principal = req.principal!;
     try {
       const parentId = folderIdOrRoot(req.params['folderId']);
+      // mode = complete context: absent/unknown tier keeps the legacy listing
+      const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+        ? (req.query['tier'] as string)
+        : null;
       // the read scope decides whether this tree is visible at all
       let breadcrumb: Array<{ id: string; name: string }> = [];
       if (parentId !== null) {
         deps.folders.scopedGet(parentId, principal.role === 'admin' ? null : principal.id);
         breadcrumb = deps.folders.breadcrumb(parentId);
       }
-      const folders = deps.folders.children(principal.role === 'admin' ? null : principal.id, parentId);
+      const folders = deps.folders.children(principal.role === 'admin' ? null : principal.id, parentId, tier);
       // one grouped pair of queries for the whole page instead of a COUNT pair
       // per folder
-      const countsByParent = deps.folders.countsForParents(folders.map((f) => f.id));
+      const countsByParent = deps.folders.countsForParents(folders.map((f) => f.id), tier);
       res.json({
         breadcrumb,
         folders: folders.map((f) => ({
           id: f.id,
           name: f.name,
           parentId: f.parent_id,
+          tier: f.tier,
           createdAt: f.created_at,
           // rename/delete/move are tree-owner actions; the read-scoped admin
           // sees another principal's tree but does not mutate it
@@ -170,7 +177,11 @@ export function filesRouter(deps: FilesRouterDeps): Router {
     const owner = principal.role === 'admin' ? null : principal.id;
     const offset = Math.max(0, Number(req.query['offset'] ?? 0) || 0);
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 50) || 50));
-    const rows = deps.trash.list(owner, limit, offset);
+    // mode = complete context: absent/unknown tier keeps the legacy listing
+    const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+      ? (req.query['tier'] as string)
+      : null;
+    const rows = deps.trash.list(owner, limit, offset, tier);
     const shaped = deps.uploads.publicFiles(rows.map((r) => r.id));
     res.json({
       // retention is a fixed constant; the client shows the honest date per file
@@ -180,7 +191,7 @@ export function filesRouter(deps: FilesRouterDeps): Router {
         state: r.state,
         trashedAt: r.trashed_at,
       })),
-      total: deps.trash.count(owner),
+      total: deps.trash.count(owner, tier),
     });
   });
 
@@ -272,7 +283,12 @@ export function filesRouter(deps: FilesRouterDeps): Router {
     const principal = req.principal!;
     const offset = Math.max(0, Number(req.query['offset'] ?? 0) || 0);
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 30) || 30));
-    const rows = deps.notifications.list(principal.id, limit, offset);
+    // mode = complete context: the bell shows the active tier's events (NULL-
+    // tier rows stay visible everywhere); absent tier = legacy whole feed
+    const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+      ? (req.query['tier'] as string)
+      : null;
+    const rows = deps.notifications.list(principal.id, limit, offset, tier);
     res.json({
       notifications: rows.map((n) => ({
         id: n.id,
@@ -281,7 +297,7 @@ export function filesRouter(deps: FilesRouterDeps): Router {
         readAt: n.read_at,
         createdAt: n.created_at,
       })),
-      unreadCount: deps.notifications.unreadCount(principal.id),
+      unreadCount: deps.notifications.unreadCount(principal.id, tier),
     });
   });
 

@@ -56,6 +56,12 @@ export const appJa: AppStrings = {
     switchAria: 'UI モード',
     personalActive: 'パーソナルモード',
     businessActive: 'ビジネスモード',
+    activeUploads: { other: '{count} 件のアップロードが実行中または待機中です' },
+    switchConfirmTitle: 'ストレージモードを切り替えますか？',
+    switchConfirmBody: '切り替えるとこれらのアップロードは一時停止になります（キャンセルではありません）。戻ったら再開できます。バックグラウンドのサーバー処理（ミラーリング、クリーンアップ、クォータ更新）は停止しません。',
+    switchPauseAndSwitch: '一時停止して切り替え',
+    switchStay: 'このまま',
+    uploadsPaused: { other: '{count} 件のアップロードを一時停止しました' },
   },
 
   shell: {
@@ -129,8 +135,6 @@ export const appJa: AppStrings = {
   },
 
   dashboard: {
-    modeFilterAria: 'ストレージ階層でダッシュボードを絞り込む',
-    modeAll: 'すべて',
     title: 'ダッシュボード',
     subtitle: '複数のプロバイダーにまたがるファイル・クラウドアカウント・ストレージを管理します。',
     errorLoad: 'ダッシュボードを読み込めませんでした。サーバーが実データを返しませんでした。',

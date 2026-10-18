@@ -364,7 +364,12 @@ export function uploadsRouter(deps: {
   router.get('/api/uploads', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
     const principal = req.principal!;
-    const jobs = deps.uploads.listJobs(50, principal.role === 'admin' ? null : principal.id)
+    // mode = complete context: the UI always asks for its active tier; absent
+    // (or invalid) the response stays the legacy whole-pool listing.
+    const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+      ? (req.query['tier'] as string)
+      : null;
+    const jobs = deps.uploads.listJobs(50, principal.role === 'admin' ? null : principal.id, tier)
       .map((job) => deps.uploads.publicJob(job.id));
     // M12.a: the worker bound the UI must respect is served from settings, so
     // the client can never invent a higher limit than the admin configured.
@@ -375,6 +380,39 @@ export function uploadsRouter(deps: {
       workerLimit: deps.settings.effectiveWorkerLimit(),
       spaceAwareRouting: deps.settings.get('upload.spaceAwareRouting'),
     });
+  });
+
+  // Mode = complete context: switching the UI mode PAUSES (never cancels) the
+  // leaving tier's live uploads. One transactional bulk pause; resume() brings
+  // them back. Background server work never pauses.
+  // Registered BEFORE /api/uploads/:jobId so "active-jobs-count" is never
+  // captured as a job id.
+  router.post('/api/uploads/pause-active', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const principal = req.principal!;
+    const tier = (req.body ?? {})['tier'];
+    if (tier !== 'personal' && tier !== 'business') {
+      res.status(400).json({ error: 'invalid_upload_metadata', code: 'invalid_upload_metadata' });
+      return;
+    }
+    const paused = deps.uploads.pauseAllActive(tier, principal.role === 'admin' ? null : principal.id);
+    res.json({ ok: true, paused });
+  });
+
+  // The switch-warning modal's honest count: live (queued/running) uploads of
+  // one tier for this principal — nothing is mutated here.
+  router.get('/api/uploads/active-jobs-count', principalOnly, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const principal = req.principal!;
+    const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+      ? (req.query['tier'] as string)
+      : null;
+    if (tier === null) {
+      res.status(400).json({ error: 'invalid_upload_metadata', code: 'invalid_upload_metadata' });
+      return;
+    }
+    const count = deps.uploads.countActiveUploadJobs(tier, principal.role === 'admin' ? null : principal.id);
+    res.json({ count });
   });
 
   router.get('/api/uploads/:jobId', principalOnly, (req, res) => {
@@ -600,14 +638,18 @@ export function uploadsRouter(deps: {
   // Phase 3: members get their own dashboard truth — their jobs, their files,
   // their used-vs-allowance — and never the pool/account view, which is
   // admin knowledge (provider accounts, quotas, reservations).
+  // Mode = complete context: ?tier= scopes every section to one storage tier.
   router.get('/api/dashboard/summary', principalOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
     const principal = req.principal!;
+    const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+      ? (req.query['tier'] as string)
+      : null;
     if (principal.role === 'admin') {
-      res.json(deps.uploads.dashboardSummary());
+      res.json(deps.uploads.dashboardSummary(null, tier));
       return;
     }
-    const scoped = deps.uploads.dashboardSummary(principal.id);
+    const scoped = deps.uploads.dashboardSummary(principal.id, tier);
     res.json({
       activeJobs: scoped.activeJobs,
       recentFiles: scoped.recentFiles,
@@ -631,6 +673,10 @@ export function uploadsRouter(deps: {
     const folderId = typeof folderParam === 'string' && folderParam !== ''
       ? (folderParam === 'root' ? null : folderParam)
       : undefined;
+    // mode = complete context: absent/unknown tier keeps the legacy behaviour
+    const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+      ? (req.query['tier'] as string)
+      : null;
     if (folderId !== undefined && folderId !== null) {
       // a foreign folder answers the same 404 as a missing one
       deps.folders.scopedGet(folderId, owner);
@@ -639,13 +685,13 @@ export function uploadsRouter(deps: {
     // the entire (own) library; `total` reflects the same filter. The page is
     // resolved with one batched placement query (no per-file N+1).
     const rows = folderId === undefined
-      ? deps.uploads.searchFiles(search, limit, offset, owner)
-      : deps.uploads.listFilesInFolder(folderId, limit, offset, owner);
+      ? deps.uploads.searchFiles(search, limit, offset, owner, tier)
+      : deps.uploads.listFilesInFolder(folderId, limit, offset, owner, tier);
     const shaped = deps.uploads.publicFiles(rows.map((f) => f.id));
     const files = rows.map((f) => ({ ...shaped.get(f.id)!, parentId: f.parent_id }));
     const total = folderId === undefined
-      ? deps.uploads.countSearchedFiles(search, owner)
-      : deps.uploads.countFilesInFolder(folderId, owner);
+      ? deps.uploads.countSearchedFiles(search, owner, tier)
+      : deps.uploads.countFilesInFolder(folderId, owner, tier);
     res.json({ files, total });
   });
 

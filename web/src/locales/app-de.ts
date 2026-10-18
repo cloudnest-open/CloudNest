@@ -56,6 +56,12 @@ export const appDe: AppStrings = {
     switchAria: 'UI-Modus',
     personalActive: 'Persönlicher Modus',
     businessActive: 'Business-Modus',
+    activeUploads: { one: '{count} Upload läuft oder wartet', other: '{count} Uploads laufen oder warten' },
+    switchConfirmTitle: 'Speicher-Modus wechseln?',
+    switchConfirmBody: 'Beim Wechsel werden diese Uploads pausiert — nichts wird abgebrochen. Bei der Rückkehr kannst du sie fortsetzen. Hintergrundarbeit des Servers (Spiegelung, Aufräumen, Quota-Aktualisierung) läuft weiter.',
+    switchPauseAndSwitch: 'Pausieren & wechseln',
+    switchStay: 'Bleiben',
+    uploadsPaused: { one: '{count} Upload pausiert', other: '{count} Uploads pausiert' },
   },
 
   shell: {
@@ -130,8 +136,6 @@ export const appDe: AppStrings = {
   },
 
   dashboard: {
-    modeFilterAria: 'Dashboard nach Speicher-Tier filtern',
-    modeAll: 'Alle',
     title: 'Übersicht',
     subtitle: 'Verwalte deine Dateien, Cloud-Konten und deinen Speicher über mehrere Anbieter hinweg.',
     errorLoad: 'Die Übersicht konnte nicht geladen werden. Der Server hat keine echten Daten geliefert.',

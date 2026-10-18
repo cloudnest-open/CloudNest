@@ -56,6 +56,12 @@ export const appPtBr: AppStrings = {
     switchAria: 'Modo da interface',
     personalActive: 'Modo pessoal',
     businessActive: 'Modo empresarial',
+    activeUploads: { one: '{count} envio em andamento ou na fila', other: '{count} envios em andamento ou na fila' },
+    switchConfirmTitle: 'Alternar o modo de armazenamento?',
+    switchConfirmBody: 'Ao alternar, esses envios serão pausados — nada é cancelado. Você pode retomá-los ao voltar. O trabalho do servidor em segundo plano (espelhamento, limpeza, atualização de cotas) continua.',
+    switchPauseAndSwitch: 'Pausar e alternar',
+    switchStay: 'Ficar',
+    uploadsPaused: { one: '{count} envio pausado', other: '{count} envios pausados' },
   },
 
   shell: {
@@ -129,8 +135,6 @@ export const appPtBr: AppStrings = {
   },
 
   dashboard: {
-    modeFilterAria: 'Filtrar o painel por nível de armazenamento',
-    modeAll: 'Todos',
     title: 'Painel',
     subtitle: 'Gerencie seus arquivos, contas de nuvem e armazenamento entre vários provedores.',
     errorLoad: 'Não foi possível carregar o painel. O servidor não respondeu com dados reais.',

@@ -21,7 +21,7 @@ import { ModeChooser } from './components/ModeChooser.js';
 import { useI18n } from './i18n-context.js';
 import { useUiMode } from './ui-mode-context.js';
 import { readStoredDockCollapsed, storeDockCollapsed } from './dock-state.js';
-import { formatBytes } from './i18n.js';
+import { formatBytes, plural } from './i18n.js';
 import { currentTheme, toggleTheme } from './theme.js';
 import { setConfirmDestructivePreference, ConfirmHost } from './confirm.js';
 
@@ -80,7 +80,7 @@ interface Health {
 }
 
 export default function App() {
-  const { t, tf } = useI18n();
+  const { t, tf, locale } = useI18n();
   const { uiMode, setUiMode } = useUiMode();
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [active, setActive] = useState<NavItem>('Dashboard');
@@ -108,11 +108,47 @@ export default function App() {
   // Session-21 batch-B: the dock starts as a collapsed pill; expanding it
   // reserves content space so the panel stops eating the page corner.
   const [dockCollapsed, setDockCollapsed] = useState<boolean>(readStoredDockCollapsed);
+  // Mode = complete context: switching modes PAUSES (never cancels) the
+  // leaving tier's live uploads. The warning modal shows the honest count.
+  const [modeSwitch, setModeSwitch] = useState<{ target: 'personal' | 'business'; count: number } | null>(null);
+  const [switchingMode, setSwitchingMode] = useState(false);
   function toggleDockCollapsed(): void {
     setDockCollapsed((prev) => {
       storeDockCollapsed(!prev);
       return !prev;
     });
+  }
+  // Mode switch entry: live uploads in the leaving tier first raise the
+  // pause-warning modal; an empty tier switches instantly. The server keeps
+  // running background work either way — only the UI context changes.
+  async function requestModeSwitch(target: 'personal' | 'business'): Promise<void> {
+    if (!uiMode || target === uiMode) return;
+    try {
+      const res = await api.activeUploadJobsCount(uiMode);
+      const count = res.status === 200 ? (res.data as { count?: number }).count ?? 0 : 0;
+      if (count > 0) {
+        setModeSwitch({ target, count });
+        return;
+      }
+    } catch {
+      // a failed count must not trap the user in the current mode
+    }
+    setUiMode(target);
+  }
+  async function confirmModeSwitch(): Promise<void> {
+    if (!modeSwitch || !uiMode) return;
+    setSwitchingMode(true);
+    let paused = 0;
+    try {
+      const res = await api.pauseActiveUploads(uiMode);
+      paused = res.status === 200 ? (res.data as { paused?: number }).paused ?? 0 : 0;
+    } catch {
+      // the switch proceeds; the Uploads page shows the durable job states
+    }
+    setSwitchingMode(false);
+    setModeSwitch(null);
+    setNotice(plural(locale, t.uiMode.uploadsPaused, paused));
+    setUiMode(modeSwitch.target);
   }
   // Global search over CloudNest-managed files (real data; never a fake index).
   const [query, setQuery] = useState('');
@@ -235,12 +271,13 @@ export default function App() {
 
   // Roadmap Phase 4: the bell's feed — fetched on sign-in, then every minute
   // and whenever the panel opens. Only the principal's own rows exist.
+  // Mode = complete context: the bell shows the active tier's events.
   useEffect(() => {
-    if (authState !== 'ready') return;
+    if (authState !== 'ready' || !uiMode) return;
     let cancelled = false;
     const loadFeed = async (): Promise<void> => {
       try {
-        const res = await api.listNotifications();
+        const res = await api.listNotifications(30, 0, uiMode);
         if (cancelled || res.status !== 200) return;
         const data = res.data as { notifications?: FeedItem[]; unreadCount?: number };
         setFeed(data.notifications ?? []);
@@ -255,16 +292,20 @@ export default function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [authState, bellOpen]);
+  }, [authState, bellOpen, uiMode]);
 
   // Roadmap Phase 4: live transfer snapshot for the topbar icon and the dock —
-  // durable rows only, polled modestly.
+  // durable rows only, polled modestly. Mode = complete context: the dock
+  // shows the active tier's transfers only.
   useEffect(() => {
-    if (authState !== 'ready') return;
+    if (authState !== 'ready' || !uiMode) return;
     let cancelled = false;
     const loadTransfers = async (): Promise<void> => {
       try {
-        const [uploadsRes, downloadsRes] = await Promise.all([api.listUploads(), api.listDownloads(50)]);
+        const [uploadsRes, downloadsRes] = await Promise.all([
+          api.listUploads(uiMode),
+          api.listDownloads(50, 0, uiMode),
+        ]);
         if (cancelled) return;
         if (uploadsRes.status === 200) {
           const jobs = (uploadsRes.data as { jobs?: Array<{ jobId: string; originalName: string | null; state: string; bytesCompleted: number; sizeBytes: number }> }).jobs ?? [];
@@ -288,21 +329,22 @@ export default function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [authState]);
+  }, [authState, uiMode]);
 
   // Search the CloudNest-managed file index server-side (the same list the
   // Files page shows). No cross-provider content search is implied, and
   // nothing is shown before the server answers.
   useEffect(() => {
     const text = query.trim();
-    if (authState !== 'ready' || text.length < 2) {
+    if (authState !== 'ready' || !uiMode || text.length < 2) {
       setHits([]);
       setSearchOpen(false);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      api.listFiles(8, 0, text)
+      // mode = complete context: search never surfaces the other tier's files
+      api.listFiles(8, 0, text, undefined, uiMode)
         .then((res) => {
           if (cancelled || res.status !== 200) return;
           setHits((res.data as { files?: SearchHit[] }).files ?? []);
@@ -315,7 +357,7 @@ export default function App() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, authState]);
+  }, [query, authState, uiMode]);
 
   function openSearchHit(hit: SearchHit): void {
     setFileSearch((prev) => ({ text: hit.originalName, seq: prev.seq + 1 }));
@@ -452,7 +494,7 @@ export default function App() {
               type="button"
               className={`mode-seg${uiMode === 'personal' ? ' active' : ''}`}
               aria-pressed={uiMode === 'personal'}
-              onClick={() => setUiMode('personal')}
+              onClick={() => void requestModeSwitch('personal')}
             >
               {t.uiMode.personal}
             </button>
@@ -460,7 +502,7 @@ export default function App() {
               type="button"
               className={`mode-seg${uiMode === 'business' ? ' active' : ''}`}
               aria-pressed={uiMode === 'business'}
-              onClick={() => setUiMode('business')}
+              onClick={() => void requestModeSwitch('business')}
             >
               {t.uiMode.business}
             </button>
@@ -772,6 +814,40 @@ export default function App() {
       </Dialog>
     )}
     <ConfirmHost />
+    {/* Mode = complete context: the switch warning — Pause (never cancel) the
+        leaving tier's live uploads; background server work keeps running. */}
+    {modeSwitch && (
+      <Dialog
+        title={t.uiMode.switchConfirmTitle}
+        role="alertdialog"
+        onClose={() => { if (!switchingMode) setModeSwitch(null); }}
+        footer={
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={switchingMode}
+              onClick={() => setModeSwitch(null)}
+            >
+              {t.uiMode.switchStay}
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={switchingMode}
+              onClick={() => void confirmModeSwitch()}
+            >
+              {t.uiMode.switchPauseAndSwitch}
+            </button>
+          </>
+        }
+      >
+        <div className="upload-form">
+          <p><strong>{plural(locale, t.uiMode.activeUploads, modeSwitch.count)}</strong></p>
+          <p>{t.uiMode.switchConfirmBody}</p>
+        </div>
+      </Dialog>
+    )}
     {/* Roadmap Phase 4 (§4.2): the transfer dock follows every page. */}
     <TransferDock
       uploads={dockUploads}

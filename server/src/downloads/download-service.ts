@@ -114,7 +114,7 @@ export class DownloadService {
 
   getFile(fileId: string) {
     return this.q.getFile.get(fileId) as
-      | { id: string; user_id: string; original_name: string; size_bytes: number; mime_type: string | null; chunk_size_bytes: number; chunk_count: number; manifest_hash: string | null; state: string }
+      | { id: string; user_id: string; original_name: string; size_bytes: number; mime_type: string | null; chunk_size_bytes: number; chunk_count: number; manifest_hash: string | null; state: string; tier: string }
       | undefined;
   }
 
@@ -572,14 +572,14 @@ export class DownloadService {
     return job;
   }
 
-  listDownloadJobs(limit: number, offset: number, userId: string | null = null): DownloadJobRow[] {
-    if (userId === null) return this.q.listDownloadJobs.all(limit, offset) as unknown as DownloadJobRow[];
-    return this.q.listDownloadJobsForUser.all(userId, limit, offset) as unknown as DownloadJobRow[];
+  listDownloadJobs(limit: number, offset: number, userId: string | null = null, tier: string | null = null): DownloadJobRow[] {
+    if (userId === null) return this.q.listDownloadJobs.all(tier, tier, limit, offset) as unknown as DownloadJobRow[];
+    return this.q.listDownloadJobsForUser.all(userId, tier, tier, limit, offset) as unknown as DownloadJobRow[];
   }
 
-  countDownloadJobs(userId: string | null = null): number {
-    if (userId === null) return (this.q.countDownloadJobs.get() as { n: number }).n;
-    return (this.q.countDownloadJobsForUser.get(userId) as { n: number }).n;
+  countDownloadJobs(userId: string | null = null, tier: string | null = null): number {
+    if (userId === null) return (this.q.countDownloadJobs.get(tier, tier) as { n: number }).n;
+    return (this.q.countDownloadJobsForUser.get(userId, tier, tier) as { n: number }).n;
   }
 
   /**

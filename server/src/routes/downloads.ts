@@ -178,7 +178,12 @@ export function downloadsRouter(deps: {
     try {
       const file = deps.downloads.getFile(String(req.params['fileId']));
       assertFileAccess(file, req.principal!);
-      if (!file) {
+      // mode = complete context: a file of the other tier answers the SAME 404
+      // as a missing one — no existence leak across the mode boundary
+      const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+        ? (req.query['tier'] as string)
+        : null;
+      if (!file || (tier !== null && file.tier !== tier)) {
         res.status(404).json({ error: 'file_not_found', code: 'file_not_found' });
         return;
       }
@@ -224,7 +229,10 @@ export function downloadsRouter(deps: {
     const owner = principal.role === 'admin' ? null : principal.id;
     const offset = Math.max(0, Number(req.query['offset'] ?? 0) || 0);
     const limit = Math.min(100, Math.max(1, Number(req.query['limit'] ?? 50) || 50));
-    const jobs = deps.downloads.listDownloadJobs(limit, offset, owner).map((job) => ({
+    const tier = req.query['tier'] === 'personal' || req.query['tier'] === 'business'
+      ? (req.query['tier'] as string)
+      : null;
+    const jobs = deps.downloads.listDownloadJobs(limit, offset, owner, tier).map((job) => ({
       jobId: job.id,
       fileId: job.file_id,
       state: job.state,
@@ -238,7 +246,7 @@ export function downloadsRouter(deps: {
       createdAt: job.created_at,
       updatedAt: job.updated_at,
     }));
-    res.json({ downloads: jobs, total: deps.downloads.countDownloadJobs(owner) });
+    res.json({ downloads: jobs, total: deps.downloads.countDownloadJobs(owner, tier) });
   });
 
   router.get('/api/downloads/:jobId', principalOnly, (req, res) => {

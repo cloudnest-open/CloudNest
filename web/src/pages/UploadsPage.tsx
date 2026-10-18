@@ -164,7 +164,8 @@ export function UploadsPage() {
   const loadSummary = useCallback(async () => {
     // FE-04: an unreachable server is reported, not hidden behind stale zeros
     try {
-      const [summary, list] = await Promise.all([api.dashboardSummary(), api.listUploads()]);
+      // mode = complete context: this page's list and stats follow its tier
+      const [summary, list] = await Promise.all([api.dashboardSummary(tier), api.listUploads(tier)]);
       if (summary.status === 200) setDashboard(summary.data as DashboardSummary);
       if (list.status === 200) {
         const data = list.data as { jobs: JobView[]; workerLimit?: number; spaceAwareRouting?: boolean };
@@ -183,7 +184,7 @@ export function UploadsPage() {
       setError(t.common.errorNetwork);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
-  }, []);
+  }, [tier]);
 
   useEffect(() => {
     void loadSummary();
@@ -308,7 +309,7 @@ export function UploadsPage() {
         setError(t.uploads.jobGone);
         return;
       }
-      const fileRes = await api.fileDetails(job.fileId);
+      const fileRes = await api.fileDetails(job.fileId, tier);
       if (fileRes.status !== 200) {
         setError(t.uploads.manifestFailed);
         return;
@@ -632,7 +633,7 @@ export function UploadsPage() {
         parent = cached;
         continue;
       }
-      const res = await api.createFolder(segment, parent);
+      const res = await api.createFolder(segment, parent, tier);
       if (res.status !== 201) {
         const code = ((res.data ?? {}) as { code?: string }).code ?? 'unknown';
         throw new Error(code);

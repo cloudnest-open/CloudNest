@@ -121,9 +121,9 @@ test('insufficient capacity stops the plan and reserves nothing', () => {
       () => service.plan({ originalName: 'big.bin', sizeBytes: 50 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY }),
       (err: unknown) => err instanceof UploadError && err.safeCode === 'capacity_insufficient',
     );
-    const jobs = q.listJobs.all(50) as unknown[];
+    const jobs = q.listJobs.all(null, null, 50) as unknown[];
     assert.equal(jobs.length, 0, 'no job was created');
-    const files = q.listFiles.all(50, 0) as unknown[];
+    const files = q.listFiles.all(null, null, 50, 0) as unknown[];
     assert.equal(files.length, 0, 'no file was created');
     const account = db.prepare('SELECT reserved_inflight_bytes FROM provider_accounts WHERE id = ?')
       .get('acc-a') as { reserved_inflight_bytes: number };

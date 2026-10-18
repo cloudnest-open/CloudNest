@@ -56,6 +56,12 @@ export const appZhCn: AppStrings = {
     switchAria: '界面模式',
     personalActive: '个人模式',
     businessActive: '商业模式',
+    activeUploads: { other: '{count} 个上传正在进行或排队中' },
+    switchConfirmTitle: '切换存储模式？',
+    switchConfirmBody: '切换后这些上传将暂停（不会取消）。返回后可恢复。后台服务器任务（镜像、清理、配额刷新）继续运行。',
+    switchPauseAndSwitch: '暂停并切换',
+    switchStay: '留在这里',
+    uploadsPaused: { other: '已暂停 {count} 个上传' },
   },
 
   shell: {
@@ -129,8 +135,6 @@ export const appZhCn: AppStrings = {
   },
 
   dashboard: {
-    modeFilterAria: '按存储层级筛选仪表盘',
-    modeAll: '全部',
     title: '仪表板',
     subtitle: '跨多个提供商管理你的文件、云盘账户和存储。',
     errorLoad: '无法加载仪表板。服务器没有返回真实数据。',

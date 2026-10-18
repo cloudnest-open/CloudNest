@@ -80,10 +80,17 @@ export function makeUploadQueries(db: Database.Database) {
     ),
     getJob: db.prepare('SELECT * FROM transfer_jobs WHERE id = ?'),
     getJobByIdempotencyKey: db.prepare('SELECT * FROM transfer_jobs WHERE idempotency_key = ?'),
-    listJobs: db.prepare('SELECT * FROM transfer_jobs WHERE job_type = \'upload\' ORDER BY created_at DESC LIMIT ?'),
+    // Tier param (mode = complete context): NULL lists every tier (the legacy
+    // behaviour), otherwise only jobs whose file matches that tier.
+    listJobs: db.prepare(
+      `SELECT j.* FROM transfer_jobs j LEFT JOIN files f ON f.id = j.file_id
+       WHERE j.job_type = 'upload' AND (? IS NULL OR f.tier = ?)
+       ORDER BY j.created_at DESC LIMIT ?`,
+    ),
     listJobsForUser: db.prepare(
       `SELECT j.* FROM transfer_jobs j JOIN files f ON f.id = j.file_id
-       WHERE j.job_type = 'upload' AND f.user_id = ? ORDER BY j.created_at DESC LIMIT ?`,
+       WHERE j.job_type = 'upload' AND f.user_id = ? AND (? IS NULL OR f.tier = ?)
+       ORDER BY j.created_at DESC LIMIT ?`,
     ),
     updateJobState: db.prepare(
       'UPDATE transfer_jobs SET state = @state, last_safe_error_code = @last_safe_error_code, updated_at = @updated_at WHERE id = @id',
@@ -104,45 +111,51 @@ export function makeUploadQueries(db: Database.Database) {
     getFile: db.prepare('SELECT * FROM files WHERE id = ?'),
     // Phase 4: the main lists and the dashboard counts never show trashed
     // files — those live behind /api/trash until they are restored or purged.
-    listFiles: db.prepare("SELECT * FROM files WHERE trashed_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?"),
+    listFiles: db.prepare(
+      "SELECT * FROM files WHERE trashed_at IS NULL AND (? IS NULL OR tier = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    ),
     // FE-02: the search filter runs in SQL BEFORE pagination, so a query sees
     // the whole library instead of only the newest page of rows.
     searchFiles: db.prepare(
-      "SELECT * FROM files WHERE trashed_at IS NULL AND lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+      "SELECT * FROM files WHERE trashed_at IS NULL AND (? IS NULL OR tier = ?) AND lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
     ),
     countSearchedFiles: db.prepare(
-      "SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL AND lower(original_name) LIKE '%' || ? || '%'",
+      "SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL AND (? IS NULL OR tier = ?) AND lower(original_name) LIKE '%' || ? || '%'",
     ),
-    countFiles: db.prepare("SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL"),
+    countFiles: db.prepare("SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL AND (? IS NULL OR tier = ?)"),
     // Phase 3: member-scoped variants of the same listing queries — ownership
     // filtering happens in SQL, never in the client.
     listFilesForUser: db.prepare(
-      'SELECT * FROM files WHERE user_id = ? AND trashed_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      'SELECT * FROM files WHERE user_id = ? AND trashed_at IS NULL AND (? IS NULL OR tier = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?',
     ),
     searchFilesForUser: db.prepare(
-      "SELECT * FROM files WHERE user_id = ? AND trashed_at IS NULL AND lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
+      "SELECT * FROM files WHERE user_id = ? AND trashed_at IS NULL AND (? IS NULL OR tier = ?) AND lower(original_name) LIKE '%' || ? || '%' ORDER BY created_at DESC LIMIT ? OFFSET ?",
     ),
     countSearchedFilesForUser: db.prepare(
-      "SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND trashed_at IS NULL AND lower(original_name) LIKE '%' || ? || '%'",
+      "SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND trashed_at IS NULL AND (? IS NULL OR tier = ?) AND lower(original_name) LIKE '%' || ? || '%'",
     ),
-    countFilesForUser: db.prepare("SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND trashed_at IS NULL"),
+    countFilesForUser: db.prepare(
+      "SELECT COUNT(*) AS n FROM files WHERE user_id = ? AND trashed_at IS NULL AND (? IS NULL OR tier = ?)",
+    ),
     // Phase 4: folder-scoped listings (root = parent_id IS NULL); the same
     // ownership and trash rules as the flat lists apply.
     listFilesInRoot: db.prepare(
       `SELECT * FROM files WHERE trashed_at IS NULL AND parent_id IS NULL
-         AND (? IS NULL OR user_id = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+         AND (? IS NULL OR user_id = ?) AND (? IS NULL OR tier = ?)
+         ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     ),
     listFilesInFolder: db.prepare(
       `SELECT * FROM files WHERE trashed_at IS NULL AND parent_id = ?
-         AND (? IS NULL OR user_id = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+         AND (? IS NULL OR user_id = ?) AND (? IS NULL OR tier = ?)
+         ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     ),
     countFilesInRoot: db.prepare(
       `SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL AND parent_id IS NULL
-         AND (? IS NULL OR user_id = ?)`,
+         AND (? IS NULL OR user_id = ?) AND (? IS NULL OR tier = ?)`,
     ),
     countFilesInFolder: db.prepare(
       `SELECT COUNT(*) AS n FROM files WHERE trashed_at IS NULL AND parent_id = ?
-         AND (? IS NULL OR user_id = ?)`,
+         AND (? IS NULL OR user_id = ?) AND (? IS NULL OR tier = ?)`,
     ),
     /** Ownership check for a transfer job: the file's owner, via one join. */
     getJobOwnerUserId: db.prepare(

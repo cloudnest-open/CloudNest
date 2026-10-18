@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
 import { Badge, RowMenu, RowMenuItem, formatBytes, formatDateTime, pageList, SkeletonRows } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
+import { useUiMode } from '../ui-mode-context.js';
 
 /**
  * Shared Links (Step 5 / M11.e).
@@ -35,6 +36,10 @@ const FILE_PAGE_SIZE = 10;
 
 export function SharedLinksPage() {
   const { t, tf, plural } = useI18n();
+  // mode = complete context: links and the shareable file picker follow the
+  // active tier (a link shows where it carries at least one tier-matching file)
+  const { uiMode } = useUiMode();
+  const tier = uiMode ?? 'personal';
   const [links, setLinks] = useState<LinkView[]>([]);
   const [linksLoading, setLinksLoading] = useState(true);
   const [linksError, setLinksError] = useState<string | null>(null);
@@ -64,7 +69,7 @@ export function SharedLinksPage() {
     setLinksLoading(true);
     setLinksError(null);
     try {
-      const res = await api.listShareLinks();
+      const res = await api.listShareLinks(tier);
       if (res.status === 200) {
         setLinks((res.data as { links: LinkView[] }).links ?? []);
       } else {
@@ -76,7 +81,7 @@ export function SharedLinksPage() {
       setLinksLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- user-triggered reloads need not refetch on locale changes
-  }, []);
+  }, [tier]);
 
   const loadFiles = useCallback(async () => {
     setFilesLoading(true);
@@ -84,7 +89,7 @@ export function SharedLinksPage() {
     setFiles([]);
     setFilesTotal(0);
     try {
-      const res = await api.listFiles(FILE_PAGE_SIZE, filePage * FILE_PAGE_SIZE, appliedFileSearch);
+      const res = await api.listFiles(FILE_PAGE_SIZE, filePage * FILE_PAGE_SIZE, appliedFileSearch, undefined, tier);
       if (res.status === 200) {
         const data = res.data as { files: FileView[]; total: number };
         setFiles(data.files ?? []);
@@ -98,7 +103,7 @@ export function SharedLinksPage() {
       setFilesLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads follow page/search changes
-  }, [filePage, appliedFileSearch]);
+  }, [filePage, appliedFileSearch, tier]);
 
   useEffect(() => {
     void loadLinks();

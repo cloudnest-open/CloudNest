@@ -56,6 +56,12 @@ export const appEs: AppStrings = {
     switchAria: 'Modo de interfaz',
     personalActive: 'Modo personal',
     businessActive: 'Modo de negocios',
+    activeUploads: { one: '{count} subida en curso o en cola', other: '{count} subidas en curso o en cola' },
+    switchConfirmTitle: '¿Cambiar el modo de almacenamiento?',
+    switchConfirmBody: 'Al cambiar, estas subidas se pausan: no se cancela nada. Podrás reanudarlas al volver. El trabajo del servidor en segundo plano (espejo, limpieza, actualización de cuotas) sigue funcionando.',
+    switchPauseAndSwitch: 'Pausar y cambiar',
+    switchStay: 'Quedarme',
+    uploadsPaused: { one: '{count} subida pausada', other: '{count} subidas pausadas' },
   },
 
   shell: {
@@ -129,8 +135,6 @@ export const appEs: AppStrings = {
   },
 
   dashboard: {
-    modeFilterAria: 'Filtrar el panel por nivel de almacenamiento',
-    modeAll: 'Todos',
     title: 'Panel',
     subtitle: 'Gestiona tus archivos, cuentas en la nube y almacenamiento entre varios proveedores.',
     errorLoad: 'No se pudo cargar el panel. El servidor no respondió con datos reales.',

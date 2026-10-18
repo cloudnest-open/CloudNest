@@ -71,6 +71,13 @@ export const appEn = {
     switchAria: 'UI mode',
     personalActive: 'Personal mode',
     businessActive: 'Business mode',
+    // mode = complete context: the switch warning (Pause, never cancel)
+    activeUploads: pl({ one: '{count} upload is running or queued', other: '{count} uploads are running or queued' }),
+    switchConfirmTitle: 'Switch storage mode?',
+    switchConfirmBody: 'Switching pauses these uploads — nothing is cancelled. Resume them when you come back. Background server work (mirror, cleanup, quota refresh) keeps running.',
+    switchPauseAndSwitch: 'Pause & switch',
+    switchStay: 'Stay',
+    uploadsPaused: pl({ one: '{count} upload paused', other: '{count} uploads paused' }),
   },
 
   shell: {
@@ -145,8 +152,6 @@ export const appEn = {
   },
 
   dashboard: {
-    modeFilterAria: 'Filter the dashboard by storage tier',
-    modeAll: 'All',
     title: 'Dashboard',
     subtitle: 'Manage your files, cloud accounts and storage across multiple providers.',
     errorLoad: 'Could not load the dashboard. The server did not answer with real data.',

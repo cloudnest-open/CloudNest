@@ -75,20 +75,21 @@ export class TrashService {
     return this.enqueueDeletion(fileId);
   }
 
-  list(ownerUserId: string | null, limit: number, offset: number): TrashedFileRow[] {
+  list(ownerUserId: string | null, limit: number, offset: number, tier: string | null = null): TrashedFileRow[] {
     return this.db.prepare(
       `SELECT id, user_id, original_name, size_bytes, state, trashed_at FROM files
        WHERE trashed_at IS NOT NULL AND state <> 'deleted'
-         AND (? IS NULL OR user_id = ?)
+         AND (? IS NULL OR user_id = ?) AND (? IS NULL OR tier = ?)
        ORDER BY trashed_at DESC LIMIT ? OFFSET ?`,
-    ).all(ownerUserId, ownerUserId, limit, offset) as TrashedFileRow[];
+    ).all(ownerUserId, ownerUserId, tier, tier, limit, offset) as TrashedFileRow[];
   }
 
-  count(ownerUserId: string | null): number {
+  count(ownerUserId: string | null, tier: string | null = null): number {
     return (this.db.prepare(
       `SELECT COUNT(*) AS n FROM files
-       WHERE trashed_at IS NOT NULL AND state <> 'deleted' AND (? IS NULL OR user_id = ?)`,
-    ).get(ownerUserId, ownerUserId) as { n: number }).n;
+       WHERE trashed_at IS NOT NULL AND state <> 'deleted'
+         AND (? IS NULL OR user_id = ?) AND (? IS NULL OR tier = ?)`,
+    ).get(ownerUserId, ownerUserId, tier, tier) as { n: number }).n;
   }
 
   /** Empty the caller's trash: every trashed file goes to the deletion engine. */

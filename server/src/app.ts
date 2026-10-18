@@ -213,9 +213,9 @@ export function createApp(options: {
   // emit into it; null user means "every active admin" (account events).
   const notifications = new NotificationService(options.db);
   app.set('notifications', notifications);
-  const uploads = new UploadService(options.db, credentialsStore, (kind: NotificationKind, userId: string | null, payload: Record<string, unknown>) => {
-    if (userId === null) notifications.pushToAdmins(kind, payload);
-    else notifications.push(userId, kind, payload);
+  const uploads = new UploadService(options.db, credentialsStore, (kind: NotificationKind, userId: string | null, payload: Record<string, unknown>, tier?: string | null) => {
+    if (userId === null) notifications.pushToAdmins(kind, payload, tier);
+    else notifications.push(userId, kind, payload, tier);
   });
   app.use(rawChunkRouter({ queries, csrf, uploads, store: credentialsStore, settings }));
   app.set('uploads', uploads);
@@ -276,9 +276,9 @@ export function createApp(options: {
   //     never inherit the admin gate; they authorize by token + one-time session.
   //     SH-1: the gate-aware router is mounted first so unlock issues grants and
   //     download-session issuance on gated links requires a live grant.
-  const shares = new ShareService(options.db, (kind: NotificationKind, userId: string | null, payload: Record<string, unknown>) => {
-    if (userId === null) notifications.pushToAdmins(kind, payload);
-    else notifications.push(userId, kind, payload);
+  const shares = new ShareService(options.db, (kind: NotificationKind, userId: string | null, payload: Record<string, unknown>, tier?: string | null) => {
+    if (userId === null) notifications.pushToAdmins(kind, payload, tier);
+    else notifications.push(userId, kind, payload, tier);
   });
   const deletions = new DeletionService(options.db, credentialsStore, shares);
   // Roadmap Phase 4: DELETE moves to trash; only a purge hands the file to the

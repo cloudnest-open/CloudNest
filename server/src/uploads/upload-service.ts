@@ -182,7 +182,7 @@ export class UploadService {
   constructor(
     private readonly db: Database.Database,
     private readonly store: CredentialsStore,
-    private readonly notify?: (kind: 'upload_completed' | 'share_used' | 'quota_stale', userId: string | null, payload: Record<string, unknown>) => void,
+    private readonly notify?: (kind: 'upload_completed' | 'share_used' | 'quota_stale', userId: string | null, payload: Record<string, unknown>, tier?: string | null) => void,
   ) {
     this.q = makeUploadQueries(db);
     this.providerQ = makeProviderQueries(db);
@@ -298,6 +298,16 @@ export class UploadService {
    * Idempotent on the client key: a retried request returns the same job.
    */
   plan(req: PlanRequest): PlanResult {
+    // mode = complete context: a tier-mismatched folder is a request-shape
+    // error and must answer 400 BEFORE any capacity/plan state is consulted
+    if (req.parentId != null && req.parentId !== '') {
+      const folder = this.db.prepare('SELECT user_id, tier FROM folders WHERE id = ?')
+        .get(req.parentId) as { user_id: string; tier: string } | undefined;
+      if (!folder || folder.user_id !== (req.userId ?? ADMIN_USER_ID)) {
+        throw new UploadError('folder_not_found', 404);
+      }
+      if (folder.tier !== (req.tier ?? 'personal')) throw new UploadError('folder_tier_mismatch', 400);
+    }
     let name: string;
     let plan;
     try {
@@ -388,13 +398,16 @@ export class UploadService {
     const fileId = this.q.newId();
     const jobId = this.q.newId();
     // Roadmap Phase 4: the target folder must belong to the SAME principal —
-    // an upload may only land in the caller's own tree.
+    // an upload may only land in the caller's own tree. Mode = complete
+    // context: the folder's tier must also match the planned tier, or a
+    // business upload could land inside the personal tree by folder.
     let parentId: string | null = null;
     if (req.parentId != null && req.parentId !== '') {
-      const folder = this.db.prepare('SELECT user_id FROM folders WHERE id = ?')
-        .get(req.parentId) as { user_id: string } | undefined;
+      const folder = this.db.prepare('SELECT user_id, tier FROM folders WHERE id = ?')
+        .get(req.parentId) as { user_id: string; tier: string } | undefined;
       if (!folder) throw new UploadError('folder_not_found', 404);
       if (folder.user_id !== ownerUserId) throw new UploadError('folder_not_found', 404);
+      if (folder.tier !== (req.tier ?? 'personal')) throw new UploadError('folder_tier_mismatch', 400);
       parentId = req.parentId;
     }
     const txn = this.db.transaction(() => {
@@ -479,11 +492,12 @@ export class UploadService {
     // the empty-file path honours the same folder contract as the chunked one
     let parentId: string | null = null;
     if (req.parentId != null && req.parentId !== '') {
-      const folder = this.db.prepare('SELECT user_id FROM folders WHERE id = ?')
-        .get(req.parentId) as { user_id: string } | undefined;
+      const folder = this.db.prepare('SELECT user_id, tier FROM folders WHERE id = ?')
+        .get(req.parentId) as { user_id: string; tier: string } | undefined;
       if (!folder || folder.user_id !== (req.userId ?? ADMIN_USER_ID)) {
         throw new UploadError('folder_not_found', 404);
       }
+      if (folder.tier !== (req.tier ?? 'personal')) throw new UploadError('folder_tier_mismatch', 400);
       parentId = req.parentId;
     }
     const txn = this.db.transaction(() => {
@@ -522,15 +536,17 @@ export class UploadService {
     return this.q.getFile.get(fileId) as FileRow | undefined;
   }
 
-  /** `userId: string | null` — null lists everything (the admin view). */
-  listJobs(limit = 50, userId: string | null = null): JobRow[] {
-    if (userId === null) return this.q.listJobs.all(limit) as unknown as JobRow[];
-    return this.q.listJobsForUser.all(userId, limit) as unknown as JobRow[];
+  /** `userId: string | null` — null lists everything (the admin view).
+   * `tier: string | null` — null lists every tier; otherwise only that tier's
+   * rows (the approved mode = complete context design). */
+  listJobs(limit = 50, userId: string | null = null, tier: string | null = null): JobRow[] {
+    if (userId === null) return this.q.listJobs.all(tier, tier, limit) as unknown as JobRow[];
+    return this.q.listJobsForUser.all(userId, tier, tier, limit) as unknown as JobRow[];
   }
 
-  listFiles(limit: number, offset: number, userId: string | null = null): FileRow[] {
-    if (userId === null) return this.q.listFiles.all(limit, offset) as unknown as FileRow[];
-    return this.q.listFilesForUser.all(userId, limit, offset) as unknown as FileRow[];
+  listFiles(limit: number, offset: number, userId: string | null = null, tier: string | null = null): FileRow[] {
+    if (userId === null) return this.q.listFiles.all(tier, tier, limit, offset) as unknown as FileRow[];
+    return this.q.listFilesForUser.all(userId, tier, tier, limit, offset) as unknown as FileRow[];
   }
 
   /**
@@ -538,29 +554,29 @@ export class UploadService {
    * degenerates to the plain paginated listing. A member's "whole library" is
    * their own files only; the admin sees everything.
    */
-  searchFiles(search: string, limit: number, offset: number, userId: string | null = null): FileRow[] {
+  searchFiles(search: string, limit: number, offset: number, userId: string | null = null, tier: string | null = null): FileRow[] {
     const term = search.trim().toLowerCase();
     if (userId !== null) {
-      if (term === '') return this.listFiles(limit, offset, userId);
-      return this.q.searchFilesForUser.all(userId, term, limit, offset) as unknown as FileRow[];
+      if (term === '') return this.listFiles(limit, offset, userId, tier);
+      return this.q.searchFilesForUser.all(userId, tier, tier, term, limit, offset) as unknown as FileRow[];
     }
-    if (term === '') return this.listFiles(limit, offset);
-    return this.q.searchFiles.all(term, limit, offset) as unknown as FileRow[];
+    if (term === '') return this.listFiles(limit, offset, null, tier);
+    return this.q.searchFiles.all(tier, tier, term, limit, offset) as unknown as FileRow[];
   }
 
-  countSearchedFiles(search: string, userId: string | null = null): number {
+  countSearchedFiles(search: string, userId: string | null = null, tier: string | null = null): number {
     const term = search.trim().toLowerCase();
     if (userId !== null) {
-      if (term === '') return this.countFiles(userId);
-      return (this.q.countSearchedFilesForUser.get(userId, term) as { n: number }).n;
+      if (term === '') return this.countFiles(userId, tier);
+      return (this.q.countSearchedFilesForUser.get(userId, tier, tier, term) as { n: number }).n;
     }
-    if (term === '') return this.countFiles();
-    return (this.q.countSearchedFiles.get(term) as { n: number }).n;
+    if (term === '') return this.countFiles(null, tier);
+    return (this.q.countSearchedFiles.get(tier, tier, term) as { n: number }).n;
   }
 
-  countFiles(userId: string | null = null): number {
-    if (userId === null) return (this.q.countFiles.get() as { n: number }).n;
-    return (this.q.countFilesForUser.get(userId) as { n: number }).n;
+  countFiles(userId: string | null = null, tier: string | null = null): number {
+    if (userId === null) return (this.q.countFiles.get(tier, tier) as { n: number }).n;
+    return (this.q.countFilesForUser.get(userId, tier, tier) as { n: number }).n;
   }
 
   /**
@@ -568,14 +584,14 @@ export class UploadService {
    * same ownership scope as the flat lists: a member sees only their own
    * folder's files, the admin sees the whole tree.
    */
-  listFilesInFolder(folderId: string | null, limit: number, offset: number, userId: string | null = null): FileRow[] {
-    if (folderId === null) return this.q.listFilesInRoot.all(userId, userId, limit, offset) as unknown as FileRow[];
-    return this.q.listFilesInFolder.all(folderId, userId, userId, limit, offset) as unknown as FileRow[];
+  listFilesInFolder(folderId: string | null, limit: number, offset: number, userId: string | null = null, tier: string | null = null): FileRow[] {
+    if (folderId === null) return this.q.listFilesInRoot.all(userId, userId, tier, tier, limit, offset) as unknown as FileRow[];
+    return this.q.listFilesInFolder.all(folderId, userId, userId, tier, tier, limit, offset) as unknown as FileRow[];
   }
 
-  countFilesInFolder(folderId: string | null, userId: string | null = null): number {
-    if (folderId === null) return (this.q.countFilesInRoot.get(userId, userId) as { n: number }).n;
-    return (this.q.countFilesInFolder.get(folderId, userId, userId) as { n: number }).n;
+  countFilesInFolder(folderId: string | null, userId: string | null = null, tier: string | null = null): number {
+    if (folderId === null) return (this.q.countFilesInRoot.get(userId, userId, tier, tier) as { n: number }).n;
+    return (this.q.countFilesInFolder.get(folderId, userId, userId, tier, tier) as { n: number }).n;
   }
 
   listAllocations(jobId: string): AllocationRow[] {
@@ -789,7 +805,7 @@ export class UploadService {
       this.q.updateJobState.run({ id: input.jobId, state: 'completed', last_safe_error_code: null, updated_at: now });
       // Roadmap Phase 4: the bell's feed is real — the owner learns their
       // upload finished at the moment the durable state says so.
-      this.notify?.('upload_completed', file.user_id, { fileName: file.original_name, fileId: file.id });
+      this.notify?.('upload_completed', file.user_id, { fileName: file.original_name, fileId: file.id }, file.tier);
     }
     return { chunksCompleted, bytesCompleted, fileCompleted };
   }
@@ -875,14 +891,14 @@ export class UploadService {
     // Roadmap Phase 4: quota events belong in the feed, not only in the table.
     // Every active admin is notified — accounts are admin knowledge (Phase 3).
     const account = this.providerQ.getAccount.get(accountId) as
-      | { display_label: string; account_identifier: string | null } | undefined;
+      | { display_label: string; account_identifier: string | null; tier: string } | undefined;
     if (account && this.notify) {
       // null user = every active admin (the wiring decides how that maps)
       this.notify('quota_stale', null, {
         accountLabel: account.display_label,
         accountIdentifier: account.account_identifier,
         reasonCode: safeCode,
-      });
+      }, account.tier);
     }
   }
 
@@ -968,9 +984,43 @@ export class UploadService {
     });
   }
 
+  /**
+   * Mode = complete context: switching the UI mode pauses (never cancels) the
+   * leaving tier's live uploads. One transactional bulk pause — the durable
+   * 'paused' state means dispatch stops immediately, already-claimed chunks
+   * may finish, resume() re-computes missing chunks, and background server
+   * work (mirror/cleanup/quota refresh) is untouched. Mirrors pause()'s own
+   * state rule: only queued/running jobs are eligible.
+   */
+  pauseAllActive(tier: string, userId: string | null): number {
+    const now = new Date().toISOString();
+    const ownerGuard = userId === null ? '' : 'AND f.user_id = ?';
+    const txn = this.db.transaction(() => {
+      const info = this.db.prepare(
+        `UPDATE transfer_jobs SET state = 'paused',
+           last_safe_error_code = 'paused_by_mode_switch', updated_at = ?
+         WHERE job_type = 'upload' AND state IN ('queued','running')
+           AND id IN (SELECT j.id FROM transfer_jobs j JOIN files f ON f.id = j.file_id
+                      WHERE f.tier = ? ${ownerGuard})`,
+      ).run(...(userId === null ? [now, tier] : [now, tier, userId]));
+      return info.changes;
+    });
+    return txn();
+  }
+
+  /** Honest count of live (queued/running) uploads for one tier + owner —
+   * what the switch-warning modal shows before pausing anything. */
+  countActiveUploadJobs(tier: string, userId: string | null): number {
+    const ownerGuard = userId === null ? '' : 'AND f.user_id = ?';
+    const row = this.db.prepare(
+      `SELECT COUNT(*) AS n FROM transfer_jobs j JOIN files f ON f.id = j.file_id
+       WHERE j.job_type = 'upload' AND j.state IN ('queued','running') AND f.tier = ? ${ownerGuard}`,
+    ).get(...(userId === null ? [tier] : [tier, userId])) as { n: number };
+    return row.n;
+  }
+
   /** Resume: continue only the chunks that are still missing. */
-  resume(jobId: string): { missingChunks: number[] } {
-    const job = this.q.getJob.get(jobId) as JobRow | undefined;
+  resume(jobId: string): { missingChunks: number[] } {    const job = this.q.getJob.get(jobId) as JobRow | undefined;
     if (!job?.file_id) throw new UploadError('job_not_found', 404);
     // UL-1: both terminal states refuse; retry on a completed job would flip
     // it to running with zero missing chunks, cancel on a cancelled job would
@@ -1421,8 +1471,11 @@ export class UploadService {
    * `userId` scopes the file/job counts and the recent list to one account's
    * own data (Phase 3); when set, `userUsage` carries that account's honest
    * used-vs-allowance numbers. Pool-level fields are unchanged — the ROUTE
-   * omits them for members, because provider accounts are admin knowledge. */
-  dashboardSummary(userId: string | null = null): {
+   * omits them for members, because provider accounts are admin knowledge.
+   * `tier` (mode = complete context) scopes every section — accounts, storage
+   * math, file/job/share counts — to one storage tier; null keeps the legacy
+   * whole-pool view. */
+  dashboardSummary(userId: string | null = null, tier: string | null = null): {
     accounts: Array<{ id: string; provider: string; displayLabel: string; status: string; quotaStatus: string; tier: string }>;
     activeJobs: number;
     recentFiles: number;
@@ -1443,12 +1496,12 @@ export class UploadService {
     recentFileList: Array<ReturnType<UploadService['publicFile']>>;
     userUsage: { usedBytes: number; allowanceBytes: number | null } | null;
   } {
-    const rows = this.providerQ.listAccounts.all() as Array<{
+    const rows = (this.providerQ.listAccounts.all() as Array<{
       id: string; provider: string; display_label: string; status: string; quota_status: string; tier: string;
       quota_total_bytes: number | null; used_bytes: number | null;
       quota_unlimited: 0 | 1; quota_scope: string | null; reserve_bytes: number;
       last_quota_check_at: string | null;
-    }>;
+    }>).filter((a) => tier === null || a.tier === tier);
     const activeAllocations = this.q.listAllActiveAllocations.all() as Array<{
       provider_account_id: string; size_bytes: number; state: string;
     }>;
@@ -1528,31 +1581,37 @@ export class UploadService {
       id: a.id, provider: a.provider, displayLabel: a.display_label,
       status: a.status, quotaStatus: a.quota_status, tier: a.tier,
     }));
-    const jobs = this.listJobs(200, userId);
+    const jobs = this.listJobs(200, userId, tier);
     // honest active-job count: the 200-row listing page above must not bound
     // this number, so it is its own COUNT (same upload-job scope as the list)
     const activeJobs = userId === null
       ? (this.db.prepare(
-          "SELECT COUNT(*) AS n FROM transfer_jobs WHERE job_type = 'upload' AND state IN ('running','queued','paused')",
-        ).get() as { n: number }).n
+          `SELECT COUNT(*) AS n FROM transfer_jobs j LEFT JOIN files f ON f.id = j.file_id
+           WHERE j.job_type = 'upload' AND j.state IN ('running','queued','paused') AND (? IS NULL OR f.tier = ?)`,
+        ).get(tier, tier) as { n: number }).n
       : (this.db.prepare(
           `SELECT COUNT(*) AS n FROM transfer_jobs j JOIN files f ON f.id = j.file_id
-           WHERE f.user_id = ? AND j.job_type = 'upload' AND j.state IN ('running','queued','paused')`,
-        ).get(userId) as { n: number }).n;
-    const files = this.listFiles(5, 0, userId);
+           WHERE f.user_id = ? AND j.job_type = 'upload' AND j.state IN ('running','queued','paused') AND (? IS NULL OR f.tier = ?)`,
+        ).get(userId, tier, tier) as { n: number }).n;
+    const files = this.listFiles(5, 0, userId, tier);
+    const shareTierGuard = tier === null
+      ? ''
+      : ' AND EXISTS (SELECT 1 FROM share_link_items i JOIN files fi ON fi.id = i.file_id WHERE i.share_link_id = l.id AND fi.tier = ?)';
     const activeShareLinks = userId === null
-      ? (this.db.prepare("SELECT COUNT(*) AS n FROM share_links WHERE state = 'active'").get() as { n: number }).n
+      ? (this.db.prepare(
+          `SELECT COUNT(*) AS n FROM share_links l WHERE l.state = 'active'${shareTierGuard}`,
+        ).get(...(tier === null ? [] : [tier])) as { n: number }).n
       : (this.db.prepare(
-          "SELECT COUNT(*) AS n FROM share_links l WHERE l.state = 'active' AND l.created_by = ?",
-        ).get(userId) as { n: number }).n;
+          `SELECT COUNT(*) AS n FROM share_links l WHERE l.state = 'active' AND l.created_by = ?${shareTierGuard}`,
+        ).get(...(tier === null ? [userId] : [userId, tier])) as { n: number }).n;
     const userUsage = userId === null ? null : (() => {
       const row = this.db.prepare('SELECT allowance_bytes FROM users WHERE id = ?').get(userId) as
         | { allowance_bytes: number | null }
         | undefined;
       return {
         usedBytes: (this.db.prepare(
-          "SELECT COALESCE(SUM(size_bytes), 0) AS n FROM files WHERE user_id = ? AND state <> 'deleted'",
-        ).get(userId) as { n: number }).n,
+          "SELECT COALESCE(SUM(size_bytes), 0) AS n FROM files WHERE user_id = ? AND state <> 'deleted' AND (? IS NULL OR tier = ?)",
+        ).get(userId, tier, tier) as { n: number }).n,
         allowanceBytes: row?.allowance_bytes ?? null,
       };
     })();
@@ -1560,7 +1619,7 @@ export class UploadService {
       accounts,
       activeJobs,
       recentFiles: files.length,
-      totalFiles: this.countFiles(userId),
+      totalFiles: this.countFiles(userId, tier),
       accountsDetailed,
       storage,
       activeShareLinks,
