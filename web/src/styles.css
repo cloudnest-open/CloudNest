@@ -203,8 +203,8 @@ body {
 /* session-26 F18: the storage-allowance field carries a GB/TB unit selector
    beside the number instead of baking the unit into the label. */
 .allowance-row { display: flex; gap: 8px; }
-.allowance-row input { flex: 1; min-width: 0; }
-.allowance-row select { width: auto; }
+.allowance-row input { flex: 1 1 0; min-width: 0; width: auto; }
+.allowance-row select { flex: 0 0 92px; width: auto; }
 
 .status-dot {
   width: 8px;
