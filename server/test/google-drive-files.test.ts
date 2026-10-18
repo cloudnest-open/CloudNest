@@ -12,6 +12,7 @@ import {
   ROOT_LABEL,
   APP_FOLDER_MIME,
 } from '../src/providers/google-drive-files.js';
+import { googleDriveAdapter } from '../src/providers/google-drive.js';
 import { ProviderError, type ProviderCredentialBundle } from '../src/providers/types.js';
 
 /** Mocked Google Drive HTTP. No real network access, no real credentials. */
@@ -121,6 +122,41 @@ test('ensureAppRoot creates the root lazily when missing', async () => {
   const create = calls.find((c) => c.method === 'POST');
   assert.ok(create);
   assert.ok(create.url.includes('supportsAllDrives=true'));
+});
+
+test('ensureAppRoot converges on the first found root after a concurrent create', async () => {
+  let listCalls = 0;
+  installMock((call) => {
+    if (call.method === 'GET') {
+      listCalls++;
+      // the pre-create search finds nothing; the post-create search finds the
+      // folder (ours or a concurrent winner's) and every racer adopts it
+      return listCalls === 1
+        ? { status: 200, body: { files: [] } }
+        : { status: 200, body: { files: [{ id: 'winner-root', name: ROOT_LABEL }] } };
+    }
+    return { status: 200, body: { id: 'loser-root' } };
+  });
+  const result = await ensureAppRootImpl(bundle, appConfig);
+  assert.equal(result.remoteRootId, 'winner-root', 'the racer adopts the first found root, not its own create');
+  assert.equal(result.created, true);
+});
+
+test('connect reads an unlimited quota as provider-confirmed unlimited', async () => {
+  installMock((call) => {
+    if (call.url.includes('about?')) {
+      return {
+        status: 200,
+        body: { user: { permissionId: 'perm-1', emailAddress: 'a@example.com' }, storageQuota: { usage: '1073741824' } },
+      };
+    }
+    return { status: 500, body: { error: { message: 'unexpected' } } };
+  });
+  const account = await googleDriveAdapter.connectAndReadAccount(bundle, appConfig);
+  assert.equal(account.quota.unlimited, true, 'absent limit + present usage is unlimited, not unknown');
+  assert.equal(account.quota.totalBytes, null);
+  assert.equal(account.quota.usedBytes, 1073741824);
+  assert.equal(account.quota.status, 'current');
 });
 
 test('upload uses a resumable session, streams the body, and returns the remote id', async () => {

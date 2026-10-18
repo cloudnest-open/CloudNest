@@ -63,10 +63,15 @@ export const googleDriveAdapter: ProviderAdapter = {
     if (!permissionId) throw new ProviderError('identity_validation_failed', 502);
     const limitRaw = about.storageQuota?.limit;
     const usageRaw = about.storageQuota?.usageInDrive ?? about.storageQuota?.usage;
+    // connect-time quota follows the same documented rule as getQuota below:
+    // an absent limit alongside a real usage figure is provider-confirmed
+    // unlimited storage — never an unknown one, never an invented total
+    const unlimited = limitRaw === undefined && usageRaw !== undefined;
     const quota: NormalizedQuota = {
       totalBytes: limitRaw !== undefined ? Number(limitRaw) : null,
       usedBytes: usageRaw !== undefined ? Number(usageRaw) : null,
       status: limitRaw !== undefined || usageRaw !== undefined ? 'current' : 'unknown',
+      unlimited,
     };
     if (quota.status === 'unknown') quota.safeErrorCode = 'quota_unavailable';
     return {

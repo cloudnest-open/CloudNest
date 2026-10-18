@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mapMegaError, safeSegment, ROOT_FOLDER_NAME } from '../src/providers/mega-files.js';
+import { Readable } from 'node:stream';
+import { mapMegaError, safeSegment, ROOT_FOLDER_NAME, closeStorageWhenStreamEnds } from '../src/providers/mega-files.js';
 import { getAdapter } from '../src/providers/registry.js';
 import { megaAdapter } from '../src/providers/mega.js';
 import { ProviderError, PROVIDER_IDS, type ProviderId } from '../src/providers/types.js';
@@ -80,4 +81,18 @@ test('the pinned megajs version is recorded and unofficial status is acknowledge
   assert.equal(pkg.name, 'megajs');
   // documented in the handoff as an unofficial integration
   assert.match(pkg.version, /^1\./);
+});
+
+test('the download stream closes its temporary Storage exactly once', () => {
+  let closes = 0;
+  const stream = new Readable({ read() {} });
+  closeStorageWhenStreamEnds(stream, () => { closes++; });
+  stream.emit('end');
+  stream.emit('close'); // a second lifecycle event must not double-close
+  stream.emit('error', new Error('late'));
+  assert.equal(closes, 1, 'exactly one close across end/close/error');
+
+  const throwing = new Readable({ read() {} });
+  closeStorageWhenStreamEnds(throwing, () => { throw new Error('cleanup boom'); });
+  assert.doesNotThrow(() => throwing.emit('end'), 'cleanup errors never mask the stream outcome');
 });

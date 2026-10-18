@@ -66,7 +66,11 @@ async function ensureAppRootImpl(
   const fresh = await ensureFresh(bundle, appConfig);
   const existing = await findRootFolder(fresh);
   if (existing) return { remoteRootId: existing, created: false };
-  // create lazily; idempotent because we re-check on ambiguity
+  // create lazily. Drive has no unique-name constraint, so two concurrent
+  // calls (e.g. the first two chunks of a fresh account) can both reach the
+  // create: the created id is only a candidate. A re-search afterwards makes
+  // every racer converge on the first folder under the app label instead of
+  // forking duplicate roots.
   const body = JSON.stringify({ name: ROOT_LABEL, mimeType: APP_FOLDER_MIME });
   const created = (await providerFetch(`${FILES_URL}?fields=id&supportsAllDrives=true`, {
     method: 'POST',
@@ -74,7 +78,8 @@ async function ensureAppRootImpl(
     body,
   })) as { id?: string };
   if (!created?.id) throw new ProviderError('identity_validation_failed', 502);
-  return { remoteRootId: created.id, created: true };
+  const settled = await findRootFolder(fresh);
+  return { remoteRootId: settled ?? created.id, created: true };
 }
 
 /** Map a Google API error payload into our normalized safe codes. */

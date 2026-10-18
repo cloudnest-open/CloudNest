@@ -252,6 +252,28 @@ async function deleteAppObjectImpl(
   });
 }
 
+/**
+ * The documented contract is "one temporary Storage per operation, and it is
+ * always closed" — but a download stream outlives the call that created it,
+ * so the close rides the stream's own lifecycle: the first of end/close/error
+ * closes the Storage exactly once, and cleanup never masks the stream outcome.
+ */
+export function closeStorageWhenStreamEnds(stream: NodeJS.ReadableStream, close: () => void): void {
+  let closed = false;
+  const once = (): void => {
+    if (closed) return;
+    closed = true;
+    try {
+      close();
+    } catch {
+      // ignore — cleanup must never mask the stream's own outcome
+    }
+  };
+  stream.on('end', once);
+  stream.on('close', once);
+  stream.on('error', once);
+}
+
 async function downloadObjectStreamImpl(
   bundle: ProviderCredentialBundle,
   remoteObjectId: string,
@@ -275,6 +297,10 @@ async function downloadObjectStreamImpl(
     const found = findNodeById(root, remoteObjectId);
     if (!found) throw new ProviderError('provider_object_missing', 404);
     const stream = found.download();
+    // the close rides the stream's own lifecycle (see closeStorageWhenStreamEnds)
+    closeStorageWhenStreamEnds(stream, () => {
+      void storage.close();
+    });
     return { stream, sizeBytes: typeof found.size === 'number' ? found.size : null, contentType: null };
   } catch (err) {
     try {
