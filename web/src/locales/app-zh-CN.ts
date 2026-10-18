@@ -129,6 +129,8 @@ export const appZhCn: AppStrings = {
   },
 
   dashboard: {
+    modeFilterAria: '按存储层级筛选仪表盘',
+    modeAll: '全部',
     title: '仪表板',
     subtitle: '跨多个提供商管理你的文件、云盘账户和存储。',
     errorLoad: '无法加载仪表板。服务器没有返回真实数据。',
@@ -871,6 +873,8 @@ export const appZhCn: AppStrings = {
       failed: '无法生成诊断信息。',
     },
     providerSetup: {
+      dropboxAppKey: 'App Key',
+      dropboxAppSecret: 'App Secret',
       title: '提供商配置',
       intro: '为每个提供商一次性配置 CloudNest 自己的应用凭据。这与连接你的账户是分开的——“连接”按钮无法绕过每个提供商的应用注册。',
       context: '你选择配置 {provider}，以便可以连接账户。',

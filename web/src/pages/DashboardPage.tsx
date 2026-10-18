@@ -30,6 +30,7 @@ interface AccountDetail {
   provider: string;
   displayLabel: string;
   status: string;
+  tier: 'personal' | 'business';
   quotaStatus: string;
   quotaUnlimited: boolean;
   quotaScopeKey: string | null;
@@ -317,7 +318,13 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
     setFileSearch(value);
   }
 
-  const accounts = summary?.accountsDetailed ?? [];
+  // Storage-tier filter (owner request): Personal shows only personal-pool
+  // accounts, Business only S3-compatible ones; 'all' keeps the whole pool.
+  // The storage block below recomputes from the filtered rows with the same
+  // per-account sums the server uses for the unfiltered view.
+  const [storageMode, setStorageMode] = useState<'all' | 'personal' | 'business'>('all');
+  const allAccounts = summary?.accountsDetailed ?? [];
+  const accounts = storageMode === 'all' ? allAccounts : allAccounts.filter((a) => a.tier === storageMode);
   // the member-scoped summary omits pool-level fields entirely — optional
   // chaining keeps their dashboard rendering without them
   const storage = summary ? buildDisplayStorage(accounts, summary.storage?.lastCheckedAt ?? null) : undefined;
@@ -356,10 +363,25 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
           <h1 className="page-title">{t.dashboard.title}</h1>
           <p className="muted">{t.dashboard.subtitle}</p>
         </div>
-        <button type="button" className="btn-secondary" onClick={reloadAll} disabled={loading || filesLoading}>
-          <RefreshCw size={15} aria-hidden="true" />
-          {loading || filesLoading ? t.common.refreshing : t.common.refresh}
-        </button>
+        <div className="page-head-actions">
+          <div className="mode-filter" role="group" aria-label={t.dashboard.modeFilterAria}>
+            {(['all', 'personal', 'business'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                className="mode-filter-btn"
+                aria-pressed={storageMode === m}
+                onClick={() => setStorageMode(m)}
+              >
+                {m === 'all' ? t.dashboard.modeAll : m === 'personal' ? t.uiMode.personal : t.uiMode.business}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="btn-secondary" onClick={reloadAll} disabled={loading || filesLoading}>
+            <RefreshCw size={15} aria-hidden="true" />
+            {loading || filesLoading ? t.common.refreshing : t.common.refresh}
+          </button>
+        </div>
       </div>
 
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}

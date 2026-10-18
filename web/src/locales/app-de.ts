@@ -130,6 +130,8 @@ export const appDe: AppStrings = {
   },
 
   dashboard: {
+    modeFilterAria: 'Dashboard nach Speicher-Tier filtern',
+    modeAll: 'Alle',
     title: 'Übersicht',
     subtitle: 'Verwalte deine Dateien, Cloud-Konten und deinen Speicher über mehrere Anbieter hinweg.',
     errorLoad: 'Die Übersicht konnte nicht geladen werden. Der Server hat keine echten Daten geliefert.',
@@ -929,6 +931,8 @@ export const appDe: AppStrings = {
       failed: 'Diagnose konnte nicht erstellt werden.',
     },
     providerSetup: {
+      dropboxAppKey: 'App-Key',
+      dropboxAppSecret: 'App-Secret',
       title: 'Anbieter-Einrichtung',
       intro:
         'Konfiguriere die eigenen Anwendungsdaten von CloudNest einmal pro Anbieter. Das ist von der Verbindung deiner Konten getrennt — der Verbinden-Knopf kann die App-Registrierung eines Anbieters nicht umgehen.',

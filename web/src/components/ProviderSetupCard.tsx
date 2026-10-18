@@ -164,9 +164,12 @@ export function ProviderSetupCard({ onChanged, onGoToCloudAccounts }: { onChange
                 <p className="muted">{p.id === 's3' ? ps.s3Note : ps.megaNote}</p>
               ) : openId === p.id ? (
                 <form onSubmit={(e) => void save(e, p)} className="password-form">
-                  <label htmlFor={`${p.id}-client-id`}>{ps.clientId}</label>
+                  {/* each provider's own terminology: Dropbox calls these the
+                      App key / App secret, the OAuth providers say Client ID /
+                      Client secret (owner request) */}
+                  <label htmlFor={`${p.id}-client-id`}>{p.id === 'dropbox' ? ps.dropboxAppKey : ps.clientId}</label>
                   <input id={`${p.id}-client-id`} type="text" value={clientId} onChange={(e) => setClientId(e.target.value)} required />
-                  <label htmlFor={`${p.id}-client-secret`}>{ps.clientSecret}</label>
+                  <label htmlFor={`${p.id}-client-secret`}>{p.id === 'dropbox' ? ps.dropboxAppSecret : ps.clientSecret}</label>
                   <input id={`${p.id}-client-secret`} type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} required />
                   {p.id === 'onedrive' && (
                     <>

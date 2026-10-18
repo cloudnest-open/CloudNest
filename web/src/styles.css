@@ -504,6 +504,41 @@ body {
 .plain-list li { margin-bottom: 4px; }
 
 /* --- 6. Buttons ----------------------------------------------------------- */
+
+/* Dashboard storage-tier filter (owner request): a small segmented group in
+   the page head. Element-qualified selectors keep it order-independent. */
+.page-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.mode-filter {
+  display: inline-flex;
+  gap: 4px;
+}
+button.mode-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--cn-border);
+  background: var(--cn-surface);
+  color: var(--cn-text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+button.mode-filter-btn:hover {
+  background: var(--cn-surface-muted);
+}
+button.mode-filter-btn[aria-pressed="true"] {
+  background: var(--cn-primary);
+  border-color: var(--cn-primary);
+  color: var(--cn-primary-on);
+}
+
 .btn-primary, .btn-secondary, .btn-danger, .btn-inline {
   display: inline-flex;
   align-items: center;

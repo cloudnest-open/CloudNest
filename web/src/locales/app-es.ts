@@ -129,6 +129,8 @@ export const appEs: AppStrings = {
   },
 
   dashboard: {
+    modeFilterAria: 'Filtrar el panel por nivel de almacenamiento',
+    modeAll: 'Todos',
     title: 'Panel',
     subtitle: 'Gestiona tus archivos, cuentas en la nube y almacenamiento entre varios proveedores.',
     errorLoad: 'No se pudo cargar el panel. El servidor no respondió con datos reales.',
@@ -921,6 +923,8 @@ export const appEs: AppStrings = {
       failed: 'No se pudo generar el diagnóstico.',
     },
     providerSetup: {
+      dropboxAppKey: 'App key',
+      dropboxAppSecret: 'App secret',
       title: 'Configuración de proveedores',
       intro:
         'Configura las credenciales de aplicación propias de CloudNest una vez por proveedor. Esto es independiente de conectar tus cuentas: el botón Conectar no puede saltarse el registro de la aplicación de cada proveedor.',

@@ -129,6 +129,8 @@ export const appPtBr: AppStrings = {
   },
 
   dashboard: {
+    modeFilterAria: 'Filtrar o painel por nível de armazenamento',
+    modeAll: 'Todos',
     title: 'Painel',
     subtitle: 'Gerencie seus arquivos, contas de nuvem e armazenamento entre vários provedores.',
     errorLoad: 'Não foi possível carregar o painel. O servidor não respondeu com dados reais.',
@@ -929,6 +931,8 @@ export const appPtBr: AppStrings = {
       failed: 'Não foi possível gerar os diagnósticos.',
     },
     providerSetup: {
+      dropboxAppKey: 'App key',
+      dropboxAppSecret: 'App secret',
       title: 'Configuração de provedores',
       intro:
         'Configure as credenciais de aplicativo do próprio CloudNest uma vez por provedor. Isto é separado de conectar suas contas — o botão Conectar não pode contornar o registro de aplicativo de cada provedor.',

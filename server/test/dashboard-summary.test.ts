@@ -17,12 +17,12 @@ const GOOD = 'correct horse battery staple';
 const MIB = 1024 * 1024;
 
 interface Summary {
-  accounts: Array<{ id: string; provider: string; status: string; quotaStatus: string }>;
+  accounts: Array<{ id: string; provider: string; status: string; quotaStatus: string; tier: string }>;
   activeJobs: number;
   recentFiles: number;
   totalFiles: number;
   accountsDetailed: Array<{
-    id: string; provider: string; status: string; quotaStatus: string;
+    id: string; provider: string; status: string; quotaStatus: string; tier: string;
     quotaTotalBytes: number | null; quotaUsedBytes: number | null;
     reserveBytes: number; outstandingBytes: number;
     usableBytes: number | null; lastQuotaCheckAt: string | null;
@@ -241,6 +241,19 @@ test('activeJobs counts jobs the 200-row listing page cannot show', async () => 
     }
     const s = await summary(client);
     assert.equal(s.activeJobs, 205);
+  } finally {
+    await app.close();
+  }
+});
+
+test('the dashboard summary carries each account\'s storage tier', async () => {
+  const { app, client } = await authed();
+  try {
+    seedAccount(app.dbPath, { id: 't1', provider: 'dropbox', total: 100 * MIB, used: 0, reserve: 0, quotaStatus: 'current' });
+    const s = await summary(client);
+    assert.ok(s.accountsDetailed.length >= 1, 'the seeded account is listed');
+    assert.ok(s.accountsDetailed.every((a) => a.tier === 'personal'), 'OAuth accounts are personal tier');
+    assert.ok(s.accounts.every((a) => a.tier === 'personal'), 'the compact list carries tier too');
   } finally {
     await app.close();
   }

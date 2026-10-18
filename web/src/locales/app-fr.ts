@@ -130,6 +130,8 @@ export const appFr: AppStrings = {
   },
 
   dashboard: {
+    modeFilterAria: 'Filtrer le tableau de bord par niveau de stockage',
+    modeAll: 'Tous',
     title: 'Tableau de bord',
     subtitle: 'Gérez vos fichiers, vos comptes cloud et votre stockage auprès de plusieurs fournisseurs.',
     errorLoad: 'Le tableau de bord n’a pas pu être chargé. Le serveur n’a pas renvoyé de données réelles.',
@@ -930,6 +932,8 @@ export const appFr: AppStrings = {
       failed: 'Impossible de produire les diagnostics.',
     },
     providerSetup: {
+      dropboxAppKey: 'App key',
+      dropboxAppSecret: 'App secret',
       title: 'Configuration des fournisseurs',
       intro:
         'Configurez une fois par fournisseur les identifiants d’application propres à CloudNest. C’est distinct de la connexion de vos comptes — le bouton Connecter ne peut pas contourner l’enregistrement d’application de chaque fournisseur.',

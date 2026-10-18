@@ -1423,12 +1423,12 @@ export class UploadService {
    * used-vs-allowance numbers. Pool-level fields are unchanged — the ROUTE
    * omits them for members, because provider accounts are admin knowledge. */
   dashboardSummary(userId: string | null = null): {
-    accounts: Array<{ id: string; provider: string; displayLabel: string; status: string; quotaStatus: string }>;
+    accounts: Array<{ id: string; provider: string; displayLabel: string; status: string; quotaStatus: string; tier: string }>;
     activeJobs: number;
     recentFiles: number;
     totalFiles: number;
     accountsDetailed: Array<{
-      id: string; provider: string; displayLabel: string; status: string; quotaStatus: string;
+      id: string; provider: string; displayLabel: string; status: string; quotaStatus: string; tier: string;
       quotaTotalBytes: number | null; quotaUsedBytes: number | null;
       quotaUnlimited: boolean; quotaScopeKey: string | null;
       reserveBytes: number; outstandingBytes: number;
@@ -1444,7 +1444,7 @@ export class UploadService {
     userUsage: { usedBytes: number; allowanceBytes: number | null } | null;
   } {
     const rows = this.providerQ.listAccounts.all() as Array<{
-      id: string; provider: string; display_label: string; status: string; quota_status: string;
+      id: string; provider: string; display_label: string; status: string; quota_status: string; tier: string;
       quota_total_bytes: number | null; used_bytes: number | null;
       quota_unlimited: 0 | 1; quota_scope: string | null; reserve_bytes: number;
       last_quota_check_at: string | null;
@@ -1491,6 +1491,7 @@ export class UploadService {
         provider: a.provider,
         displayLabel: a.display_label,
         status: a.status,
+        tier: a.tier,
         quotaStatus: a.provider === 's3' ? (quotaTotalBytes !== null ? 'current' : 'unknown') : a.quota_status,
         quotaTotalBytes,
         quotaUsedBytes,
@@ -1525,7 +1526,7 @@ export class UploadService {
 
     const accounts = rows.map((a) => ({
       id: a.id, provider: a.provider, displayLabel: a.display_label,
-      status: a.status, quotaStatus: a.quota_status,
+      status: a.status, quotaStatus: a.quota_status, tier: a.tier,
     }));
     const jobs = this.listJobs(200, userId);
     // honest active-job count: the 200-row listing page above must not bound

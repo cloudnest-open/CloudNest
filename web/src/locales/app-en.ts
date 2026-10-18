@@ -145,6 +145,8 @@ export const appEn = {
   },
 
   dashboard: {
+    modeFilterAria: 'Filter the dashboard by storage tier',
+    modeAll: 'All',
     title: 'Dashboard',
     subtitle: 'Manage your files, cloud accounts and storage across multiple providers.',
     errorLoad: 'Could not load the dashboard. The server did not answer with real data.',
@@ -934,6 +936,8 @@ export const appEn = {
       failed: 'Could not build diagnostics.',
     },
     providerSetup: {
+      dropboxAppKey: 'App key',
+      dropboxAppSecret: 'App secret',
       title: 'Provider Setup',
       intro:
         'Configure CloudNest’s own application credentials once per provider. This is separate from connecting your accounts — the Connect button cannot bypass each provider’s app registration.',

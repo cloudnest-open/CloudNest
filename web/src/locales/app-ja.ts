@@ -129,6 +129,8 @@ export const appJa: AppStrings = {
   },
 
   dashboard: {
+    modeFilterAria: 'ストレージ階層でダッシュボードを絞り込む',
+    modeAll: 'すべて',
     title: 'ダッシュボード',
     subtitle: '複数のプロバイダーにまたがるファイル・クラウドアカウント・ストレージを管理します。',
     errorLoad: 'ダッシュボードを読み込めませんでした。サーバーが実データを返しませんでした。',
@@ -912,6 +914,8 @@ export const appJa: AppStrings = {
       failed: '診断情報を作成できませんでした。',
     },
     providerSetup: {
+      dropboxAppKey: 'アプリキー',
+      dropboxAppSecret: 'アプリシークレット',
       title: 'プロバイダー設定',
       intro:
         'CloudNest 自身のアプリケーション認証情報をプロバイダーごとに一度だけ設定します。これはアカウントの接続とは別のもので、「接続」ボタンは各プロバイダーのアプリ登録を迂回できません。',
