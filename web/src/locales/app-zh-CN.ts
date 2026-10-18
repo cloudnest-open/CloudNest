@@ -97,7 +97,7 @@ export const appZhCn: AppStrings = {
       emptyBody: '上传、共享和账户事件将显示在这里。',
     },
     transfers: {
-      activeAria: '{count} 个进行中的传输——打开上传页',
+      activeAria: '传输 {count} 项——打开上传页',
     },
     account: {
       role: 'CloudNest 管理员',
@@ -150,7 +150,7 @@ export const appZhCn: AppStrings = {
       quotaUnverified: '配额未验证',
       quotaUnverifiedWithTime: '配额未验证 · 上次检查：{when}',
       files: '已存储文件',
-      filesSub: '文件与文件夹总数',
+      filesSub: '统计所有文件夹中的文件（不含回收站）',
       links: '共享链接',
       linksSub: '有效链接',
     },

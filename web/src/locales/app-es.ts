@@ -97,7 +97,7 @@ export const appEs: AppStrings = {
       emptyBody: 'Aquí aparecerán los eventos de subida, compartición y cuentas.',
     },
     transfers: {
-      activeAria: '{count} transferencias activas — abrir Subidas',
+      activeAria: '{count} transferencias — abrir Subidas',
     },
     account: {
       role: 'Administrador de CloudNest',
@@ -150,7 +150,7 @@ export const appEs: AppStrings = {
       quotaUnverified: 'Cuota sin verificar',
       quotaUnverifiedWithTime: 'Cuota sin verificar · última comprobación {when}',
       files: 'Archivos almacenados',
-      filesSub: 'Total de archivos y carpetas',
+      filesSub: 'Contados en todas las carpetas (papelera excluida)',
       links: 'Enlaces compartidos',
       linksSub: 'Enlaces activos',
     },

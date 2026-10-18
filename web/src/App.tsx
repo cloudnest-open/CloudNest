@@ -14,7 +14,7 @@ import { DashboardPage } from './pages/DashboardPage.js';
 import { DownloadsPage } from './pages/DownloadsPage.js';
 import { SharedLinksPage } from './pages/SharedLinksPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
-import { Dialog, EmptyState, ToastProvider, formatDateTime } from './components/ui.js';
+import { Dialog, EmptyState, ToastProvider, formatDateTime, feedItemLine } from './components/ui.js';
 import { FileActionsProvider } from './components/FileActionsProvider.js';
 import { LanguageMenu } from './components/LanguageMenu.js';
 import { ModeChooser } from './components/ModeChooser.js';
@@ -87,7 +87,10 @@ export default function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // session-26 F14: a notice belongs to the page it was raised on — rendering
+  // it on every later page (and forever) made one-off messages read like
+  // permanent app errors.
+  const [notice, setNotice] = useState<{ text: string; page: NavItem } | null>(null);
   const [theme, setTheme] = useState(currentTheme());
   // Real account identity from the backend drives the avatar initials.
   const [username, setUsername] = useState('admin');
@@ -147,7 +150,7 @@ export default function App() {
     }
     setSwitchingMode(false);
     setModeSwitch(null);
-    setNotice(plural(locale, t.uiMode.uploadsPaused, paused));
+    setNotice({ text: plural(locale, t.uiMode.uploadsPaused, paused), page: active });
     setUiMode(modeSwitch.target);
   }
   // Global search over CloudNest-managed files (real data; never a fake index).
@@ -229,14 +232,22 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const connectResult = params.get('connect');
     if (connectResult) {
-      setNotice(
-        (t.connectResults as Record<string, string | undefined>)[connectResult] ?? t.connectResults.fallback,
-      );
+      setNotice({
+        text: (t.connectResults as Record<string, string | undefined>)[connectResult] ?? t.connectResults.fallback,
+        page: 'Cloud Accounts',
+      });
       setActive('Cloud Accounts');
       window.history.replaceState({}, '', '/');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the redirect cleanup must not re-run on a language change
   }, [authState]);
+
+  // session-26 F14: a notice never follows the user around — leaving the page
+  // it belongs to retires it (the connect-result stays until then, so the
+  // honest outcome is actually seen on the page it speaks about).
+  useEffect(() => {
+    setNotice((current) => (current && current.page !== active ? null : current));
+  }, [active]);
 
   useEffect(() => {
     if (authState !== 'ready') return;
@@ -671,16 +682,7 @@ export default function App() {
                               {item.kind === 'quota_stale' && <AlertTriangle size={15} />}
                             </span>
                             <span className="bell-item-text">
-                              {item.kind === 'upload_completed' && tf(t.shell.bell.itemUpload, {
-                                name: String(item.payload['fileName'] ?? t.fileTypes.file),
-                              })}
-                              {item.kind === 'share_used' && tf(t.shell.bell.itemShare, {
-                                name: String(item.payload['fileName'] ?? t.fileTypes.file),
-                                downloads: Number(item.payload['downloads'] ?? 0),
-                              })}
-                              {item.kind === 'quota_stale' && tf(t.shell.bell.itemQuota, {
-                                account: String(item.payload['accountLabel'] ?? ''),
-                              })}
+                              {feedItemLine(t, tf, item)}
                               <span className="muted small">{formatDateTime(item.createdAt)}</span>
                             </span>
                           </li>
@@ -770,9 +772,9 @@ export default function App() {
           </div>
         </header>
         <main className={`content${dockCollapsed ? '' : ' content-dock-reserve'}`}>
-          {notice && (
+          {notice && notice.page === active && (
             <div className="card notice-card" role="status">
-              <p>{notice}</p>
+              <p>{notice.text}</p>
             </div>
           )}
           {active === 'Settings' ? (

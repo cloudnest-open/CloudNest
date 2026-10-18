@@ -97,7 +97,7 @@ export const appRu: AppStrings = {
       emptyBody: 'Здесь появятся события загрузки, общего доступа и аккаунтов.',
     },
     transfers: {
-      activeAria: 'Активных передач: {count} — открыть загрузки',
+      activeAria: 'Передач: {count} — открыть загрузки',
     },
     account: {
       role: 'Администратор CloudNest',
@@ -150,7 +150,7 @@ export const appRu: AppStrings = {
       quotaUnverified: 'Квота не проверена',
       quotaUnverifiedWithTime: 'Квота не проверена · последняя проверка {when}',
       files: 'Сохранённые файлы',
-      filesSub: 'Всего файлов и папок',
+      filesSub: 'Учтены файлы во всех папках (без корзины)',
       links: 'Общие ссылки',
       linksSub: 'Активные ссылки',
     },

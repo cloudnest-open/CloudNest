@@ -113,7 +113,7 @@ export const appEn = {
       emptyBody: 'Upload, share and account events will appear here.',
     },
     transfers: {
-      activeAria: '{count} active transfers — open Uploads',
+      activeAria: '{count} transfers — open Uploads',
     },
     account: {
       role: 'CloudNest administrator',
@@ -167,7 +167,7 @@ export const appEn = {
       quotaUnverified: 'Quota not verified',
       quotaUnverifiedWithTime: 'Quota not verified · last checked {when}',
       files: 'Files Stored',
-      filesSub: 'Total files & folders',
+      filesSub: 'Counted across all folders (trash excluded)',
       links: 'Shared Links',
       linksSub: 'Active links',
     },

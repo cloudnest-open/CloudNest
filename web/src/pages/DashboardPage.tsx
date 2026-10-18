@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Cloud, CloudUpload, Database, FileText, Link as LinkIcon, Plus, Upload, RefreshCw, Activity,
+  AlertTriangle, Cloud, CloudUpload, CheckCircle2, Database, FileText, Link as LinkIcon, Plus, Upload, RefreshCw, Activity,
 } from 'lucide-react';
 import { api } from '../api.js';
 import { FileTable, type FileTableRow } from '../components/FileTable.js';
 import { ProviderLogo } from '../components/ProviderLogo.js';
 import {
   Badge, EmptyState, ProgressBar, SkeletonRows, pageList,
-  formatBytes, formatDateTime, PROVIDER_LABELS,
+  formatBytes, formatDateTime, PROVIDER_LABELS, feedItemLine, type FeedLineItem,
 } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
 import { useUiMode } from '../ui-mode-context.js';
@@ -237,6 +237,10 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
   // Roadmap Phase 5 (§4.5): per-provider health behind the provider cards.
   // Admin-only data — members never fetch (or see) it.
   const [providerHealth, setProviderHealth] = useState<Record<string, { health: string; lastCheckAt: string | null }> | null>(null);
+  // session-26 F4: Recent Activity reads the SAME notification feed the bell
+  // does (same rows, same words via feedItemLine) — the old card claimed "no
+  // activity" while the bell right above it listed events.
+  const [activity, setActivity] = useState<FeedLineItem[]>([]);
 
   const loadSummary = useCallback(async () => {
     setLoading(true);
@@ -274,6 +278,17 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
     }
   }, []);
 
+  const loadActivity = useCallback(async () => {
+    try {
+      const res = await api.listNotifications(4, 0, tier);
+      if (res.status === 200) setActivity((res.data as { notifications?: FeedLineItem[] }).notifications ?? []);
+      // a failed read keeps the truthful empty state; the next reload retries
+    } catch {
+      /* keep the empty state */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user-driven; a language change must not re-fetch
+  }, [tier]);
+
   const loadFiles = useCallback(async () => {
     setFilesLoading(true);
     setFilesError(null);
@@ -300,7 +315,8 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
     void loadSummary();
     // §4.5: the health badge rides the same reload cycle (admin only)
     if (!isMember) void loadHealth();
-  }, [loadSummary, loadHealth, isMember]);
+    void loadActivity();
+  }, [loadSummary, loadHealth, loadActivity, isMember]);
 
   useEffect(() => {
     void loadFiles();
@@ -317,7 +333,8 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
   const reloadAll = useCallback(() => {
     void loadSummary();
     void loadFiles();
-  }, [loadSummary, loadFiles]);
+    void loadActivity();
+  }, [loadSummary, loadFiles, loadActivity]);
 
   function onSearchChange(value: string): void {
     setFileSearch(value);
@@ -532,8 +549,12 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
                       {t.dashboard.slot[slot.statusKey]}
                     </p>
                     {/* Phase 5 §4.5: the honest reliability badge — derived from
-                        real error counters and account states, never invented. */}
-                    {slot.health && slot.health !== 'unconfigured' && (
+                        real error counters and account states, never invented.
+                        session-26 F5: a provider with no connected account in
+                        this mode has no relevant health story — the badge never
+                        leaks the other tier's connection state next to "Not
+                        connected yet". */}
+                    {slot.health && slot.health !== 'unconfigured' && slot.statusKey !== 'notConnected' && (
                       <p className="small muted provider-health">
                         <span
                           className={`status-dot status-${slot.health === 'healthy' ? 'ok' : slot.health === 'degraded' ? 'warn' : 'down'}`}
@@ -665,13 +686,32 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
             <div className="card-head">
               <h2>{t.dashboard.activity.title}</h2>
             </div>
-            {/* No activity/audit event source exists yet; the card and its slot
-                stay present with a truthful empty state (reference spec §1.5). */}
-            <EmptyState
-              icon={Activity}
-              title={t.dashboard.activity.emptyTitle}
-              body={t.dashboard.activity.emptyBody}
-            />
+            {/* session-26 F4: the card reads the same tier-scoped feed the bell
+                does — the empty state below is now truthful by construction,
+                because the two surfaces can no longer disagree. */}
+            {activity.length > 0 ? (
+              <ul className="bell-feed">
+                {activity.map((item) => (
+                  <li key={item.id} className="bell-item">
+                    <span className="bell-item-icon" aria-hidden="true">
+                      {item.kind === 'upload_completed' && <CheckCircle2 size={15} />}
+                      {item.kind === 'share_used' && <LinkIcon size={15} />}
+                      {item.kind === 'quota_stale' && <AlertTriangle size={15} />}
+                    </span>
+                    <span className="bell-item-text">
+                      {feedItemLine(t, tf, item)}
+                      <span className="muted small">{formatDateTime(item.createdAt)}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyState
+                icon={Activity}
+                title={t.dashboard.activity.emptyTitle}
+                body={t.dashboard.activity.emptyBody}
+              />
+            )}
           </section>
           <section className="card">
             <h2>{t.dashboard.storage.title}</h2>

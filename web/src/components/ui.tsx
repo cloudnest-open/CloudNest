@@ -57,6 +57,43 @@ export function ProviderTile({ provider, size = 28 }: { provider: string; size?:
   );
 }
 
+/* --- notification feed lines --------------------------------------------- */
+
+/** The notification rows both the bell and the dashboard activity card show. */
+export interface FeedLineItem {
+  id: string;
+  kind: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  readAt?: string | null;
+}
+
+/**
+ * session-26 F4: one shared line-renderer for notification items — the bell
+ * and the dashboard's Recent Activity read the same feed, so they must also
+ * tell the same story with the same words. Unknown kinds render the raw kind
+ * code as the diagnostic, never an empty label.
+ */
+export function feedItemLine(
+  t: import('../i18n.js').AppStrings,
+  tf: (template: string, vars?: Record<string, string | number>) => string,
+  item: FeedLineItem,
+): string {
+  if (item.kind === 'upload_completed') {
+    return tf(t.shell.bell.itemUpload, { name: String(item.payload['fileName'] ?? t.fileTypes.file) });
+  }
+  if (item.kind === 'share_used') {
+    return tf(t.shell.bell.itemShare, {
+      name: String(item.payload['fileName'] ?? t.fileTypes.file),
+      downloads: Number(item.payload['downloads'] ?? 0),
+    });
+  }
+  if (item.kind === 'quota_stale') {
+    return tf(t.shell.bell.itemQuota, { account: String(item.payload['accountLabel'] ?? '') });
+  }
+  return item.kind;
+}
+
 /* --- file type icon ------------------------------------------------------ */
 
 /**

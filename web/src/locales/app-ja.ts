@@ -97,7 +97,7 @@ export const appJa: AppStrings = {
       emptyBody: 'アップロード・共有・アカウントのイベントがここに表示されます。',
     },
     transfers: {
-      activeAria: '進行中の転送 {count} 件 — アップロードを開く',
+      activeAria: '転送 {count} 件 — アップロードを開く',
     },
     account: {
       role: 'CloudNest 管理者',
@@ -150,7 +150,7 @@ export const appJa: AppStrings = {
       quotaUnverified: 'クォータ未検証',
       quotaUnverifiedWithTime: 'クォータ未検証 · 最終確認 {when}',
       files: '保存済みファイル',
-      filesSub: 'ファイルとフォルダーの合計',
+      filesSub: 'すべてのフォルダーを合計（ゴミ箱は除く）',
       links: '共有リンク',
       linksSub: '有効なリンク',
     },

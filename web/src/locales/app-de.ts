@@ -97,7 +97,7 @@ export const appDe: AppStrings = {
       emptyBody: 'Upload-, Freigabe- und Konto-Ereignisse erscheinen hier.',
     },
     transfers: {
-      activeAria: '{count} aktive Übertragungen — Uploads öffnen',
+      activeAria: '{count} Übertragungen — Uploads öffnen',
     },
     account: {
       role: 'CloudNest-Administrator',
@@ -151,7 +151,7 @@ export const appDe: AppStrings = {
       quotaUnverified: 'Kontingent nicht verifiziert',
       quotaUnverifiedWithTime: 'Kontingent nicht verifiziert · zuletzt geprüft {when}',
       files: 'Gespeicherte Dateien',
-      filesSub: 'Dateien & Ordner insgesamt',
+      filesSub: 'Zählt alle Ordner zusammen (Papierkorb ausgenommen)',
       links: 'Geteilte Links',
       linksSub: 'Aktive Links',
     },

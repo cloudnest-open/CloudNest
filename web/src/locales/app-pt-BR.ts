@@ -97,7 +97,7 @@ export const appPtBr: AppStrings = {
       emptyBody: 'Eventos de envio, compartilhamento e contas aparecerão aqui.',
     },
     transfers: {
-      activeAria: '{count} transferências ativas — abrir Envios',
+      activeAria: '{count} transferências — abrir Envios',
     },
     account: {
       role: 'Administrador do CloudNest',
@@ -150,7 +150,7 @@ export const appPtBr: AppStrings = {
       quotaUnverified: 'Cota não verificada',
       quotaUnverifiedWithTime: 'Cota não verificada · última verificação {when}',
       files: 'Arquivos armazenados',
-      filesSub: 'Total de arquivos e pastas',
+      filesSub: 'Contados em todas as pastas (lixeira excluída)',
       links: 'Links compartilhados',
       linksSub: 'Links ativos',
     },

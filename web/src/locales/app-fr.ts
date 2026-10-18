@@ -97,7 +97,7 @@ export const appFr: AppStrings = {
       emptyBody: 'Les événements d’envoi, de partage et de compte apparaîtront ici.',
     },
     transfers: {
-      activeAria: '{count} transferts actifs — ouvrir Téléversements',
+      activeAria: '{count} transferts — ouvrir Téléversements',
     },
     account: {
       role: 'Administrateur CloudNest',
@@ -151,7 +151,7 @@ export const appFr: AppStrings = {
       quotaUnverified: 'Quota non vérifié',
       quotaUnverifiedWithTime: 'Quota non vérifié · dernière vérification {when}',
       files: 'Fichiers stockés',
-      filesSub: 'Total de fichiers et dossiers',
+      filesSub: 'Comptés dans tous les dossiers (corbeille exclue)',
       links: 'Liens partagés',
       linksSub: 'Liens actifs',
     },
