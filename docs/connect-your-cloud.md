@@ -103,7 +103,7 @@ OneDrive via Microsoft Graph, with an offline token so uploads keep working.
    → **New registration** (name it anything; account type: personal +
    work/school accounts unless you know you want narrower).
 2. Under **Authentication**, add a **Web** platform entry with the callback
-   URL, and tick **Access tokens** and **ID tokens**.
+   URL.
 3. Under **API permissions** add delegated **Files.ReadWrite** and
    **offline_access**.
 4. Under **Certificates & secrets** create a client secret and copy its
