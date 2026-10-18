@@ -196,7 +196,15 @@ body {
   min-width: 0;
 }
 
-.sidebar-footer .status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* session-26 F10: the sidebar status line wraps instead of clipping —
+   "connected (v0.1.0)" is real information, never hidden behind an ellipsis. */
+.sidebar-footer .status-text { overflow: hidden; }
+
+/* session-26 F18: the storage-allowance field carries a GB/TB unit selector
+   beside the number instead of baking the unit into the label. */
+.allowance-row { display: flex; gap: 8px; }
+.allowance-row input { flex: 1; min-width: 0; }
+.allowance-row select { width: auto; }
 
 .status-dot {
   width: 8px;
@@ -1687,6 +1695,11 @@ input:disabled, select:disabled, textarea:disabled {
   .topbar { padding: 0 16px; }
   .page-title { font-size: 22px; line-height: 30px; }
   .provider-grid { grid-template-columns: 1fr; }
+  /* session-26 F13: folder cards keep their full name on phones — the name
+     wraps onto its own line instead of being clipped to two characters, and
+     the count line sits under it without mid-phrase wrapping. */
+  .folder-open { flex-wrap: wrap; }
+  .folder-open > .ellipsis { flex: 1 1 100%; white-space: normal; overflow: visible; text-overflow: clip; }
   /* Files rows on phones keep checkbox + name + actions; the middle columns
      (type/size/stored-in/modified) would otherwise squeeze the actions out of
      reach. */

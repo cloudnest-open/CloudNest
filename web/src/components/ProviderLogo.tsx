@@ -90,11 +90,13 @@ export function ProviderLogo({ provider, size = 24 }: { provider: string; size?:
   if (!Mark) return <ProviderTile provider={provider} size={size} />;
   const label = PROVIDER_LABELS[provider] ?? provider;
   return (
+    // session-26 F11: the mark is decorative — every usage places the
+    // provider's name as adjacent text, so the old aria-label made screen
+    // readers announce "Google Drive Google Drive". The hover title stays.
     <span
       className="provider-logo"
       style={{ width: size, height: size }}
-      role="img"
-      aria-label={label}
+      aria-hidden="true"
       title={label}
     >
       <Mark size={size} />

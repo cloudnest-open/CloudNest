@@ -503,7 +503,12 @@ export default function App() {
         <div className="sidebar-footer">
           <span className="status-line">
             <span className={health ? 'status-dot status-ok' : 'status-dot status-down'} aria-hidden="true" />
-            <span className="status-text">
+            {/* session-26 F10: the line wraps now, so the version is never
+                clipped away; the tooltip repeats it for narrow sidebars. */}
+            <span
+              className="status-text"
+              title={health ? tf(t.shell.status.connected, { version: health.version }) : t.shell.status.down}
+            >
               {health ? tf(t.shell.status.connected, { version: health.version }) : t.shell.status.down}
             </span>
           </span>

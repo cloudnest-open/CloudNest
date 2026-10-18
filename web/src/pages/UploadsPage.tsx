@@ -893,12 +893,13 @@ export function UploadsPage() {
             </label>
             <p className="muted small">{t.uploads.queue.autoSpreadHelp}</p>
           </div>
+          {/* session-26 F17: a permanently disabled checkbox is a dead control
+              occupying prime form space — the honest coming-soon promise reads
+              as a plain note instead. */}
           <div className="upload-toggle-row sync-placeholder">
-            <label>
-              <input type="checkbox" disabled aria-readonly="true" />
-              {t.uploads.queue.continuousSync}
-            </label>
-            <p className="muted small">{t.uploads.queue.continuousSyncNote}</p>
+            <p className="muted small">
+              <strong>{t.uploads.queue.continuousSync}</strong> — {t.uploads.queue.continuousSyncNote}
+            </p>
           </div>
         </div>
 

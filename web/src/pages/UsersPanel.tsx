@@ -28,6 +28,10 @@ export function UsersPanel() {
   const [inviteAllowance, setInviteAllowance] = useState('');
   const [editRole, setEditRole] = useState<'admin' | 'member'>('member');
   const [editAllowance, setEditAllowance] = useState('');
+  // session-26 F18: the allowance carries its own unit — a business owner
+  // thinks in TB, not in five-digit GB values.
+  const [inviteAllowanceUnit, setInviteAllowanceUnit] = useState<'gb' | 'tb'>('gb');
+  const [editAllowanceUnit, setEditAllowanceUnit] = useState<'gb' | 'tb'>('gb');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -49,12 +53,14 @@ export function UsersPanel() {
     void load();
   }, [load]);
 
-  const gBytes = (raw: string): number | null | undefined => {
+  const gBytes = (raw: string, unit: 'gb' | 'tb' = 'gb'): number | null | undefined => {
     const v = raw.trim();
     if (v === '') return null;
     const n = Number(v);
     if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) return undefined;
-    return n * 1024 * 1024 * 1024;
+    // F18: a whole number of TB is always a whole number of GB — the byte
+    // contract (allowanceBytes) never changes.
+    return n * 1024 * 1024 * 1024 * (unit === 'tb' ? 1024 : 1);
   };
 
   function safeErrorText(body: unknown): string {
@@ -65,7 +71,7 @@ export function UsersPanel() {
   async function submitInvite(ev: React.FormEvent) {
     ev.preventDefault();
     if (busy) return;
-    const allowance = gBytes(inviteAllowance);
+    const allowance = gBytes(inviteAllowance, inviteAllowanceUnit);
     if (allowance === undefined) {
       setError(t.users.errors.invalid_allowance);
       return;
@@ -79,6 +85,7 @@ export function UsersPanel() {
         setEmail('');
         setName('');
         setInviteAllowance('');
+        setInviteAllowanceUnit('gb');
         setOneTimeLink({ url: (res.data as { acceptUrl: string }).acceptUrl, kind: 'invite' });
         toast.push({ kind: 'success', title: t.users.toast.invited });
         void load();
@@ -95,7 +102,7 @@ export function UsersPanel() {
   async function submitEdit(ev: React.FormEvent) {
     ev.preventDefault();
     if (busy || !editTarget) return;
-    const allowance = gBytes(editAllowance);
+    const allowance = gBytes(editAllowance, editAllowanceUnit);
     if (allowance === undefined) {
       setError(t.users.errors.invalid_allowance);
       return;
@@ -301,14 +308,24 @@ export function UsersPanel() {
               <option value="admin">{t.users.role.admin}</option>
             </select>
             <label htmlFor="invite-allowance">{t.users.inviteDialog.allowance}</label>
-            <input
-              id="invite-allowance"
-              type="number"
-              min={1}
-              value={inviteAllowance}
-              onChange={(e) => setInviteAllowance(e.target.value)}
-              placeholder={t.users.unlimited}
-            />
+            <div className="allowance-row">
+              <input
+                id="invite-allowance"
+                type="number"
+                min={1}
+                value={inviteAllowance}
+                onChange={(e) => setInviteAllowance(e.target.value)}
+                placeholder={t.users.unlimited}
+              />
+              <select
+                aria-label={t.users.inviteDialog.allowance}
+                value={inviteAllowanceUnit}
+                onChange={(e) => setInviteAllowanceUnit(e.target.value as 'gb' | 'tb')}
+              >
+                <option value="gb">GB</option>
+                <option value="tb">TB</option>
+              </select>
+            </div>
             <p className="muted small">{t.users.inviteDialog.allowanceHint}</p>
             {error && <p className="form-error" role="alert">{error}</p>}
             <div className="actions">
@@ -332,14 +349,24 @@ export function UsersPanel() {
               <option value="admin">{t.users.role.admin}</option>
             </select>
             <label htmlFor="edit-allowance">{t.users.editDialog.allowance}</label>
-            <input
-              id="edit-allowance"
-              type="number"
-              min={1}
-              value={editAllowance}
-              onChange={(e) => setEditAllowance(e.target.value)}
-              placeholder={t.users.unlimited}
-            />
+            <div className="allowance-row">
+              <input
+                id="edit-allowance"
+                type="number"
+                min={1}
+                value={editAllowance}
+                onChange={(e) => setEditAllowance(e.target.value)}
+                placeholder={t.users.unlimited}
+              />
+              <select
+                aria-label={t.users.editDialog.allowance}
+                value={editAllowanceUnit}
+                onChange={(e) => setEditAllowanceUnit(e.target.value as 'gb' | 'tb')}
+              >
+                <option value="gb">GB</option>
+                <option value="tb">TB</option>
+              </select>
+            </div>
             <p className="muted small">{t.users.editDialog.allowanceHint}</p>
             {error && <p className="form-error" role="alert">{error}</p>}
             <div className="actions">

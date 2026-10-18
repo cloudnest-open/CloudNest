@@ -119,6 +119,16 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   const [renameTarget, setRenameTarget] = useState<AccountInfo | null>(null);
   const [renameLabel, setRenameLabel] = useState('');
   const [renameError, setRenameError] = useState<string | null>(null);
+  // session-26 F9: OAuth runs in a NEW tab (the tunnel wizard's pattern) — the
+  // app stays here, keeps its state, and polls for the outcome instead of
+  // navigating itself away and losing everything on-screen.
+  const [oauthWait, setOauthWait] = useState<{
+    providerId: string;
+    providerName: string;
+    accountId: string | null;
+    baseline: number;
+    deadline: number;
+  } | null>(null);
 
   // On arrival, honour a pending "continue connecting" hand-off from Settings.
   useEffect(() => {
@@ -158,6 +168,51 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     try { sessionStorage.setItem('cloudnest.connectPickerOpen', pickerOpen ? '1' : '0'); } catch { /* private mode */ }
   }, [pickerOpen]);
 
+  // session-26 F9: poll the account list while the provider tab is open. A
+  // first-ever connect succeeds when this provider gains an account; a
+  // reconnect succeeds when its account returns to 'connected'. Five honest
+  // minutes, then the notice says exactly that — the user can also stop
+  // waiting explicitly.
+  useEffect(() => {
+    if (!oauthWait) return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        if (Date.now() > oauthWait.deadline) {
+          setOauthWait(null);
+          setError(tf(t.accounts.oauthWait.timeout, { provider: oauthWait.providerName }));
+          return;
+        }
+        try {
+          const res = await api.accounts();
+          if (cancelled || res.status !== 200) return;
+          const rows = (res.data as { accounts?: AccountInfo[] }).accounts ?? [];
+          setAccounts(rows);
+          if (oauthWait.accountId) {
+            const target = rows.find((r) => r.id === oauthWait.accountId);
+            if (target?.status === 'connected') {
+              setOauthWait(null);
+              setNotice(tf(t.accounts.oauthWait.completed, { provider: oauthWait.providerName }));
+            }
+            return;
+          }
+          const count = rows.filter((r) => r.provider === oauthWait.providerId).length;
+          if (count > oauthWait.baseline) {
+            setOauthWait(null);
+            setNotice(tf(t.accounts.oauthWait.completed, { provider: oauthWait.providerName }));
+          }
+        } catch {
+          // the next tick retries; the provider tab stays open
+        }
+      })();
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the wait object fully identifies the poll
+  }, [oauthWait]);
+
   const reload = useCallback(async () => {
     // FE-04: without this the page showed "Loading…" forever on a network error
     try {
@@ -194,14 +249,34 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       setS3Open(true);
       return;
     }
+    // session-26 F9: open the provider's consent page in a NEW tab — opened
+    // synchronously inside the click so popup blockers allow it, then pointed
+    // at the real authorization URL once the server answers. This page never
+    // navigates away; it polls and reports the outcome.
+    const authWindow = window.open('', '_blank');
+    if (!authWindow) {
+      setError(t.accounts.popupBlocked);
+      return;
+    }
+    authWindow.opener = null;
     const res = await api.oauthStart(p.id);
     if (res.status === 200) {
       const url = (res.data as { authorizationUrl: string }).authorizationUrl;
       // the setup round-trip is complete; no stale hand-off should linger
       writeHandoff(PENDING_KEY, null);
-      window.location.assign(url);
+      authWindow.location.replace(url);
+      setOauthWait({
+        providerId: p.id,
+        providerName: p.displayName,
+        accountId: null,
+        baseline: accounts.filter((a) => a.provider === p.id).length,
+        deadline: Date.now() + 5 * 60_000,
+      });
       return;
     }
+    // the tab is useless without an authorization URL — close it and handle
+    // the failure honestly right here
+    authWindow.close();
     const data = res.data as { error?: string; code?: string };
     if (data.code === 'provider_not_configured') {
       // wizard §1 (rclone-style): the FIRST-EVER connect opens the one-time
@@ -290,7 +365,22 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       const res = await api.reconnect(account.id);
       const data = res.data as { mode?: string; authorizationUrl?: string; message?: string };
       if (data.mode === 'oauth' && data.authorizationUrl) {
-        window.location.assign(data.authorizationUrl);
+        // session-26 F9: the browser re-auth also opens in a new tab; this
+        // page polls until the account reports 'connected' again.
+        const authWindow = window.open('', '_blank');
+        if (!authWindow) {
+          setError(t.accounts.popupBlocked);
+          return;
+        }
+        authWindow.opener = null;
+        authWindow.location.replace(data.authorizationUrl);
+        setOauthWait({
+          providerId: account.provider,
+          providerName: providers.find((x) => x.id === account.provider)?.displayName ?? account.provider,
+          accountId: account.id,
+          baseline: 0,
+          deadline: Date.now() + 5 * 60_000,
+        });
         return;
       }
       if (data.mode === 'credentials') {
@@ -424,6 +514,13 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   async function submitMega(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    // session-26 F16: branded inline validation — the browser's native
+    // "Please fill out this field." bubble was off-tone with every other
+    // surface in the app.
+    if (megaEmail.trim() === '' || megaPassword === '') {
+      setError(t.accounts.mega.missingFields);
+      return;
+    }
     const res = await api.megaConnect(megaEmail, megaPassword, mega2fa.trim() || undefined);
     setMegaPassword('');
     if (res.status === 201) {
@@ -448,6 +545,11 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   async function submitS3(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    // session-26 F16: same branded validation as the MEGA form.
+    if (s3Endpoint.trim() === '' || s3AccessKey.trim() === '' || s3Secret === '' || s3Bucket.trim() === '') {
+      setError(t.accounts.s3.missingFields);
+      return;
+    }
     const capBytes = s3Cap.trim() ? Number(s3Cap.trim()) : null;
     const res = await api.connectS3({
       endpoint: s3Endpoint.trim(),
@@ -504,6 +606,15 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       {error && (
         <div className="card error-card" role="alert">
           <p>{error}</p>
+        </div>
+      )}
+
+      {oauthWait && (
+        <div className="card notice-card" role="status">
+          <p>{tf(t.accounts.oauthWait.waiting, { provider: oauthWait.providerName })}</p>
+          <button type="button" className="btn-secondary" onClick={() => setOauthWait(null)}>
+            {t.accounts.oauthWait.cancel}
+          </button>
         </div>
       )}
 
@@ -619,7 +730,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
         <section className="card">
           <h2>{t.accounts.mega.title} <span className="tag tag-warn">{t.accounts.mega.experimental}</span></h2>
           <p className="muted">{t.accounts.mega.note}</p>
-          <form onSubmit={submitMega} className="password-form">
+          <form onSubmit={submitMega} noValidate className="password-form">
             <label htmlFor="mega-email">{t.accounts.mega.email}</label>
             <input id="mega-email" type="email" value={megaEmail} onChange={(e) => setMegaEmail(e.target.value)} required />
             <label htmlFor="mega-password">{t.accounts.mega.password}</label>
@@ -641,7 +752,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
         <section className="card">
           <h2>{t.accounts.s3.title}</h2>
           <p className="muted">{t.accounts.s3.note}</p>
-          <form onSubmit={submitS3} className="password-form">
+          <form onSubmit={submitS3} noValidate className="password-form">
             <label htmlFor="s3-endpoint">{t.accounts.s3.endpoint}</label>
             <input id="s3-endpoint" type="url" placeholder="https://acc123.r2.cloudflarestorage.com" value={s3Endpoint} onChange={(e) => setS3Endpoint(e.target.value)} required />
             <label htmlFor="s3-region">{t.accounts.s3.region}</label>
@@ -687,6 +798,12 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
               type="button"
               role="tab"
               aria-selected={tierTab === tier}
+              // session-26 F11: the count badge glued to the label made screen
+              // readers say "Personal2" — the accessible name carries the count.
+              aria-label={tf(t.accounts.tabs.countAria, {
+                label: tier === 'personal' ? t.accounts.tabs.personal : t.accounts.tabs.business,
+                count: accounts.filter((a) => (a.tier ?? 'personal') === tier).length,
+              })}
               className={`tab${tierTab === tier ? ' active' : ''}`}
               onClick={() => setTierTab(tier)}
             >
