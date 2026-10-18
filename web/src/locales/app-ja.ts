@@ -243,6 +243,7 @@ export const appJa: AppStrings = {
       nameLabel: 'フォルダ名',
       create: '作成',
       nameError: 'フォルダを保存できませんでした（{code}）。',
+      nameRequired: 'フォルダ名は必須です。',
       notEmpty: '「{name}」にはまだファイルやフォルダがあります。先に空にしてください。',
       renameTitle: 'フォルダ名を変更',
       renameDesc: 'フォルダ名だけが変わります。ファイルはそのままです。',
@@ -315,6 +316,7 @@ export const appJa: AppStrings = {
     deleteSelected: '選択を削除',
     clearSelection: '選択を解除',
     shareDisabledTitle: '共有するには、選択したすべてのファイルが完了状態である必要があります。',
+    shareDisabledRowTitle: 'このファイルはアップロードが完了するまで共有できません。',
     deleteDisabledTitle: '選択したファイルはすでに削除されています。',
     selectAllAria: 'このページのすべてのファイルを選択',
     selectOneAria: '{name} を選択',
@@ -569,6 +571,7 @@ export const appJa: AppStrings = {
       'ダウンロードのためにサーバーに接続できません。CloudNest が起動しているか確認して、再試行してください。',
     failedWithCode:
       'ダウンロードに失敗しました（{code}）。ファイルのチャンクとプロバイダーアカウントを確認して、再試行してください。',
+    notPlacedTitle: 'このファイルにはまだ保存済みチャンクがありません — まずプロバイダーへアップロードかミラーしてください。',
     failedWithStatus:
       'ダウンロードに失敗しました（HTTP {status}）。ファイルのチャンクとプロバイダーアカウントを確認して、再試行してください。',
     errorLoad: 'ダウンロード一覧を読み込めませんでした。サーバーが実データを返しませんでした。',
@@ -769,7 +772,13 @@ export const appJa: AppStrings = {
       excludeUploads: 'アップロードから除外',
       includeUploads: 'アップロードに含める',
       excludedBadge: 'アップロード外',
-      renamePrompt: 'このアカウントの新しいラベル：',
+      renameDialog: {
+        title: 'アカウント名を変更',
+        desc: '表示名だけが変わります — 接続・クォータ・ファイルはそのままです。',
+        label: 'アカウント表示名',
+        save: '変更を保存',
+        required: 'アカウント表示名は必須です。',
+      },
       footnote:
         'プロバイダーが報告するクォータは CloudNest の外部で変化することがあります。「利用可能」は推定値であり、予約の保証ではありません。接続を解除してもリモートファイルは削除されません。',
     },

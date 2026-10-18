@@ -248,6 +248,7 @@ export const appDe: AppStrings = {
       nameLabel: 'Ordnername',
       create: 'Erstellen',
       nameError: 'Der Ordner konnte nicht gespeichert werden ({code}).',
+      nameRequired: 'Der Ordnername ist erforderlich.',
       notEmpty: '„{name}“ enthält noch Dateien oder Ordner. Bitte zuerst leeren.',
       renameTitle: 'Ordner umbenennen',
       renameDesc: 'Nur der Ordnername ändert sich; Dateien bleiben, wo sie sind.',
@@ -320,6 +321,7 @@ export const appDe: AppStrings = {
     deleteSelected: 'Auswahl löschen',
     clearSelection: 'Auswahl aufheben',
     shareDisabledTitle: 'Alle ausgewählten Dateien müssen abgeschlossen sein, bevor sie geteilt werden können.',
+    shareDisabledRowTitle: 'Diese Datei muss zuerst fertig hochgeladen werden, bevor sie geteilt werden kann.',
     deleteDisabledTitle: 'Die ausgewählten Dateien sind bereits gelöscht.',
     selectAllAria: 'Alle Dateien dieser Seite auswählen',
     selectOneAria: '{name} auswählen',
@@ -582,6 +584,7 @@ export const appDe: AppStrings = {
       'Der Server war für den Download nicht erreichbar. Prüfe, ob CloudNest läuft, und versuche es erneut.',
     failedWithCode:
       'Der Download ist fehlgeschlagen ({code}). Prüfe die Chunks der Datei und die Anbieter-Konten, und versuche es erneut.',
+    notPlacedTitle: 'Diese Datei hat noch keine gespeicherten Chunks — lade sie zuerst hoch oder spiegele sie bei einem Anbieter.',
     failedWithStatus:
       'Der Download ist fehlgeschlagen (HTTP {status}). Prüfe die Chunks der Datei und die Anbieter-Konten, und versuche es erneut.',
     errorLoad: 'Die Download-Liste konnte nicht geladen werden. Der Server hat keine echten Daten geliefert.',
@@ -782,7 +785,13 @@ export const appDe: AppStrings = {
       excludeUploads: 'Aus Uploads ausschließen',
       includeUploads: 'In Uploads einschließen',
       excludedBadge: 'Nicht in Uploads',
-      renamePrompt: 'Neue Bezeichnung für dieses Konto:',
+      renameDialog: {
+        title: 'Konto umbenennen',
+        desc: 'Nur die Bezeichnung ändert sich — Verbindung, Kontingent und Dateien bleiben unverändert.',
+        label: 'Konto-Bezeichnung',
+        save: 'Änderungen speichern',
+        required: 'Die Konto-Bezeichnung ist erforderlich.',
+      },
       footnote:
         'Anbietergemeldete Kontingente können sich außerhalb von CloudNest ändern. „Verfügbar“ ist eine Schätzung, keine Reservierungsgarantie. Beim Trennen werden Remote-Dateien nie gelöscht.',
     },

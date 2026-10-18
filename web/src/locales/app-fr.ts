@@ -248,6 +248,7 @@ export const appFr: AppStrings = {
       nameLabel: 'Nom du dossier',
       create: 'Créer',
       nameError: 'Le dossier n’a pas pu être enregistré ({code}).',
+      nameRequired: 'Le nom du dossier est obligatoire.',
       notEmpty: '« {name} » contient encore des fichiers ou des dossiers. Videz-le d’abord.',
       renameTitle: 'Renommer le dossier',
       renameDesc: 'Seul le nom du dossier change ; les fichiers restent en place.',
@@ -320,6 +321,7 @@ export const appFr: AppStrings = {
     deleteSelected: 'Supprimer la sélection',
     clearSelection: 'Effacer',
     shareDisabledTitle: 'Tous les fichiers sélectionnés doivent être terminés avant de pouvoir être partagés.',
+    shareDisabledRowTitle: 'Ce fichier doit terminer son transfert avant de pouvoir être partagé.',
     deleteDisabledTitle: 'Les fichiers sélectionnés sont déjà supprimés.',
     selectAllAria: 'Sélectionner tous les fichiers de cette page',
     selectOneAria: 'Sélectionner {name}',
@@ -582,6 +584,7 @@ export const appFr: AppStrings = {
       'Impossible de joindre le serveur pour le téléchargement. Vérifiez que CloudNest est démarré, puis réessayez.',
     failedWithCode:
       'Le téléchargement a échoué ({code}). Vérifiez les segments du fichier et les comptes fournisseurs, puis réessayez.',
+    notPlacedTitle: 'Ce fichier n’a encore aucun fragment stocké — téléversez-le ou créez d’abord un miroir chez un fournisseur.',
     failedWithStatus:
       'Le téléchargement a échoué (HTTP {status}). Vérifiez les segments du fichier et les comptes fournisseurs, puis réessayez.',
     errorLoad: 'La liste des téléchargements n’a pas pu être chargée. Le serveur n’a pas renvoyé de données réelles.',
@@ -782,7 +785,13 @@ export const appFr: AppStrings = {
       excludeUploads: 'Exclure des téléversements',
       includeUploads: 'Inclure dans les téléversements',
       excludedBadge: 'Hors des téléversements',
-      renamePrompt: 'Nouveau libellé pour ce compte :',
+      renameDialog: {
+        title: 'Renommer le compte',
+        desc: 'Seul le libellé change — la connexion, le quota et les fichiers restent inchangés.',
+        label: 'Libellé du compte',
+        save: 'Enregistrer les modifications',
+        required: 'Le libellé du compte est obligatoire.',
+      },
       footnote:
         'Les quotas rapportés par les fournisseurs peuvent évoluer en dehors de CloudNest. « Disponible » est une estimation, pas une garantie de réservation. Déconnecter ne supprime jamais les fichiers distants.',
     },

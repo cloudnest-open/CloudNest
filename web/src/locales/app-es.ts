@@ -246,6 +246,7 @@ export const appEs: AppStrings = {
       nameLabel: 'Nombre de la carpeta',
       create: 'Crear',
       nameError: 'No se pudo guardar la carpeta ({code}).',
+      nameRequired: 'El nombre de la carpeta es obligatorio.',
       notEmpty: '«{name}» todavía contiene archivos o carpetas. Vacíala primero.',
       renameTitle: 'Renombrar carpeta',
       renameDesc: 'Solo cambia el nombre de la carpeta; los archivos quedan donde están.',
@@ -318,6 +319,7 @@ export const appEs: AppStrings = {
     deleteSelected: 'Eliminar selección',
     clearSelection: 'Limpiar',
     shareDisabledTitle: 'Todos los archivos seleccionados deben estar completos para poder compartirlos.',
+    shareDisabledRowTitle: 'Este archivo debe terminar de subirse antes de poder compartirlo.',
     deleteDisabledTitle: 'Los archivos seleccionados ya están eliminados.',
     selectAllAria: 'Seleccionar todos los archivos de esta página',
     selectOneAria: 'Seleccionar {name}',
@@ -577,6 +579,7 @@ export const appEs: AppStrings = {
     reachFailed:
       'No se pudo contactar con el servidor para la descarga. Comprueba que CloudNest esté en ejecución y reintenta.',
     failedWithCode: 'La descarga falló ({code}). Comprueba los fragmentos del archivo y las cuentas de proveedor, y reintenta.',
+    notPlacedTitle: 'Este archivo aún no tiene fragmentos almacenados — súbelo o crea un espejo en un proveedor primero.',
     failedWithStatus:
       'La descarga falló (HTTP {status}). Comprueba los fragmentos del archivo y las cuentas de proveedor, y reintenta.',
     errorLoad: 'No se pudo cargar la lista de descargas. El servidor no respondió con datos reales.',
@@ -776,7 +779,13 @@ export const appEs: AppStrings = {
       excludeUploads: 'Excluir de las subidas',
       includeUploads: 'Incluir en las subidas',
       excludedBadge: 'Fuera de las subidas',
-      renamePrompt: 'Nueva etiqueta para esta cuenta:',
+      renameDialog: {
+        title: 'Renombrar cuenta',
+        desc: 'Solo cambia la etiqueta: la conexión, la cuota y los archivos quedan igual.',
+        label: 'Etiqueta de la cuenta',
+        save: 'Guardar cambios',
+        required: 'La etiqueta de la cuenta es obligatoria.',
+      },
       footnote:
         'Las cuotas informadas por los proveedores pueden cambiar fuera de CloudNest. «Disponible» es una estimación, no una garantía de reserva. Desconectar nunca elimina archivos remotos.',
     },

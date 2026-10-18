@@ -114,6 +114,11 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [edit2fa, setEdit2fa] = useState('');
+  // session-26 F2: Rename is a branded dialog — the native window.prompt was
+  // invisible in embedded browsers and off-tone with every other surface.
+  const [renameTarget, setRenameTarget] = useState<AccountInfo | null>(null);
+  const [renameLabel, setRenameLabel] = useState('');
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   // On arrival, honour a pending "continue connecting" hand-off from Settings.
   useEffect(() => {
@@ -238,11 +243,22 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     });
   }
 
-  async function rename(account: AccountInfo) {
-    const label = window.prompt(t.accounts.list.renamePrompt, account.displayLabel);
-    if (!label) return;
-    await withBusy(account.id, async () => {
-      await api.updateAccount(account.id, { displayLabel: label });
+  function openRename(account: AccountInfo) {
+    setRenameError(null);
+    setRenameLabel(account.displayLabel);
+    setRenameTarget(account);
+  }
+
+  async function saveRename() {
+    const target = renameTarget;
+    if (!target) return;
+    const label = renameLabel.trim();
+    // F1-sibling honesty: an empty submit explains itself instead of vanishing.
+    if (label === '') { setRenameError(t.accounts.list.renameDialog.required); return; }
+    if (label === target.displayLabel) { setRenameTarget(null); return; }
+    await withBusy(target.id, async () => {
+      await api.updateAccount(target.id, { displayLabel: label });
+      setRenameTarget(null);
       await reload();
     });
   }
@@ -756,7 +772,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                           {a.provider === 's3' || a.provider === 'mega' ? t.accounts.edit.menuItem : t.accounts.edit.appConfigItem}
                         </RowMenuItem>
                         <RowMenuItem disabled={busyId === a.id} onSelect={() => void refreshOne(a.id)}>{t.accounts.list.refreshQuota}</RowMenuItem>
-                        <RowMenuItem disabled={busyId === a.id} onSelect={() => void rename(a)}>{t.accounts.list.rename}</RowMenuItem>
+                        <RowMenuItem disabled={busyId === a.id} onSelect={() => openRename(a)}>{t.accounts.list.rename}</RowMenuItem>
                         <RowMenuItem disabled={busyId === a.id} onSelect={() => void toggleParticipation(a)}>
                           {a.participatesInUploads ? t.accounts.list.excludeUploads : t.accounts.list.includeUploads}
                         </RowMenuItem>
@@ -806,6 +822,42 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
             >
               {t.accounts.sharedPool.save}
             </button>
+          </div>
+        </Dialog>
+      )}
+
+      {renameTarget && (
+        <Dialog
+          title={t.accounts.list.renameDialog.title}
+          description={t.accounts.list.renameDialog.desc}
+          onClose={() => { if (busyId === null) setRenameTarget(null); }}
+          footer={
+            <>
+              <button type="button" className="btn-secondary" disabled={busyId === renameTarget.id} onClick={() => setRenameTarget(null)}>
+                {t.dialog.cancel}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busyId === renameTarget.id || renameLabel.trim() === ''}
+                onClick={() => void saveRename()}
+              >
+                {t.accounts.list.renameDialog.save}
+              </button>
+            </>
+          }
+        >
+          <div className="upload-form">
+            <label htmlFor="account-rename-input">{t.accounts.list.renameDialog.label}</label>
+            <input
+              id="account-rename-input"
+              type="text"
+              value={renameLabel}
+              autoFocus
+              onChange={(e) => setRenameLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void saveRename(); }}
+            />
+            {renameError && <p className="form-error" role="alert">{renameError}</p>}
           </div>
         </Dialog>
       )}

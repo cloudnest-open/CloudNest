@@ -247,6 +247,7 @@ export const appPtBr: AppStrings = {
       nameLabel: 'Nome da pasta',
       create: 'Criar',
       nameError: 'Não foi possível salvar a pasta ({code}).',
+      nameRequired: 'O nome da pasta é obrigatório.',
       notEmpty: '“{name}” ainda contém arquivos ou pastas. Esvazie-a primeiro.',
       renameTitle: 'Renomear pasta',
       renameDesc: 'Só o nome da pasta muda; os arquivos ficam onde estão.',
@@ -319,6 +320,7 @@ export const appPtBr: AppStrings = {
     deleteSelected: 'Excluir seleção',
     clearSelection: 'Limpar',
     shareDisabledTitle: 'Todos os arquivos selecionados precisam estar concluídos para poderem ser compartilhados.',
+    shareDisabledRowTitle: 'Este arquivo precisa terminar de ser enviado antes de poder ser compartilhado.',
     deleteDisabledTitle: 'Os arquivos selecionados já estão excluídos.',
     selectAllAria: 'Selecionar todos os arquivos desta página',
     selectOneAria: 'Selecionar {name}',
@@ -581,6 +583,7 @@ export const appPtBr: AppStrings = {
       'Não foi possível contatar o servidor para o download. Verifique se o CloudNest está em execução e tente novamente.',
     failedWithCode:
       'O download falhou ({code}). Verifique os chunks do arquivo e as contas de provedor, então tente novamente.',
+    notPlacedTitle: 'Este arquivo ainda não tem blocos armazenados — envie-o ou espelhe-o em um provedor primeiro.',
     failedWithStatus:
       'O download falhou (HTTP {status}). Verifique os chunks do arquivo e as contas de provedor, então tente novamente.',
     errorLoad: 'Não foi possível carregar a lista de downloads. O servidor não respondeu com dados reais.',
@@ -781,7 +784,13 @@ export const appPtBr: AppStrings = {
       excludeUploads: 'Excluir dos envios',
       includeUploads: 'Incluir nos envios',
       excludedBadge: 'Fora dos envios',
-      renamePrompt: 'Novo rótulo para esta conta:',
+      renameDialog: {
+        title: 'Renomear conta',
+        desc: 'Só o nome muda — a conexão, a cota e os arquivos permanecem iguais.',
+        label: 'Nome da conta',
+        save: 'Salvar alterações',
+        required: 'O nome da conta é obrigatório.',
+      },
       footnote:
         'As cotas informadas pelos provedores podem mudar fora do CloudNest. “Disponível” é uma estimativa, não uma garantia de reserva. Desconectar nunca exclui arquivos remotos.',
     },

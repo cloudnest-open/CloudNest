@@ -156,7 +156,13 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
               <td>{formatBytes(file.sizeBytes)}</td>
               <td>
                 <span className="file-name-cell">
-                  {file.storedAcross.length === 0 ? (
+                  {/* session-26 F15: one state, one name — an in-flight upload
+                      says "Uploading" here exactly like it does on Shared
+                      Links; only a completed file with zero placements is
+                      "Not yet placed". */}
+                  {file.state === 'uploading' ? (
+                    <span className="muted small">{t.states.file.uploading}</span>
+                  ) : file.storedAcross.length === 0 ? (
                     <span className="muted small">{t.common.notPlaced}</span>
                   ) : (
                     <>
@@ -179,6 +185,7 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                     type="button"
                     className="btn-inline"
                     disabled={file.state !== 'completed'}
+                    title={file.state !== 'completed' ? t.table.shareDisabledRowTitle : undefined}
                     onClick={() => actions.share(file, reload)}
                   >
                     <ShareIcon size={14} aria-hidden="true" />

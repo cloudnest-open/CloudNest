@@ -34,6 +34,9 @@ interface FileView {
   originalName: string;
   sizeBytes: number;
   state: string;
+  /** session-26 F3: empty = nothing is stored on any provider yet, so a
+   * download could only ever fail — the button says so instead. */
+  storedAcross: string[];
 }
 
 export function DownloadsPage() {
@@ -90,6 +93,10 @@ export function DownloadsPage() {
   }
 
   async function startDownload(file: FileView) {
+    // session-26 F3: an unplaced file has no bytes anywhere — starting a job
+    // could only end in the honest chunk_missing failure, so the row-level
+    // button is disabled and this guard keeps the keyboard path honest too.
+    if (file.storedAcross.length === 0) return;
     // FE-08: fetch first so a failed download surfaces IN-APP instead of
     // replacing the whole page with a raw JSON error document. The start
     // feedback is a toast (session-21 batch-C): the primary action deserves
@@ -191,7 +198,9 @@ export function DownloadsPage() {
     }
   }
 
-  const downloadable = files.filter((f) => f.state === 'completed');
+  const downloadable = files
+    .filter((f) => f.state === 'completed')
+    .map((f) => ({ ...f, storedAcross: f.storedAcross ?? [] }));
   const fileNames = new Map(files.map((file) => [file.id, file.originalName]));
 
   return (
@@ -228,10 +237,26 @@ export function DownloadsPage() {
             <tbody>
               {downloadable.map((file) => (
                 <tr key={file.id}>
-                  <td className="download-file-name-cell" title={file.originalName}>{file.originalName}</td>
+                  <td className="download-file-name-cell">
+                    <span className="download-file-name" title={file.originalName}>{file.originalName}</span>
+                    {file.storedAcross.length === 0 && (
+                      <span className="download-range-meta muted small">{t.common.notPlaced}</span>
+                    )}
+                  </td>
                   <td>{formatBytes(file.sizeBytes)}</td>
                   <td className="actions">
-                    <button type="button" className="btn-primary" onClick={() => startDownload(file)}>{t.downloads.download}</button>
+                    {/* session-26 F3: a file with zero placements cannot
+                        produce a download — the disabled button carries the
+                        reason, matching the Files page's disabled Share. */}
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      disabled={file.storedAcross.length === 0}
+                      title={file.storedAcross.length === 0 ? t.downloads.notPlacedTitle : undefined}
+                      onClick={() => void startDownload(file)}
+                    >
+                      {t.downloads.download}
+                    </button>
                   </td>
                 </tr>
               ))}

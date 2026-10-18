@@ -192,7 +192,10 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
 
   async function createFolder(): Promise<void> {
     const name = newFolderName.trim();
-    if (name === '') { setNewFolderOpen(false); return; }
+    // session-26 F1: an empty submit explains itself — the old code closed the
+    // dialog silently, throwing the user's intent away with no folder and no
+    // message.
+    if (name === '') { setFolderError(t.files.folders.nameRequired); return; }
     setFolderBusy(true);
     setFolderError(null);
     try {
@@ -214,7 +217,8 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
     const target = renameFolderTarget;
     if (!target) return;
     const name = renameFolderName.trim();
-    if (name === '' || name === target.name) { setRenameFolderTarget(null); return; }
+    if (name === '') { setFolderError(t.files.folders.nameRequired); return; }
+    if (name === target.name) { setRenameFolderTarget(null); return; }
     setFolderBusy(true);
     setFolderError(null);
     try {
@@ -428,7 +432,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
                             type="button"
                             className="btn-inline"
                             aria-label={tf(t.files.folders.renameAria, { name: folder.name })}
-                            onClick={() => { setRenameFolderTarget(folder); setRenameFolderName(folder.name); }}
+                            onClick={() => { setRenameFolderTarget(folder); setRenameFolderName(folder.name); setFolderError(null); }}
                           >
                             <Pencil size={14} aria-hidden="true" />
                             {t.table.rename}
@@ -632,7 +636,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
               <button type="button" className="btn-secondary" disabled={folderBusy} onClick={() => setNewFolderOpen(false)}>
                 {t.dialog.cancel}
               </button>
-              <button type="button" className="btn-primary" disabled={folderBusy} onClick={() => void createFolder()}>
+              <button type="button" className="btn-primary" disabled={folderBusy || newFolderName.trim() === ''} onClick={() => void createFolder()}>
                 {t.files.folders.create}
               </button>
             </>
@@ -662,7 +666,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
               <button type="button" className="btn-secondary" disabled={folderBusy} onClick={() => setRenameFolderTarget(null)}>
                 {t.dialog.cancel}
               </button>
-              <button type="button" className="btn-primary" disabled={folderBusy} onClick={() => void renameFolder()}>
+              <button type="button" className="btn-primary" disabled={folderBusy || renameFolderName.trim() === ''} onClick={() => void renameFolder()}>
                 {t.fileActions.rename.save}
               </button>
             </>
