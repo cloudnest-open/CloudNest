@@ -12,10 +12,11 @@ import { UserError } from '../users/user-service.js';
  * Authentication routes. Generic errors only — never reveal whether an admin
  * row or a user account exists, never echo a password, never log secrets.
  *
- * Roadmap Phase 3: two principal kinds share this router. The root admin keeps
- * signing in with the fixed username 'admin' (credentials in admin_users); a
- * users-table account signs in with its email. Both get server-side sessions
- * with the same rotation, CSRF, rate limit and audit treatment.
+ * Roadmap Phase 3: two principal kinds share this router. The root admin signs
+ * in with the username held in admin_users (the login name it renamed itself
+ * to; setup seeds it as 'admin'); a users-table account signs in with its
+ * email. Both get server-side sessions with the same rotation, CSRF, rate
+ * limit and audit treatment.
  */
 export function authRouter(
   queries: Queries,
@@ -63,13 +64,12 @@ export function authRouter(
         return;
       }
 
-      // the built-in root admin keeps its dedicated credential row and path
-      if (username === 'admin') {
-        const admin = queries.getAdmin();
-        const ok =
-          admin !== undefined &&
-          username === admin.username &&
-          (await verifyPassword(password, admin.password_hash));
+      // the built-in root admin keeps its dedicated credential row and path;
+      // the login name is whatever the admin renamed it to (stored lowercase,
+      // matched case-insensitively — the same convention as member emails)
+      const admin = queries.getAdmin();
+      if (admin !== undefined && username.toLowerCase() === admin.username) {
+        const ok = await verifyPassword(password, admin.password_hash);
         if (!ok) {
           queries.recordAudit('login', false, 'invalid_credentials');
           res.status(401).json({ error: 'Invalid username or password.' });
@@ -232,6 +232,52 @@ export function authRouter(
         if (err instanceof UserError && err.safeCode === 'wrong_current_password') {
           queries.recordAudit('password_change', false, 'wrong_current_password');
           res.status(401).json({ error: 'Current password is incorrect.' });
+          return;
+        }
+        throw err;
+      }
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---- the built-in admin's login-name rename ----
+  // The admin re-proves the current password; the new name must be free.
+  // Sessions stay valid (they carry the fixed id, never the username), so
+  // unlike a password change no logout is forced. Members are refused: the
+  // owner asked for the admin's rename only, member self-rename stays an open
+  // decision.
+  router.post('/api/auth/change-username', csrf.doubleCsrfProtection, async (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      const principal = resolvePrincipal(req, queries);
+      if (!principal) {
+        res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
+      if (principal.kind !== 'admin' || !users) {
+        res.status(403).json({ error: 'Only the built-in admin account can change its username.' });
+        return;
+      }
+      const body = (req.body ?? {}) as { currentPassword?: unknown; newUsername?: unknown };
+      const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+      const newUsername = typeof body.newUsername === 'string' ? body.newUsername : '';
+      try {
+        const username = await users.changeAdminUsername(currentPassword, newUsername);
+        queries.recordAudit('username_change', true, 'success');
+        res.json({ ok: true, username });
+      } catch (err) {
+        if (err instanceof UserError) {
+          queries.recordAudit('username_change', false, err.safeCode);
+          const responses: Record<string, { status: number; error: string }> = {
+            wrong_current_password: { status: 401, error: 'Current password is incorrect.' },
+            invalid_username: { status: 400, error: 'Enter a username of 1–254 characters with no spaces.' },
+            username_unchanged: { status: 400, error: 'The new username is the same as the current one.' },
+            username_taken: { status: 409, error: 'This username is already taken.' },
+            user_not_found: { status: 404, error: 'Authentication required' },
+          };
+          const mapped = responses[err.safeCode] ?? { status: err.httpStatus, error: err.safeCode };
+          res.status(mapped.status).json({ error: mapped.error, code: err.safeCode });
           return;
         }
         throw err;

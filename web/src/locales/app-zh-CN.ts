@@ -1053,6 +1053,16 @@ export const appZhCn: AppStrings = {
       success: '密码已更改。其他会话已退出登录。',
       failed: '密码更改失败。',
     },
+    changeUsername: {
+      title: '更改登录名',
+      next: '新登录名（不含空格）',
+      current: '当前密码',
+      submit: '更改登录名',
+      changing: '正在更改…',
+      success: '登录名已更改。当前会话保持登录状态；下次请使用新名称登录。',
+      failed: '登录名更改失败。',
+      hint: '您仍保持登录状态。下次登录时请使用新名称。',
+    },
   },
 
   summary: {

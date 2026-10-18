@@ -1112,6 +1112,16 @@ export const appPtBr: AppStrings = {
       success: 'Senha alterada. As outras sessões foram desconectadas.',
       failed: 'Falha na alteração da senha.',
     },
+    changeUsername: {
+      title: 'Alterar nome de login',
+      next: 'Novo nome de login (sem espaços)',
+      current: 'Senha atual',
+      submit: 'ALTERAR NOME DE LOGIN',
+      changing: 'Renomeando…',
+      success: 'Nome de login alterado. Esta sessão permanece conectada; na próxima vez, entre com o novo nome.',
+      failed: 'Falha na alteração do nome de login.',
+      hint: 'Você permanece conectado. Use o novo nome no próximo login.',
+    },
   },
 
   summary: {

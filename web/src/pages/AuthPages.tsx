@@ -62,3 +62,50 @@ export function ChangePasswordPanel({ onDone }: { onDone: (message: string) => v
     </section>
   );
 }
+
+/**
+ * Built-in admin only: rename the login identifier. The current password is
+ * re-proven; the session stays signed in — the new name matters at the next
+ * login. The server lowercases and trims, so what is typed here is what the
+ * login form will accept afterwards.
+ */
+export function ChangeUsernamePanel({ onDone }: { onDone: (message: string) => void }) {
+  const { t } = useI18n();
+  const cu = t.auth.changeUsername;
+  const [next, setNext] = useState('');
+  const [current, setCurrent] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    const { status, data } = await api.changeUsername(next, current);
+    if (status === 200) {
+      setNext('');
+      setCurrent('');
+      onDone(cu.success);
+    } else {
+      setError((data as { error?: string })?.error ?? cu.failed);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <section className="card">
+      <h2>{cu.title}</h2>
+      <form onSubmit={submit} className="password-form">
+        <label htmlFor="cu-new">{cu.next}</label>
+        <input id="cu-new" type="text" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="username" required />
+        <label htmlFor="cu-current">{cu.current}</label>
+        <input id="cu-current" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />
+        <ErrorNote message={error} />
+        <button type="submit" className="btn-primary" disabled={busy}>
+          {busy ? cu.changing : cu.submit}
+        </button>
+      </form>
+      <p className="password-form-hint">{cu.hint}</p>
+    </section>
+  );
+}

@@ -1113,6 +1113,16 @@ export const appFr: AppStrings = {
       success: 'Mot de passe changé. Les autres sessions ont été déconnectées.',
       failed: 'Le changement de mot de passe a échoué.',
     },
+    changeUsername: {
+      title: 'Changer le nom de connexion',
+      next: 'Nouveau nom de connexion (sans espaces)',
+      current: 'Mot de passe actuel',
+      submit: 'CHANGER LE NOM DE CONNEXION',
+      changing: 'Renommage…',
+      success: 'Nom de connexion changé. Cette session reste connectée ; connectez-vous avec le nouveau nom la prochaine fois.',
+      failed: 'Le changement de nom de connexion a échoué.',
+      hint: 'Vous restez connecté. Utilisez le nouveau nom lors de votre prochaine connexion.',
+    },
   },
 
   summary: {

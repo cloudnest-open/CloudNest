@@ -120,6 +120,9 @@ export const api = {
   logout: () => request('POST', '/api/auth/logout'),
   changePassword: (currentPassword: string, newPassword: string) =>
     request('POST', '/api/auth/change-password', { currentPassword, newPassword, confirmNew: newPassword }),
+  /** Built-in admin only: rename the login identifier; sessions stay valid. */
+  changeUsername: (newUsername: string, currentPassword: string) =>
+    request('POST', '/api/auth/change-username', { newUsername, currentPassword }),
   /** Public: set a password from a one-time invite / reset token. */
   acceptInvite: (token: string, password: string) =>
     request('POST', '/api/auth/accept-invite', { token, password, confirm: password }),

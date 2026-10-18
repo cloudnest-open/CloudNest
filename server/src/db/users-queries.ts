@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
-import type { UserRow } from './queries.js';
+import type { AdminRow, UserRow } from './queries.js';
 
 /**
  * Prepared statements for user management (roadmap Phase 3). The reads the
@@ -34,6 +34,12 @@ export function makeUserQueries(db: Database.Database) {
     ),
     setUserAllowance: db.prepare('UPDATE users SET allowance_bytes = @allowance_bytes, updated_at = @updated_at WHERE id = @id'),
     deleteUser: db.prepare('DELETE FROM users WHERE id = ?'),
+    // ---- the built-in admin's login-name rename ----
+    getAdmin: db.prepare('SELECT * FROM admin_users WHERE id = 1'),
+    /** Username only: no auth_version bump — sessions store the fixed id. */
+    updateAdminUsername: db.prepare('UPDATE admin_users SET username = @username, updated_at = @updated_at WHERE id = 1'),
+    /** The users row of the built-in admin always carries the same login name. */
+    setUserEmail: db.prepare('UPDATE users SET email = @email, updated_at = @updated_at WHERE id = @id'),
     countActiveAdmins: db.prepare(
       "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active'",
     ),

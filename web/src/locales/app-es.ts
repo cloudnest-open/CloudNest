@@ -1104,6 +1104,16 @@ export const appEs: AppStrings = {
       success: 'Contraseña cambiada. Las demás sesiones se cerraron.',
       failed: 'Falló el cambio de contraseña.',
     },
+    changeUsername: {
+      title: 'Cambiar el nombre de inicio de sesión',
+      next: 'Nuevo nombre de inicio de sesión (sin espacios)',
+      current: 'Contraseña actual',
+      submit: 'CAMBIAR NOMBRE DE SESIÓN',
+      changing: 'Renombrando…',
+      success: 'Nombre de inicio de sesión cambiado. Esta sesión sigue abierta; la próxima vez inicie sesión con el nuevo nombre.',
+      failed: 'Falló el cambio del nombre de inicio de sesión.',
+      hint: 'Sigue conectado. Use el nuevo nombre la próxima vez que inicie sesión.',
+    },
   },
 
   summary: {

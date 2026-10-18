@@ -1132,6 +1132,39 @@ const M0019_PROVIDER_DISPLAY_NAME: Migration = {
   },
 };
 
+const M0020_ADMIN_USERNAME_FREE: Migration = {
+  version: 20,
+  name: '0020-admin-username-free',
+  // The built-in admin's login name becomes changeable: M0002 pinned
+  // admin_users.username to the literal 'admin' with a CHECK constraint, so
+  // no rename could ever land. The rebuild keeps every column and the id=1
+  // singleton, drops only that CHECK (username stays NOT NULL UNIQUE). No
+  // table references admin_users, so the plain copy-rebuild is safe inside
+  // the runner's transaction. Sessions are unaffected — they store the
+  // admin's fixed id and auth_version, never the username.
+  up: (db) => {
+    db.exec('DROP TABLE IF EXISTS admin_users_new;');
+    db.exec(`
+      CREATE TABLE admin_users_new (
+        id INTEGER PRIMARY KEY CHECK(id = 1),
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        password_changed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        auth_version INTEGER NOT NULL DEFAULT 1 CHECK(auth_version >= 1)
+      );
+    `);
+    db.exec('INSERT INTO admin_users_new SELECT id, username, password_hash, password_changed_at, created_at, updated_at, auth_version FROM admin_users;');
+    db.exec('DROP TABLE admin_users;');
+    db.exec('ALTER TABLE admin_users_new RENAME TO admin_users;');
+    const violations = db.pragma('foreign_key_check', { simple: true });
+    if (violations) {
+      throw new Error('foreign_key_check failed after the admin-username migration');
+    }
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -1152,4 +1185,5 @@ export const allMigrations: readonly Migration[] = [
   M0017_TRANSFER_JOB_TYPE_INDEX,
   M0018_MODE_CONTEXT_TIER,
   M0019_PROVIDER_DISPLAY_NAME,
+  M0020_ADMIN_USERNAME_FREE,
 ];

@@ -133,3 +133,130 @@ test('raw password never appears in the database', async () => {
     await app.close();
   }
 });
+
+/** Invite a member, let them set a password, and return their logged-in client. */
+async function invitedMember(app: { url: string }, admin: Client, email: string, password: string) {
+  const invited = await admin.post('/api/users', {
+    email,
+    displayName: email.split('@')[0] ?? email,
+    role: 'member',
+    allowanceBytes: null,
+  });
+  assert.equal(invited.status, 201, JSON.stringify(invited.body));
+  const { acceptUrl } = invited.body as { acceptUrl: string };
+  const token = new URL(acceptUrl).searchParams.get('token') ?? '';
+  const claimer = new Client(app.url);
+  const claimed = await claimer.post('/api/auth/accept-invite', { token, password, confirm: password });
+  assert.equal(claimed.status, 200, JSON.stringify(claimed.body));
+  const client = new Client(app.url);
+  const login = await client.send('POST', '/api/auth/login', { username: email, password });
+  assert.equal(login.status, 200, JSON.stringify(login.body));
+  return client;
+}
+
+test('admin renames the login name: new name signs in, old name retires, session survives', async () => {
+  const { app, client } = await loggedIn();
+  try {
+    // a second pre-existing session must survive the rename (no forced logout)
+    const bystander = new Client(app.url);
+    await bystander.login(GOOD);
+
+    const renamed = await client.post('/api/auth/change-username', {
+      currentPassword: GOOD,
+      newUsername: 'nest-keeper',
+    });
+    assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
+    assert.deepEqual(renamed.body, { ok: true, username: 'nest-keeper' });
+
+    // the renaming session itself is untouched and shows the new name
+    const me = await client.get('/api/auth/me');
+    assert.equal((me.body as { authenticated: boolean; username?: string }).authenticated, true);
+    assert.equal((me.body as { username?: string }).username, 'nest-keeper');
+    // the bystander session survives too
+    const bystanderMe = await bystander.get('/api/auth/me');
+    assert.equal((bystanderMe.body as { authenticated: boolean }).authenticated, true);
+    assert.equal((bystanderMe.body as { username?: string }).username, 'nest-keeper');
+
+    // the users attribution row carries the same name
+    const users = await client.get('/api/users');
+    const adminRow = ((users.body as { users: Array<{ email: string }> }).users ?? []).find((u) => u.email === 'nest-keeper');
+    assert.ok(adminRow, 'the admin attribution row follows the rename');
+
+    // the new name signs in (case-insensitively, like member emails)
+    const fresh = new Client(app.url);
+    assert.equal((await fresh.send('POST', '/api/auth/login', { username: 'nest-keeper', password: GOOD })).status, 200);
+    assert.equal((await fresh.send('POST', '/api/auth/login', { username: 'Nest-Keeper', password: GOOD })).status, 200);
+    // the old name retires
+    assert.equal((await fresh.send('POST', '/api/auth/login', { username: 'admin', password: GOOD })).status, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+test('rename re-proofs the current password and validates the name', async () => {
+  const { app, client } = await loggedIn();
+  try {
+    const wrong = await client.post('/api/auth/change-username', {
+      currentPassword: 'not the password',
+      newUsername: 'nest-keeper',
+    });
+    assert.equal(wrong.status, 401);
+    assert.equal((wrong.body as { error?: string }).error, 'Current password is incorrect.');
+
+    const unchanged = await client.post('/api/auth/change-username', {
+      currentPassword: GOOD,
+      newUsername: 'admin',
+    });
+    assert.equal(unchanged.status, 400);
+    assert.equal((unchanged.body as { code?: string }).code, 'username_unchanged');
+
+    for (const bad of ['with space', '', '   ']) {
+      const invalid = await client.post('/api/auth/change-username', {
+        currentPassword: GOOD,
+        newUsername: bad,
+      });
+      assert.equal(invalid.status, 400, JSON.stringify(bad));
+      assert.equal((invalid.body as { code?: string }).code, 'invalid_username');
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test('rename refuses a name a member already holds, and members cannot rename', async () => {
+  const { app, client } = await loggedIn();
+  try {
+    const member = await invitedMember(app, client, 'casey@example.com', 'member passphrase here');
+
+    const taken = await client.post('/api/auth/change-username', {
+      currentPassword: GOOD,
+      newUsername: 'casey@example.com',
+    });
+    assert.equal(taken.status, 409);
+    assert.equal((taken.body as { code?: string }).code, 'username_taken');
+
+    const forbidden = await member.post('/api/auth/change-username', {
+      currentPassword: 'member passphrase here',
+      newUsername: 'casey',
+    });
+    assert.equal(forbidden.status, 403);
+
+    // the member keeps working after the admin's (refused) attempts
+    assert.equal((await member.get('/api/files')).status, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test('the retired name is free again: renaming back restores the old login', async () => {
+  const { app, client } = await loggedIn();
+  try {
+    assert.equal((await client.post('/api/auth/change-username', { currentPassword: GOOD, newUsername: 'nest-keeper' })).status, 200);
+    assert.equal((await client.post('/api/auth/change-username', { currentPassword: GOOD, newUsername: 'admin' })).status, 200);
+    const fresh = new Client(app.url);
+    assert.equal((await fresh.send('POST', '/api/auth/login', { username: 'admin', password: GOOD })).status, 200);
+    assert.equal((await fresh.send('POST', '/api/auth/login', { username: 'nest-keeper', password: GOOD })).status, 401);
+  } finally {
+    await app.close();
+  }
+});

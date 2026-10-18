@@ -6,7 +6,7 @@ import {
 import { api, refreshCsrfToken } from './api.js';
 import { TransferDock, type DownloadDockJob, type UploadDockJob } from './components/TransferDock.js';
 import { FirstRunPage, LoginPage } from './pages/EntryPage.js';
-import { ChangePasswordPanel } from './pages/AuthPages.js';
+import { ChangePasswordPanel, ChangeUsernamePanel } from './pages/AuthPages.js';
 import { CloudAccountsPage } from './pages/CloudAccountsPage.js';
 import { UploadsPage } from './pages/UploadsPage.js';
 import { FilesPage } from './pages/FilesPage.js';
@@ -68,6 +68,7 @@ type AuthState = 'loading' | 'setup' | 'login' | 'ready';
 
 /** The authenticated principal, from /api/auth/me (roadmap Phase 3). */
 interface PrincipalInfo {
+  kind: 'admin' | 'user';
   role: 'admin' | 'member';
   username: string;
   displayName: string;
@@ -185,6 +186,7 @@ export default function App() {
     const me = await api.me();
     const data = me.data as {
       authenticated?: boolean;
+      kind?: 'admin' | 'user';
       role?: 'admin' | 'member';
       username?: string;
       displayName?: string;
@@ -192,6 +194,7 @@ export default function App() {
     };
     if (data.authenticated === true) {
       setPrincipal({
+        kind: data.kind ?? 'user',
         role: data.role ?? 'admin',
         username: data.username ?? 'admin',
         displayName: data.displayName ?? data.username ?? 'admin',
@@ -827,6 +830,17 @@ export default function App() {
             endpoint serves the root admin and users-table accounts alike;
             it re-authenticates the current session, so no logout is needed. */}
         <ChangePasswordPanel onDone={() => setProfileOpen(false)} />
+        {/* The built-in admin's renameable login name. A rename keeps this
+            session signed in, so the principal is refreshed in place and the
+            chip/header pick up the new name without a re-login. */}
+        {principal.kind === 'admin' && (
+          <ChangeUsernamePanel
+            onDone={(message) => {
+              setProfileOpen(false);
+              void refreshMe().then(() => setNotice({ text: message, page: active }));
+            }}
+          />
+        )}
       </Dialog>
     )}
     <ConfirmHost />

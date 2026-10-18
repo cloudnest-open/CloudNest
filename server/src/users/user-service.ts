@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
-import type { UserRow } from '../db/queries.js';
+import type { AdminRow, UserRow } from '../db/queries.js';
 import { makeUserQueries, deleteUserSessionsByUserId, type UserQueries } from '../db/users-queries.js';
 import { ADMIN_USER_ID } from '../middleware/require-admin.js';
 import { hashPassword, verifyPassword, validatePasswordPolicy } from '../auth/password.js';
@@ -219,6 +219,47 @@ export class UserService {
       deleteUserSessionsByUserId(this.db, user.id);
     });
     txn();
+  }
+
+  /**
+   * The built-in root admin renames their login identifier. The current
+   * password must be re-proven; the new name must be free. The rename writes
+   * BOTH credential stores in one transaction — admin_users.username (the
+   * login lookup) and the users attribution row's email (which doubles as the
+   * cross-table uniqueness guard, because users.email is UNIQUE no member can
+   * ever hold the admin's name). Sessions stay valid: they carry the fixed id
+   * and auth_version, never the username. The name is stored lowercase and
+   * trimmed, so login matches case-insensitively exactly like member emails.
+   */
+  async changeAdminUsername(currentPassword: string, newUsername: string): Promise<string> {
+    const admin = this.q.getAdmin.get() as AdminRow | undefined;
+    if (!admin) throw new UserError('user_not_found', 404);
+    if (!(await verifyPassword(currentPassword, admin.password_hash))) {
+      throw new UserError('wrong_current_password', 401);
+    }
+    const name = newUsername.trim().toLowerCase();
+    if (name.length === 0 || name.length > 254 || /[\s\u0000-\u001f\u007f]/.test(name)) {
+      throw new UserError('invalid_username', 400);
+    }
+    if (name === admin.username) throw new UserError('username_unchanged', 400);
+    const clash = this.q.getUserByEmail.get(name) as UserRow | undefined;
+    if (clash && clash.id !== ADMIN_USER_ID) throw new UserError('username_taken', 409);
+    const now = new Date().toISOString();
+    const txn = this.db.transaction(() => {
+      try {
+        this.q.updateAdminUsername.run({ username: name, updated_at: now });
+        this.q.setUserEmail.run({ email: name, id: ADMIN_USER_ID, updated_at: now });
+      } catch (err) {
+        // a concurrent invite can pass the pre-check above; the UNIQUE
+        // constraints are the real gate — surface them as 409
+        if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
+          throw new UserError('username_taken', 409);
+        }
+        throw err;
+      }
+    });
+    txn();
+    return name;
   }
 
   /** Admin edit of role/status/allowance, protecting the last active admin. */

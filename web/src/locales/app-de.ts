@@ -1111,6 +1111,16 @@ export const appDe: AppStrings = {
       success: 'Passwort geändert. Andere Sitzungen wurden abgemeldet.',
       failed: 'Passwortänderung fehlgeschlagen.',
     },
+    changeUsername: {
+      title: 'Anmeldenamen ändern',
+      next: 'Neuer Anmeldename (ohne Leerzeichen)',
+      current: 'Aktuelles Passwort',
+      submit: 'ANMELDENAMEN ÄNDERN',
+      changing: 'Umbenennen…',
+      success: 'Anmeldename geändert. Diese Sitzung bleibt angemeldet; melden Sie sich das nächste Mal mit dem neuen Namen an.',
+      failed: 'Änderung des Anmeldenamens fehlgeschlagen.',
+      hint: 'Sie bleiben angemeldet. Verwenden Sie den neuen Namen bei Ihrer nächsten Anmeldung.',
+    },
   },
 
   summary: {

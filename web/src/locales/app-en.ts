@@ -1130,6 +1130,16 @@ export const appEn = {
       success: 'Password changed. Other sessions were signed out.',
       failed: 'Password change failed.',
     },
+    changeUsername: {
+      title: 'Change login name',
+      next: 'New login name (no spaces)',
+      current: 'Current password',
+      submit: 'CHANGE LOGIN NAME',
+      changing: 'Renaming…',
+      success: 'Login name changed. This session stays signed in; sign in with the new name next time.',
+      failed: 'Login name change failed.',
+      hint: 'You stay signed in. Use the new name the next time you sign in.',
+    },
   },
 
   summary: {

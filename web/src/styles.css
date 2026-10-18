@@ -759,6 +759,7 @@ input:disabled, select:disabled, textarea:disabled {
 
 .form-error { color: var(--cn-danger); font-size: 13px; margin: 4px 0 0; }
 .form-ok { color: var(--cn-success-text); font-size: 13px; margin: 4px 0 0; }
+.password-form-hint { color: var(--cn-text-muted); font-size: 13px; margin: 8px 0 0; }
 
 /* --- Cards for notices, errors, empty states ----------------------------- */
 .notice-card { border-color: var(--cn-success-text); }
