@@ -115,9 +115,7 @@ export function sharesRouter(deps: {
   /** A member may only delete their own files (same 404 for foreign ids). */
   function assertFileOwnedBy(fileId: string, principal: Principal): void {
     if (principal.role === 'admin') return;
-    const row = deps.db.prepare('SELECT user_id FROM files WHERE id = ?').get(fileId) as
-      | { user_id: string }
-      | undefined;
+    const row = deps.queries.getFileOwner(fileId);
     if (!row || row.user_id !== principal.id) throw new ShareError('file_not_found', 404);
   }
 
@@ -304,9 +302,16 @@ export function publicSharesRouter(deps: {
     keyGenerator: makeLimiterKey(deps.tunnelRunning),
     message: { error: 'share_rate_limited' },
   });
+  // the landing read is a DB hit per request: bounded generously (a normal
+  // visitor loads it once per view) so token-guessing volume stays finite
+  const landingLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false,
+    keyGenerator: makeLimiterKey(deps.tunnelRunning),
+    message: { error: 'share_rate_limited' },
+  });
 
   // Landing page data. Without a valid unlock nothing is disclosed.
-  router.get('/api/public/shares/:token', (req, res) => {
+  router.get('/api/public/shares/:token', landingLimiter, (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
       const view = deps.shares.publicView(String(req.params['token']), false);

@@ -56,6 +56,10 @@ export function makeQueries(db: Database.Database) {
     getUserByEmail(email: string): UserRow | undefined {
       return db.prepare('SELECT * FROM users WHERE email = ?').get(email) as UserRow | undefined;
     },
+    /** Owner check for share-route guards — routes hold no ad-hoc SQL. */
+    getFileOwner(fileId: string): { user_id: string } | undefined {
+      return db.prepare('SELECT user_id FROM files WHERE id = ?').get(fileId) as { user_id: string } | undefined;
+    },
     deleteAllSessions(): void {
       db.prepare('DELETE FROM sessions').run();
     },

@@ -542,3 +542,26 @@ test('auto-spread: an unknown strategy is refused, an absent one uses the saved 
     await app.close();
   }
 });
+
+test('folder children counts answer for the whole page at once', async () => {
+  const { app, client } = await authed();
+  try {
+    const alpha = ((await (await client.post('/api/folders', { name: 'Alpha', parentId: null })).body) as { folder: { id: string } }).folder;
+    const beta = ((await (await client.post('/api/folders', { name: 'Beta', parentId: null })).body) as { folder: { id: string } }).folder;
+    await client.post('/api/folders', { name: 'Alpha one', parentId: alpha.id });
+    await client.post('/api/folders', { name: 'Alpha two', parentId: alpha.id });
+    seedFile(app, { id: 'file-into-alpha', userId: 'usr_admin', name: 'file-into-alpha.bin' });
+    const moved = await client.post('/api/files/file-into-alpha/move', { folderId: alpha.id });
+    assert.equal(moved.status, 200, JSON.stringify(moved.body));
+
+    const listing = await client.get('/api/folders/root/children');
+    assert.equal(listing.status, 200);
+    const folders = (listing.body as { folders: Array<{ id: string; counts: { folders: number; files: number } }> }).folders;
+    const alphaRow = folders.find((f) => f.id === alpha.id)!;
+    const betaRow = folders.find((f) => f.id === beta.id)!;
+    assert.deepEqual(alphaRow.counts, { folders: 2, files: 1 });
+    assert.deepEqual(betaRow.counts, { folders: 0, files: 0 });
+  } finally {
+    await app.close();
+  }
+});

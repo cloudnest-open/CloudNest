@@ -169,10 +169,29 @@ export class FolderService {
     return { moved, failed };
   }
 
-  counts(folderId: string): { folders: number; files: number } {
-    return {
-      folders: (this.db.prepare('SELECT COUNT(*) AS n FROM folders WHERE parent_id = ?').get(folderId) as { n: number }).n,
-      files: (this.db.prepare('SELECT COUNT(*) AS n FROM files WHERE parent_id = ?').get(folderId) as { n: number }).n,
-    };
+  /**
+   * Child counts for a batch of folders in two grouped queries. The children
+   * listing used to run a COUNT pair per folder (N+1); this answers the whole
+   * page in one round trip per table. Chunked IN-lists stay far under SQLite's
+   * bound-variable ceiling.
+   */
+  countsForParents(parentIds: string[]): Map<string, { folders: number; files: number }> {
+    const result = new Map<string, { folders: number; files: number }>();
+    for (const id of parentIds) result.set(id, { folders: 0, files: 0 });
+    const CHUNK = 500;
+    for (let i = 0; i < parentIds.length; i += CHUNK) {
+      const batch = parentIds.slice(i, i + CHUNK);
+      const marks = batch.map(() => '?').join(', ');
+      for (const table of ['folders', 'files'] as const) {
+        const rows = this.db.prepare(
+          `SELECT parent_id, COUNT(*) AS n FROM ${table} WHERE parent_id IN (${marks}) GROUP BY parent_id`,
+        ).all(...batch) as Array<{ parent_id: string; n: number }>;
+        for (const row of rows) {
+          const entry = result.get(row.parent_id);
+          if (entry) entry[table] = row.n;
+        }
+      }
+    }
+    return result;
   }
 }

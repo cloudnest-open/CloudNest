@@ -94,6 +94,9 @@ export function filesRouter(deps: FilesRouterDeps): Router {
         breadcrumb = deps.folders.breadcrumb(parentId);
       }
       const folders = deps.folders.children(principal.role === 'admin' ? null : principal.id, parentId);
+      // one grouped pair of queries for the whole page instead of a COUNT pair
+      // per folder
+      const countsByParent = deps.folders.countsForParents(folders.map((f) => f.id));
       res.json({
         breadcrumb,
         folders: folders.map((f) => ({
@@ -104,7 +107,7 @@ export function filesRouter(deps: FilesRouterDeps): Router {
           // rename/delete/move are tree-owner actions; the read-scoped admin
           // sees another principal's tree but does not mutate it
           owned: f.user_id === principal.id,
-          counts: deps.folders.counts(f.id),
+          counts: countsByParent.get(f.id) ?? { folders: 0, files: 0 },
         })),
       });
     } catch (err) {

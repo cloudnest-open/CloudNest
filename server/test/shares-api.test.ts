@@ -277,3 +277,20 @@ test('share listings never expose tokens, hashes or provider internals', async (
     await app.close();
   }
 });
+
+test('the public landing read is rate-limited', async () => {
+  const { app } = await authed();
+  try {
+    // hammer the landing route past its per-key limit: the first requests
+    // answer the honest 404, then the limiter takes over
+    let last = 0;
+    for (let i = 0; i < 121; i++) {
+      last = (await fetch(`${app.url}/api/public/shares/not-a-token`)).status;
+    }
+    assert.equal(last, 429);
+    const after = await fetch(`${app.url}/api/public/shares/not-a-token`);
+    assert.equal(((await after.json()) as { error?: string }).error, 'share_rate_limited');
+  } finally {
+    await app.close();
+  }
+});
