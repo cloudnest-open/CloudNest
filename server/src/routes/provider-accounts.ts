@@ -52,6 +52,8 @@ function toPublic(row: ProviderAccountRow) {
     reservedInflightBytes: row.reserved_inflight_bytes,
     /** M0016: false = the account takes no NEW placements (plan/reassign/mirror). */
     participatesInUploads: row.participates_in_uploads !== 0,
+    /** M0019 (wizard §3): the owner's S3 provider name; null = generic label. */
+    providerDisplayName: row.provider_display_name ?? null,
     lastErrorCode: row.last_error_code,
     lastErrorAt: row.last_error_at,
     hasCredentials: row.credential_ciphertext !== null,
@@ -118,7 +120,7 @@ export function providerAccountsRouter(deps: {
       res.status(404).json({ error: 'Account not found.' });
       return;
     }
-    const body = (req.body ?? {}) as { displayLabel?: unknown; reserveBytes?: unknown; participatesInUploads?: unknown };
+    const body = (req.body ?? {}) as { displayLabel?: unknown; reserveBytes?: unknown; participatesInUploads?: unknown; capacityCapBytes?: unknown; providerDisplayName?: unknown };
     if (typeof body.displayLabel === 'string') {
       const label = body.displayLabel.trim();
       if (!label || label.length > 120) {
@@ -138,6 +140,32 @@ export function providerAccountsRouter(deps: {
     // stops NEW placements; existing chunks stay readable.
     if (typeof body.participatesInUploads === 'boolean') {
       accounts.setParticipation(row.id, body.participatesInUploads);
+    }
+    // Wizard §4 (S3 special): the capacity-cap edit lives on the same surface.
+    if (typeof body.capacityCapBytes === 'number' || body.capacityCapBytes === null) {
+      const cap = body.capacityCapBytes;
+      if (cap !== null && (!Number.isInteger(cap) || cap <= 0)) {
+        res.status(400).json({ error: 'Capacity cap must be a positive integer of bytes.' });
+        return;
+      }
+      if (row.provider !== 's3') {
+        res.status(400).json({ error: 'Only S3-compatible accounts take a capacity cap.', code: 'invalid_request' });
+        return;
+      }
+      accounts.setCapacityCap(row.id, cap);
+    }
+    // M0019 (wizard §3): the owner's provider name; null restores the generic.
+    if (typeof body.providerDisplayName === 'string' || body.providerDisplayName === null) {
+      const name = body.providerDisplayName;
+      if (name !== null && (name.trim().length === 0 || name.trim().length > 60)) {
+        res.status(400).json({ error: 'Provider name must be 1–60 characters.' });
+        return;
+      }
+      if (name !== null && row.provider !== 's3') {
+        res.status(400).json({ error: 'Only S3-compatible accounts take a custom provider name.', code: 'invalid_request' });
+        return;
+      }
+      accounts.setProviderDisplayName(row.id, name);
     }
     res.json({ account: toPublic(accounts.get(row.id) as ProviderAccountRow) });
   });
@@ -173,10 +201,24 @@ export function providerAccountsRouter(deps: {
     }
   });
 
-  router.post('/api/provider-accounts/:id/reconnect', adminOnly, csrf.doubleCsrfProtection, refreshLimiter, (req, res) => {
+  router.post('/api/provider-accounts/:id/reconnect', adminOnly, csrf.doubleCsrfProtection, refreshLimiter, async (req, res) => {
     const row = accounts.get(String(req.params.id));
     if (!row) {
       res.status(404).json({ error: 'Account not found.' });
+      return;
+    }
+    const body = (req.body ?? {}) as { mode?: unknown };
+    // Wizard §4: "Reconnect" on a live OAuth account first tries the silent
+    // token refresh (the scheduler's own path); the browser flow stays the
+    // honest fallback when the provider has revoked the grant.
+    if (body.mode === 'refresh' && row.provider !== 'mega' && row.provider !== 's3') {
+      if (!row.credential_ciphertext) {
+        res.status(409).json({ error: 'No stored credentials to refresh.', code: 'account_needs_reauth' });
+        return;
+      }
+      const result = await refreshOne(row);
+      const updated = accounts.get(row.id) as ProviderAccountRow;
+      res.json({ mode: 'refreshed', result, account: toPublic(updated) });
       return;
     }
     if (row.provider === 'mega') {
@@ -197,7 +239,9 @@ export function providerAccountsRouter(deps: {
     const pkce = endpoints.usesPkce ? makePkcePair() : null;
     let state: string;
     try {
-      ({ state } = startOAuthFlow(provider, req.sessionID, pkce?.verifier));
+      // wizard §1: this flow re-authorizes THIS row — the state carries the
+      // account id so the callback may upsert instead of refusing a duplicate
+      ({ state } = startOAuthFlow(provider, req.sessionID, pkce?.verifier, row.id));
     } catch {
       res.status(503).json({ error: 'Too many pending authorization flows.', code: 'oauth_state_invalid' });
       return;
@@ -213,6 +257,120 @@ export function providerAccountsRouter(deps: {
     });
     queries.recordAudit('provider_reconnect_start', true, provider, { accountId: row.id });
     res.json({ mode: 'oauth', authorizationUrl: `${endpoints.authorizeUrl}?${params.toString()}` });
+  });
+
+  // ---- wizard §4: Test/Verify on the one management surface ----
+  // Proves the stored credential still works RIGHT NOW with the provider's
+  // own cheapest identity call (S3 HeadBucket, OAuth refresh/validate, MEGA
+  // login). Never mutates the account; failures carry the safe code.
+  router.post('/api/provider-accounts/:id/verify', adminOnly, csrf.doubleCsrfProtection, refreshLimiter, async (req, res) => {
+    const row = accounts.get(String(req.params.id));
+    if (!row) {
+      res.status(404).json({ error: 'Account not found.' });
+      return;
+    }
+    const adapter = getAdapter(row.provider);
+    if (!adapter) {
+      res.status(400).json({ error: 'Unknown provider.', code: 'invalid_request' });
+      return;
+    }
+    const bundle = row.credential_ciphertext ? store.loadAccountBundle(row) : null;
+    if (!bundle) {
+      res.status(409).json({ error: 'No stored credentials to verify.', code: 'account_needs_reauth' });
+      return;
+    }
+    try {
+      const cfg = adapter.requiresAppConfig ? store.getConfig(row.provider)?.config : undefined;
+      // refresh-or-validate first: an expiring token gets renewed, a revoked
+      // grant surfaces as account_needs_reauth instead of a fake "ok"
+      const validBundle = await adapter.ensureValidCredentials(bundle, cfg);
+      if (validBundle !== bundle) accounts.saveRefreshedBundle(row, validBundle);
+      const identity = await adapter.connectAndReadAccount(validBundle, cfg);
+      const updated = accounts.get(row.id) as ProviderAccountRow;
+      queries.recordAudit('provider_verify', true, row.provider, { accountId: row.id });
+      res.json({
+        ok: true,
+        accountIdentifier: identity.providerAccountId,
+        quotaStatus: (accounts.get(row.id) as ProviderAccountRow).quota_status,
+        status: updated.status,
+        checkedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      const code = err instanceof ProviderError ? err.safeCode : 'provider_unavailable';
+      const httpStatus = err instanceof ProviderError && err.httpStatus === 401 ? 401 : 502;
+      queries.recordAudit('provider_verify', false, code, { accountId: row.id });
+      res.status(httpStatus).json({ ok: false, error: 'Verification failed.', code });
+    }
+  });
+
+  // ---- wizard §4: Edit/Replace credentials (S3/MEGA accounts, same surface)
+  // The OAuth providers edit their APP config through PUT /api/providers/:p/config —
+  // their account credential is a browser-granted token, never hand-typed.
+  router.post('/api/provider-accounts/:id/credentials', adminOnly, csrf.doubleCsrfProtection, async (req, res) => {
+    const row = accounts.get(String(req.params.id));
+    if (!row) {
+      res.status(404).json({ error: 'Account not found.' });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const adapter = getAdapter(row.provider);
+    if (!adapter) {
+      res.status(400).json({ error: 'Unknown provider.', code: 'invalid_request' });
+      return;
+    }
+    if (row.provider !== 's3' && row.provider !== 'mega') {
+      res.status(409).json({
+        error: 'OAuth accounts are re-authorized in the browser; edit the app config instead.',
+        code: 'oauth_account',
+      });
+      return;
+    }
+    try {
+      let bundle: import('../providers/types.js').ProviderCredentialBundle;
+      let accountIdentifier: string | undefined;
+      if (row.provider === 's3') {
+        const endpoint = typeof body['endpoint'] === 'string' ? (body['endpoint'] as string).trim() : '';
+        const region = typeof body['region'] === 'string' && (body['region'] as string).trim() ? (body['region'] as string).trim() : 'auto';
+        const accessKeyId = typeof body['accessKeyId'] === 'string' ? (body['accessKeyId'] as string).trim() : '';
+        const secretAccessKey = typeof body['secretAccessKey'] === 'string' ? (body['secretAccessKey'] as string) : '';
+        const bucket = typeof body['bucket'] === 'string' ? (body['bucket'] as string).trim() : '';
+        const prefixRaw = typeof body['prefix'] === 'string' && (body['prefix'] as string).trim() ? (body['prefix'] as string).trim() : 'cloudnest';
+        if (!accessKeyId || !secretAccessKey || !bucket) {
+          res.status(400).json({ error: 'Access key, secret key and bucket are required.', code: 'invalid_credentials' });
+          return;
+        }
+        bundle = { schemaVersion: 1, provider: 's3', endpoint, region, accessKeyId, secretAccessKey, bucket, prefix: `${prefixRaw.replace(/\/+$/, '')}/` };
+        const identity = await adapter.connectAndReadAccount(bundle);
+        accountIdentifier = identity.providerAccountId;
+        const { row: updated } = accounts.upsertConnection({ provider: 's3', account: identity, bundle, tier: 'business' });
+        queries.recordAudit('provider_credentials_replaced', true, 's3', { accountId: updated.id });
+        (req.body as Record<string, unknown>)['secretAccessKey'] = undefined;
+        res.json({ ok: true, account: toPublic(updated) });
+        return;
+      }
+      // mega
+      const email = typeof body['email'] === 'string' ? (body['email'] as string).trim() : '';
+      const password = typeof body['password'] === 'string' ? (body['password'] as string) : '';
+      const secondFactorCode = typeof body['secondFactorCode'] === 'string' && (body['secondFactorCode'] as string).trim()
+        ? (body['secondFactorCode'] as string).trim()
+        : undefined;
+      if (!email || !password) {
+        res.status(400).json({ error: 'Email and password are required.', code: 'invalid_credentials' });
+        return;
+      }
+      bundle = { schemaVersion: 1, provider: 'mega', email, password, ...(secondFactorCode ? { secondFactorCode } : {}) };
+      const identity = await adapter.connectAndReadAccount(bundle);
+      const { row: updated } = accounts.upsertConnection({ provider: 'mega', account: identity, bundle });
+      queries.recordAudit('provider_credentials_replaced', true, 'mega', { accountId: updated.id });
+      (req.body as Record<string, unknown>)['password'] = undefined;
+      res.json({ ok: true, account: toPublic(updated) });
+      void accountIdentifier;
+    } catch (err) {
+      const code = err instanceof ProviderError ? err.safeCode : 'provider_unavailable';
+      const httpStatus = err instanceof ProviderError && err.httpStatus === 401 ? 401 : 502;
+      queries.recordAudit('provider_credentials_replaced', false, code, { accountId: row.id });
+      res.status(httpStatus).json({ error: 'The provider rejected these credentials.', code });
+    }
   });
 
   router.post('/api/provider-accounts/:id/disconnect', adminOnly, csrf.doubleCsrfProtection, async (req, res) => {

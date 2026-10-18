@@ -25,6 +25,9 @@ export interface ProviderAccountRow {
   /** Owner-controlled flag (M0016): 0 = the account takes no NEW placements
    * (plan/reassign/mirror); existing chunks stay readable and unaffected. */
   participates_in_uploads: 0 | 1;
+  /** M0019 (connect wizard §3): the owner's name for an S3-compatible
+   * provider (Wasabi, Backblaze, …); NULL keeps the generic label. */
+  provider_display_name: string | null;
   last_quota_check_at: string | null;
   last_quota_error_code: string | null;
   last_quota_error_at: string | null;
@@ -93,6 +96,10 @@ export function makeProviderQueries(db: Database.Database) {
     ),
     updateParticipation: db.prepare(
       'UPDATE provider_accounts SET participates_in_uploads = @participates_in_uploads, updated_at = @updated_at WHERE id = @id',
+    ),
+    // M0019: the owner's provider name (S3-compatible cards); NULL = generic
+    setProviderDisplayName: db.prepare(
+      'UPDATE provider_accounts SET provider_display_name = @provider_display_name, updated_at = @updated_at WHERE id = @id',
     ),
     eraseCredentials: db.prepare(
       `UPDATE provider_accounts SET credential_ciphertext = NULL, credential_nonce = NULL,

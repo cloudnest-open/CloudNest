@@ -72,7 +72,8 @@ export function mapMegaError(err: unknown): ProviderError {
     return new ProviderError('invalid_credentials', 401);
   }
   if (message.includes('two-factor') || message.includes('2fa') || message.includes('second factor') || message.includes('verification code')) {
-    return new ProviderError('invalid_credentials', 401);
+    // wizard §2: the credentials were not wrong — a TOTP code is required now
+    return new ProviderError('two_factor_required', 401);
   }
   if (message.includes('eagain') || message.includes('rate') || message.includes('too many')) {
     return new ProviderError('provider_rate_limited', 429);

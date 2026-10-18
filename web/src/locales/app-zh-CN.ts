@@ -630,6 +630,31 @@ export const appZhCn: AppStrings = {
     title: '云盘账户',
     connectAccount: '+ 连接账户',
     emptyBusiness: '还没有商业账户。使用“连接账户”并选择兼容 S3 的存储桶来添加。',
+    wizard: {
+      continueConnect: '继续连接 {provider}',
+    },
+    edit: {
+      title: '编辑凭据 — {label}',
+      submit: '保存凭据',
+      saved: '已替换 {label} 的凭据。',
+      badCredentials: '提供商拒绝了新凭据。',
+      failed: '无法替换凭据。',
+      menuItem: '编辑凭据',
+      appConfigItem: '编辑应用凭据',
+      oauthNote: 'OAuth 账户在浏览器中授权——重新授权请使用「重新连接」，应用凭据请在这里修改。',
+    },
+    verify: {
+      ok: '{label} 已验证——连接正常。',
+      twoFactor: '此账户需要新的 2FA 代码才能验证。',
+      failed: '验证失败（{code}）。',
+    },
+    result: {
+      connected: '账户已连接。',
+      alreadyConnected: '该提供商账户已连接——每个账户都会作为单独一行连接。',
+      denied: '授权被拒绝——没有连接任何账户。',
+      refreshMissing: '提供商未返回持久的刷新令牌；该账户需要重新授权。',
+      failed: '连接失败（{code}）。',
+    },
     errorLoad: '无法加载云盘账户。服务器没有返回真实数据。',
     startFailed: '无法发起连接。',
     sharedPool: {
@@ -675,6 +700,9 @@ export const appZhCn: AppStrings = {
       badCredentials: 'MEGA 拒绝了这些凭据。',
       failed: 'MEGA 连接失败。',
       reauthNotice: '请重新输入你的 MEGA 凭据。',
+      twoFactor: '两步验证代码（可选）',
+      twoFactorNote: '只有 MEGA 本身能校验这个一次性代码——之后重新连接时需要新代码。',
+      twoFactorRequired: '此 MEGA 账户启用了两步验证。请输入验证器应用中当前的 2FA 代码。',
     },
     tabs: {
       aria: '存储层级',
@@ -698,6 +726,9 @@ export const appZhCn: AppStrings = {
       connected: '已连接 S3 兼容存储桶（企业层）。',
       failed: 'S3 连接失败。',
       testNote: '连接时会通过 HeadBucket 验证密钥。',
+      providerName: '提供商名称',
+      providerNamePlaceholder: 'Wasabi、Backblaze 等',
+      providerNameHint: '将显示在卡片和仪表盘上，替代通用的「S3 兼容」。',
     },
     list: {
       title: '账户',
@@ -712,6 +743,7 @@ export const appZhCn: AppStrings = {
       available: '可用（估算）：{size}',
       checked: '检查于 {when}',
       refreshQuota: '刷新配额',
+      test: '测试',
       rename: '重命名',
       reconnect: '重新连接',
       disconnect: '断开连接',
@@ -726,6 +758,7 @@ export const appZhCn: AppStrings = {
       allFailed: { other: '{total} 次配额刷新中有 {count} 次失败。其他账户仍已更新。' },
     },
     reconnect: {
+      refreshed: '已重新连接 {label}——令牌已刷新。',
       failed: '重新连接失败。',
     },
     disconnect: {

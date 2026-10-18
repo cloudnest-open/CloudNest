@@ -74,6 +74,8 @@ export interface AccountInfo {
   reservedInflightBytes: number;
   /** M0016: false = the account takes no NEW placements (plan/reassign/mirror). */
   participatesInUploads: boolean;
+  /** M0019 (wizard §3): the owner's S3 provider name; null = generic label. */
+  providerDisplayName: string | null;
   /** Owner-confirmed shared-pool key (§6.2); null = independent quota scope. */
   quotaScopeKey: string | null;
   /** Owner-set per-bucket cap (S3-compatible accounts); null elsewhere. */
@@ -136,18 +138,23 @@ export const api = {
   saveProviderConfig: (provider: string, body: { clientId: string; clientSecret: string; authority?: string }) =>
     request('PUT', `/api/providers/${provider}/config`, body),
   oauthStart: (provider: string) => request('POST', `/api/providers/${provider}/oauth/start`),
-  megaConnect: (email: string, password: string) =>
-    request('POST', '/api/providers/mega/credentials', { email, password }),
+  megaConnect: (email: string, password: string, secondFactorCode?: string) =>
+    request('POST', '/api/providers/mega/credentials', { email, password, ...(secondFactorCode ? { secondFactorCode } : {}) }),
   connectS3: (body: {
     endpoint: string; region: string; accessKeyId: string; secretAccessKey: string;
-    bucket: string; prefix: string; capacityCapBytes: number | null;
+    bucket: string; prefix: string; capacityCapBytes: number | null; providerName?: string | null;
   }) => request('POST', '/api/providers/s3/credentials', body),
   accounts: () => request('GET', '/api/provider-accounts'),
   refreshQuota: (id: string) => request('POST', `/api/provider-accounts/${id}/refresh-quota`),
   refreshAllQuotas: () => request('POST', '/api/provider-accounts/refresh-quotas'),
-  updateAccount: (id: string, body: { displayLabel?: string; reserveBytes?: number; participatesInUploads?: boolean }) =>
+  updateAccount: (id: string, body: { displayLabel?: string; reserveBytes?: number; participatesInUploads?: boolean; capacityCapBytes?: number | null; providerDisplayName?: string | null }) =>
     request('PATCH', `/api/provider-accounts/${id}`, body),
-  reconnect: (id: string) => request('POST', `/api/provider-accounts/${id}/reconnect`),
+  reconnect: (id: string, body?: { mode?: 'refresh' }) => request('POST', `/api/provider-accounts/${id}/reconnect`, body ?? {}),
+  /** wizard §4: Test/Verify — the provider's own cheapest identity call. */
+  verifyAccount: (id: string) => request('POST', `/api/provider-accounts/${id}/verify`, {}),
+  /** wizard §4: Edit/Replace credentials (S3/MEGA rows; OAuth refuses honestly). */
+  editAccountCredentials: (id: string, body: Record<string, unknown>) =>
+    request('POST', `/api/provider-accounts/${id}/credentials`, body),
   /** §6.2 owner-confirmed shared-pool grouping: explicit accountIds, or clear. */
   setQuotaScope: (provider: string, accountIds: string[] | null) =>
     request('POST', '/api/provider-accounts/quota-scope', accountIds ? { provider, accountIds } : { provider, clear: true }),

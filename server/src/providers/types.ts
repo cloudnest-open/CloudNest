@@ -12,7 +12,7 @@ export type ProviderCredentialBundle =
   | { schemaVersion: 1; provider: 'google_drive'; accessToken: string; refreshToken?: string; accessTokenExpiresAtMs?: number; grantedScopes: string[] }
   | { schemaVersion: 1; provider: 'dropbox'; accessToken: string; refreshToken?: string; accessTokenExpiresAtMs?: number; grantedScopes: string[] }
   | { schemaVersion: 1; provider: 'pcloud'; accessToken: string; apiHost: 'api.pcloud.com' | 'eapi.pcloud.com'; userId: string }
-  | { schemaVersion: 1; provider: 'mega'; email: string; password: string }
+  | { schemaVersion: 1; provider: 'mega'; email: string; password: string; /** Wizard §2: megajs login TOTP code. One-time by design — a later refresh/reconnect needs a fresh code. */ secondFactorCode?: string }
   | { schemaVersion: 1; provider: 'onedrive'; accessToken: string; refreshToken?: string; accessTokenExpiresAtMs?: number; authority: string; grantedScopes: string[] }
   /**
    * S3-compatible (R2/B2/AWS) static keys. Path-style URLs are always used so
@@ -66,6 +66,7 @@ export type ProviderSafeErrorCode =
   | 'needs_reauth'
   | 'identity_validation_failed'
   | 'invalid_credentials'
+  | 'two_factor_required'
   | 'quota_unavailable'
   | 'provider_rate_limited'
   | 'provider_unavailable'

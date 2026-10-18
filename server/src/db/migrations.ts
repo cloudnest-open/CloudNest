@@ -1120,6 +1120,18 @@ const M0018_MODE_CONTEXT_TIER: Migration = {
   },
 };
 
+const M0019_PROVIDER_DISPLAY_NAME: Migration = {
+  version: 19,
+  name: '0019-provider-display-name',
+  // Approved connect-wizard design §3: an S3-compatible account may carry the
+  // owner's name for its provider (Wasabi, Backblaze, …) so cards and the
+  // dashboard show that name instead of the generic "S3-compatible". Nullable:
+  // NULL keeps the honest generic label everywhere.
+  up: (db) => {
+    db.exec('ALTER TABLE provider_accounts ADD COLUMN provider_display_name TEXT;');
+  },
+};
+
 export const allMigrations: readonly Migration[] = [
   M0001_INFRASTRUCTURE,
   M0002_CORE_METADATA_SCHEMA,
@@ -1139,4 +1151,5 @@ export const allMigrations: readonly Migration[] = [
   M0016_ACCOUNT_PARTICIPATION,
   M0017_TRANSFER_JOB_TYPE_INDEX,
   M0018_MODE_CONTEXT_TIER,
+  M0019_PROVIDER_DISPLAY_NAME,
 ];

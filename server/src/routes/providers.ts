@@ -111,11 +111,16 @@ export function providersRouter(deps: {
     }
     const endpoints = oauthEndpoints(provider, cfg.config);
     const sessionId = req.sessionID;
+    // wizard §1 multi-account rule: the start body may name the account row a
+    // RECONNECT re-authorizes; a fresh Connect never does, so the callback can
+    // honestly refuse a duplicate identity with already_connected
+    const body = (req.body ?? {}) as { reconnectOf?: unknown };
+    const reconnectOf = typeof body.reconnectOf === 'string' && body.reconnectOf.trim() ? body.reconnectOf.trim() : undefined;
     let pkce: { verifier: string; challengeS256: string } | null = null;
     if (endpoints.usesPkce) pkce = makePkcePair();
     let state: string;
     try {
-      ({ state } = startOAuthFlow(provider, sessionId, pkce?.verifier));
+      ({ state } = startOAuthFlow(provider, sessionId, pkce?.verifier, reconnectOf));
     } catch {
       res.status(503).json({ error: 'Too many pending authorization flows.', code: 'oauth_state_invalid' });
       return;
@@ -237,6 +242,17 @@ export function providersRouter(deps: {
       if (provider === 'pcloud' && bundle.provider === 'pcloud') {
         bundle = { ...bundle, userId: identity.providerAccountId };
       }
+      // wizard §1: an honest duplicate refusal — the same provider identity
+      // connected twice is a 409-class result, never a silent upsert. Only a
+      // flow started AS a reconnect (state carries reconnectOf) may update an
+      // existing row; two different accounts always stay two rows.
+      const existingRow = identity.providerAccountId
+        ? accounts.findByIdentity(provider, identity.providerAccountId)
+        : undefined;
+      if (existingRow && consumed.reconnectOf !== existingRow.id) {
+        queries.recordAudit('provider_oauth_callback', false, 'already_connected', { accountId: existingRow.id });
+        return redirectTo('already_connected');
+      }
       const { row } = accounts.upsertConnection({ provider, account: identity, bundle });
       store.markConfigVerified(provider);
       queries.recordAudit('provider_oauth_callback', true, provider, { accountId: row.id });
@@ -260,6 +276,11 @@ export function providersRouter(deps: {
     const bucket = typeof body['bucket'] === 'string' ? (body['bucket'] as string).trim() : '';
     const prefixRaw = typeof body['prefix'] === 'string' && (body['prefix'] as string).trim() ? (body['prefix'] as string).trim() : 'cloudnest';
     const prefix = `${prefixRaw.replace(/\/+$/, '')}/`;
+    // wizard §3: optional display name for the S3-compatible provider
+    const nameBody = body['providerName'];
+    const providerName = typeof nameBody === 'string'
+      ? (nameBody as string)
+      : nameBody === null ? null : undefined;
     const capBody = body['capacityCapBytes'];
     const capacityCapBytes = typeof capBody === 'number' && Number.isInteger(capBody) && capBody > 0 ? capBody : null;
 
@@ -294,6 +315,13 @@ export function providersRouter(deps: {
         tier: 'business',
         capacityCapBytes,
       });
+      // wizard §3: the owner's provider name (Wasabi, Backblaze, …); absent →
+      // the honest generic label stays
+      if (typeof providerName === 'string' && providerName.trim()) {
+        accounts.setProviderDisplayName(row.id, providerName.trim());
+      } else if (providerName === null) {
+        accounts.setProviderDisplayName(row.id, null);
+      }
       queries.recordAudit('provider_s3_connect', true, bucket, { accountId: row.id });
       res.status(201).json({ ok: true, accountId: row.id });
     } catch (err) {
@@ -327,8 +355,19 @@ export function providersRouter(deps: {
       res.status(400).json({ error: 'Email and password are required.', code: 'invalid_credentials' });
       return;
     }
-    // secondFactorCode is accepted for the flow but never persisted or logged
-    const bundle: ProviderCredentialBundle = { schemaVersion: 1, provider: 'mega', email, password };
+    // wizard §2 (MEGA 2FA): megajs accepts a TOTP code at login; it rides the
+    // encrypted credential bundle. HONEST LIMIT: a 2FA code is one-time, so a
+    // later reconnect/quota-refresh needs a fresh code — the UI says so.
+    const secondFactor = typeof body.secondFactorCode === 'string' && body.secondFactorCode.trim()
+      ? body.secondFactorCode.trim()
+      : undefined;
+    const bundle: ProviderCredentialBundle = {
+      schemaVersion: 1,
+      provider: 'mega',
+      email,
+      password,
+      ...(secondFactor ? { secondFactorCode: secondFactor } : {}),
+    };
     try {
       const adapter = getAdapter('mega')!;
       const identity = await adapter.connectAndReadAccount(bundle);

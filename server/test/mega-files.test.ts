@@ -45,9 +45,10 @@ test('MEGA requires no provider app config (no fake OAuth setup)', () => {
 test('credential errors never leak whether an account exists, and never log secrets', () => {
   const bad = mapMegaError(new Error('Wrong password'));
   assert.equal(bad.safeCode, 'invalid_credentials');
+  // wizard §2: a 2FA wall is NOT a wrong password — the distinct honest code
+  // lets the UI reveal its TOTP field; the raw provider text still stays out
   const twoFa = mapMegaError(new Error('Two-factor code required'));
-  assert.equal(twoFa.safeCode, 'invalid_credentials');
-  // the normalized error must not carry the raw provider text
+  assert.equal(twoFa.safeCode, 'two_factor_required');
   assert.ok(!twoFa.message.toLowerCase().includes('two-factor'));
   assert.ok(!mapMegaError(new Error('ENOENT')).message.includes('ENOENT'));
   assert.ok(!mapMegaError(new Error('quota overflow')).message.includes('quota'));

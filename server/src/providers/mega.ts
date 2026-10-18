@@ -44,9 +44,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 async function withTemporaryStorage<T>(bundle: Extract<ProviderCredentialBundle, { provider: 'mega' }>, fn: (storage: MegaStorageLike) => Promise<T>): Promise<T> {
+  // wizard §2: megajs 1.3.x forwards secondFactorCode as the MEGA `mfa`
+  // login parameter — the one supported 2FA path (a one-time code, never
+  // durable; the UI must ask again at every fresh login).
   const storage = new Storage({
     email: bundle.email,
     password: bundle.password,
+    ...(bundle.secondFactorCode ? { secondFactorCode: bundle.secondFactorCode } : {}),
   } as unknown as ConstructorParameters<typeof Storage>[0]) as unknown as MegaStorageLike;
   try {
     await withTimeout(new Promise<void>((resolve, reject) => {
@@ -64,9 +68,10 @@ async function withTemporaryStorage<T>(bundle: Extract<ProviderCredentialBundle,
       throw new ProviderError('invalid_credentials', 401);
     }
     // W-04: 'FA' matched almost any failure message ("Failed", ...); match the
-    // real two-factor tokens instead.
+    // real two-factor tokens instead. Wizard §2: a distinct honest code lets
+    // the UI reveal its 2FA field (the credentials themselves were not wrong).
     if (message.includes('two-factor') || message.includes('2fa')) {
-      throw new ProviderError('invalid_credentials', 401);
+      throw new ProviderError('two_factor_required', 401);
     }
     if (err instanceof ProviderError) throw err;
     throw new ProviderError('provider_unavailable', 502);

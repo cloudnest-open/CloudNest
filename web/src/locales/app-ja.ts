@@ -646,6 +646,31 @@ export const appJa: AppStrings = {
     title: 'クラウドアカウント',
     connectAccount: '+ アカウントを接続',
     emptyBusiness: 'ビジネスアカウントはまだありません。「アカウントを接続」から S3 互換バケットを選んで追加してください。',
+    wizard: {
+      continueConnect: '{provider} の接続を続ける',
+    },
+    edit: {
+      title: '資格情報を編集 — {label}',
+      submit: '資格情報を保存',
+      saved: '{label} の資格情報を差し替えました。',
+      badCredentials: 'プロバイダーが新しい資格情報を拒否しました。',
+      failed: '資格情報を差し替えできませんでした。',
+      menuItem: '資格情報を編集',
+      appConfigItem: 'アプリ資格情報を編集',
+      oauthNote: 'OAuth アカウントはブラウザで承認します。再承認には「再接続」を、アプリ資格情報の変更はこちらで行ってください。',
+    },
+    verify: {
+      ok: '{label} を検証しました — 接続は正常です。',
+      twoFactor: 'このアカウントの検証には新しい 2FA コードが必要です。',
+      failed: '検証に失敗しました（{code}）。',
+    },
+    result: {
+      connected: 'アカウントを接続しました。',
+      alreadyConnected: 'そのプロバイダーアカウントは既に接続されています — アカウントごとに別の行として接続できます。',
+      denied: '承認が拒否されたため、何も接続されていません。',
+      refreshMissing: 'プロバイダーが永続的なリフレッシュトークンを返しませんでした。新しい承認が必要です。',
+      failed: '接続に失敗しました（{code}）。',
+    },
     errorLoad: 'クラウドアカウントを読み込めませんでした。サーバーが実データを返しませんでした。',
     startFailed: '接続を開始できませんでした。',
     sharedPool: {
@@ -694,6 +719,9 @@ export const appJa: AppStrings = {
       badCredentials: 'MEGA がその認証情報を拒否しました。',
       failed: 'MEGA への接続に失敗しました。',
       reauthNotice: 'MEGA の認証情報をもう一度入力してください。',
+      twoFactor: '二要素コード（任意）',
+      twoFactorNote: 'このワンタイムコードを検証できるのは MEGA 本体のみです。後で再接続する場合は新しいコードが必要です。',
+      twoFactorRequired: 'この MEGA アカウントは二要素認証を使っています。認証アプリの現在の 2FA コードを入力してください。',
     },
     tabs: {
       aria: 'ストレージ層',
@@ -717,6 +745,9 @@ export const appJa: AppStrings = {
       connected: 'S3 互換バケットを接続しました（ビジネス層）。',
       failed: 'S3 接続に失敗しました。',
       testNote: '接続時に HeadBucket でキーを検証します。',
+      providerName: 'プロバイダー名',
+      providerNamePlaceholder: 'Wasabi、Backblaze など',
+      providerNameHint: '「S3 互換」の代わりにカードやダッシュボードに表示されます。',
     },
     list: {
       title: 'アカウント',
@@ -731,6 +762,7 @@ export const appJa: AppStrings = {
       available: '利用可能（推定）：{size}',
       checked: '{when} に確認',
       refreshQuota: 'クォータを更新',
+      test: 'テスト',
       rename: '名前の変更',
       reconnect: '再接続',
       disconnect: '接続解除',
@@ -748,6 +780,7 @@ export const appJa: AppStrings = {
       },
     },
     reconnect: {
+      refreshed: '{label} を再接続しました — トークンを更新しました。',
       failed: '再接続に失敗しました。',
     },
     disconnect: {

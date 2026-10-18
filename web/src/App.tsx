@@ -331,6 +331,15 @@ export default function App() {
     };
   }, [authState, uiMode]);
 
+  // OAuth callback return (wizard §1): the server redirects to
+  // /cloud-accounts?connect=<result>; open that page so the honest result
+  // notice is actually seen (today the SPA would silently stay on Dashboard).
+  useEffect(() => {
+    if (authState !== 'ready') return;
+    const result = new URLSearchParams(window.location.search).get('connect');
+    if (result) setActive('Cloud Accounts');
+  }, [authState]);
+
   // Search the CloudNest-managed file index server-side (the same list the
   // Files page shows). No cross-provider content search is implied, and
   // nothing is shown before the server answers.

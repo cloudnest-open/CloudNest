@@ -14,6 +14,10 @@ interface PendingOAuth {
   sessionIdHash: string;
   provider: string;
   pkceVerifier?: string;
+  /** Wizard multi-account rule: set when the flow re-authorizes an EXISTING
+   * account row (reconnect); a fresh connect carries no row id, so the
+   * callback can honestly refuse a duplicate with already_connected. */
+  reconnectOf?: string;
   createdAt: number;
 }
 
@@ -30,7 +34,7 @@ function purgeExpired(): void {
   }
 }
 
-export function startOAuthFlow(provider: string, sessionId: string, pkceVerifier?: string): { state: string } {
+export function startOAuthFlow(provider: string, sessionId: string, pkceVerifier?: string, reconnectOf?: string): { state: string } {
   purgeExpired();
   if (pending.size >= MAX_PENDING) {
     throw Object.assign(new Error('Too many pending authorization flows; try again shortly.'), { safeCode: 'oauth_state_invalid' });
@@ -41,6 +45,7 @@ export function startOAuthFlow(provider: string, sessionId: string, pkceVerifier
     sessionIdHash: sha256(sessionId),
     provider,
     pkceVerifier,
+    reconnectOf,
     createdAt: Date.now(),
   });
   return { state };
@@ -49,6 +54,7 @@ export function startOAuthFlow(provider: string, sessionId: string, pkceVerifier
 export interface ConsumedFlow {
   provider: string;
   pkceVerifier?: string;
+  reconnectOf?: string;
 }
 
 /** Consume exactly once; validates provider match and owning session. */
@@ -60,7 +66,7 @@ export function consumeOAuthState(state: string, provider: string, sessionId: st
   if (entry.provider !== provider) return null;
   if (entry.sessionIdHash !== sha256(sessionId)) return null;
   if (Date.now() - entry.createdAt > STATE_TTL_MS) return null;
-  return { provider: entry.provider, pkceVerifier: entry.pkceVerifier };
+  return { provider: entry.provider, pkceVerifier: entry.pkceVerifier, reconnectOf: entry.reconnectOf };
 }
 
 export function makePkcePair(): { verifier: string; challengeS256: string } {

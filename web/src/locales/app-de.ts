@@ -659,6 +659,31 @@ export const appDe: AppStrings = {
     title: 'Cloud-Konten',
     connectAccount: '+ Konto verbinden',
     emptyBusiness: 'Noch keine Business-Konten. Über „+ Konto verbinden“ und einen S3-kompatiblen Bucket hinzufügen.',
+    wizard: {
+      continueConnect: '{provider} weiter verbinden',
+    },
+    edit: {
+      title: 'Zugangsdaten bearbeiten — {label}',
+      submit: 'Zugangsdaten speichern',
+      saved: 'Zugangsdaten für {label} ersetzt.',
+      badCredentials: 'Der Anbieter hat die neuen Zugangsdaten abgelehnt.',
+      failed: 'Zugangsdaten konnten nicht ersetzt werden.',
+      menuItem: 'Zugangsdaten bearbeiten',
+      appConfigItem: 'App-Zugangsdaten bearbeiten',
+      oauthNote: 'OAuth-Konten werden im Browser autorisiert — nutze Reconnect für eine neue Erlaubnis oder bearbeite die App-Zugangsdaten selbst.',
+    },
+    verify: {
+      ok: '{label} geprüft — die Verbindung funktioniert.',
+      twoFactor: 'Dieses Konto braucht einen frischen 2FA-Code, bevor es geprüft werden kann.',
+      failed: 'Prüfung fehlgeschlagen ({code}).',
+    },
+    result: {
+      connected: 'Konto verbunden.',
+      alreadyConnected: 'Dieses Anbieter-Konto ist bereits verbunden — jedes Konto verbindet als eigene Zeile.',
+      denied: 'Die Autorisierung wurde abgelehnt — nichts wurde verbunden.',
+      refreshMissing: 'Der Anbieter hat kein dauerhaftes Refresh-Token geliefert; das Konto braucht eine neue Autorisierung.',
+      failed: 'Verbindung fehlgeschlagen ({code}).',
+    },
     errorLoad: 'Die Cloud-Konten konnten nicht geladen werden. Der Server hat keine echten Daten geliefert.',
     startFailed: 'Die Verbindung konnte nicht gestartet werden.',
     sharedPool: {
@@ -707,6 +732,9 @@ export const appDe: AppStrings = {
       badCredentials: 'MEGA hat diese Zugangsdaten abgelehnt.',
       failed: 'Die MEGA-Verbindung ist fehlgeschlagen.',
       reauthNotice: 'Gib deine MEGA-Zugangsdaten erneut ein.',
+      twoFactor: 'Zwei-Faktor-Code (optional)',
+      twoFactorNote: 'Nur MEGA selbst kann diesen Einmalcode prüfen — ein späteres Reconnect fragt nach einem neuen Code.',
+      twoFactorRequired: 'Dieses MEGA-Konto nutzt Zwei-Faktor-Authentifizierung. Gib den aktuellen 2FA-Code aus deiner Authenticator-App ein.',
     },
     tabs: {
       aria: 'Speicher-Tier',
@@ -730,6 +758,9 @@ export const appDe: AppStrings = {
       connected: 'S3-kompatibler Bucket verbunden (Business-Tier).',
       failed: 'S3-Verbindung fehlgeschlagen.',
       testNote: 'Beim Verbinden werden die Schlüssel per HeadBucket geprüft.',
+      providerName: 'Anbietername',
+      providerNamePlaceholder: 'Wasabi, Backblaze, …',
+      providerNameHint: 'Wird auf Karten und im Dashboard statt des generischen „S3-kompatibel“ angezeigt.',
     },
     list: {
       title: 'Konten',
@@ -744,6 +775,7 @@ export const appDe: AppStrings = {
       available: 'Verfügbar (geschätzt): {size}',
       checked: 'Geprüft {when}',
       refreshQuota: 'Kontingent aktualisieren',
+      test: 'Testen',
       rename: 'Umbenennen',
       reconnect: 'Neu verbinden',
       disconnect: 'Trennen',
@@ -762,6 +794,7 @@ export const appDe: AppStrings = {
       },
     },
     reconnect: {
+      refreshed: '{label} neu verbunden — Token aktualisiert.',
       failed: 'Die Neuverbindung ist fehlgeschlagen.',
     },
     disconnect: {

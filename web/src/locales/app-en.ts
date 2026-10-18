@@ -670,6 +670,32 @@ export const appEn = {
     title: 'Cloud Accounts',
     connectAccount: '+ Connect Account',
     emptyBusiness: 'No business accounts yet. Use Connect Account and choose an S3-compatible bucket to add one.',
+    // wizard §1–§4 (rclone-style connect flow)
+    wizard: {
+      continueConnect: 'Continue connecting {provider}',
+    },
+    edit: {
+      title: 'Edit credentials — {label}',
+      submit: 'Save credentials',
+      saved: 'Credentials replaced for {label}.',
+      badCredentials: 'The provider rejected the new credentials.',
+      failed: 'Could not replace the credentials.',
+      menuItem: 'Edit credentials',
+      appConfigItem: 'Edit app credentials',
+      oauthNote: 'OAuth accounts are authorized in the browser — use Reconnect for a new grant, or edit the app credentials themselves.',
+    },
+    verify: {
+      ok: '{label} verified — the connection works.',
+      twoFactor: 'This account needs a fresh 2FA code before it can be verified.',
+      failed: 'Verification failed ({code}).',
+    },
+    result: {
+      connected: 'Account connected.',
+      alreadyConnected: 'That provider account is already connected — each account connects as its own row.',
+      denied: 'The provider authorization was denied — nothing was connected.',
+      refreshMissing: 'The provider did not return a durable refresh token; the account needs a fresh authorization.',
+      failed: 'Connection failed ({code}).',
+    },
     errorLoad: 'Could not load cloud accounts. The server did not answer with real data.',
     startFailed: 'Could not start the connection.',
     sharedPool: {
@@ -719,6 +745,9 @@ export const appEn = {
       badCredentials: 'MEGA rejected those credentials.',
       failed: 'MEGA connection failed.',
       reauthNotice: 'Enter your MEGA credentials again.',
+      twoFactor: 'Two-factor code (optional)',
+      twoFactorNote: 'Only MEGA itself can check this one-time code — a later reconnect will ask for a fresh one.',
+      twoFactorRequired: 'This MEGA account uses two-factor authentication. Enter the current 2FA code from your authenticator app.',
     },
     tabs: {
       aria: 'Account tier',
@@ -741,6 +770,9 @@ export const appEn = {
       connected: 'S3-compatible bucket connected (business tier).',
       failed: 'S3 connection failed.',
       testNote: 'Connecting verifies the keys with a HeadBucket check.',
+      providerName: 'Provider name',
+      providerNamePlaceholder: 'Wasabi, Backblaze, …',
+      providerNameHint: 'Shown on cards and the dashboard instead of the generic "S3-compatible".',
     },
     list: {
       title: 'Accounts',
@@ -755,6 +787,7 @@ export const appEn = {
       available: 'Available (estimated): {size}',
       checked: 'Checked {when}',
       refreshQuota: 'Refresh quota',
+      test: 'Test',
       rename: 'Rename',
       reconnect: 'Reconnect',
       disconnect: 'Disconnect',
@@ -773,6 +806,7 @@ export const appEn = {
       }),
     },
     reconnect: {
+      refreshed: 'Reconnected {label} — the token was refreshed.',
       failed: 'Reconnect failed.',
     },
     disconnect: {

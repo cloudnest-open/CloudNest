@@ -659,6 +659,31 @@ export const appFr: AppStrings = {
     title: 'Comptes cloud',
     connectAccount: '+ Connecter un compte',
     emptyBusiness: 'Aucun compte professionnel pour l’instant. Utilisez « Connecter un compte » et choisissez un bucket compatible S3 pour en ajouter un.',
+    wizard: {
+      continueConnect: 'Continuer la connexion de {provider}',
+    },
+    edit: {
+      title: 'Modifier les identifiants — {label}',
+      submit: 'Enregistrer les identifiants',
+      saved: 'Identifiants remplacés pour {label}.',
+      badCredentials: 'Le fournisseur a refusé les nouveaux identifiants.',
+      failed: 'Impossible de remplacer les identifiants.',
+      menuItem: 'Modifier les identifiants',
+      appConfigItem: 'Modifier les identifiants de l’app',
+      oauthNote: 'Les comptes OAuth sont autorisés dans le navigateur — utilisez Reconnecter pour un nouvel accord, ou modifiez les identifiants de l’application.',
+    },
+    verify: {
+      ok: '{label} vérifié — la connexion fonctionne.',
+      twoFactor: 'Ce compte a besoin d’un nouveau code 2FA avant de pouvoir être vérifié.',
+      failed: 'Échec de la vérification ({code}).',
+    },
+    result: {
+      connected: 'Compte connecté.',
+      alreadyConnected: 'Ce compte du fournisseur est déjà connecté — chaque compte est connecté comme sa propre ligne.',
+      denied: 'L’autorisation a été refusée — rien n’a été connecté.',
+      refreshMissing: 'Le fournisseur n’a pas renvoyé de refresh token durable ; le compte a besoin d’une nouvelle autorisation.',
+      failed: 'Échec de la connexion ({code}).',
+    },
     errorLoad: 'Les comptes cloud n’ont pas pu être chargés. Le serveur n’a pas renvoyé de données réelles.',
     startFailed: 'La connexion n’a pas pu être lancée.',
     sharedPool: {
@@ -707,6 +732,9 @@ export const appFr: AppStrings = {
       badCredentials: 'MEGA a rejeté ces identifiants.',
       failed: 'La connexion à MEGA a échoué.',
       reauthNotice: 'Saisissez à nouveau vos identifiants MEGA.',
+      twoFactor: 'Code à deux facteurs (facultatif)',
+      twoFactorNote: 'Seul MEGA peut vérifier ce code à usage unique — une reconnexion ultérieure demandera un nouveau code.',
+      twoFactorRequired: 'Ce compte MEGA utilise la double authentification. Saisissez le code 2FA actuel de votre application d’authentification.',
     },
     tabs: {
       aria: 'Niveau de stockage',
@@ -730,6 +758,9 @@ export const appFr: AppStrings = {
       connected: 'Bucket compatible S3 connecté (niveau entreprise).',
       failed: 'Échec de la connexion S3.',
       testNote: 'La connexion vérifie les clés via un test HeadBucket.',
+      providerName: 'Nom du fournisseur',
+      providerNamePlaceholder: 'Wasabi, Backblaze, …',
+      providerNameHint: 'Affiché sur les cartes et le tableau de bord au lieu du générique « Compatible S3 ».',
     },
     list: {
       title: 'Comptes',
@@ -744,6 +775,7 @@ export const appFr: AppStrings = {
       available: 'Disponible (estimé) : {size}',
       checked: 'Vérifié {when}',
       refreshQuota: 'Actualiser le quota',
+      test: 'Tester',
       rename: 'Renommer',
       reconnect: 'Reconnecter',
       disconnect: 'Déconnecter',
@@ -762,6 +794,7 @@ export const appFr: AppStrings = {
       },
     },
     reconnect: {
+      refreshed: '{label} reconnecté — jeton actualisé.',
       failed: 'La reconnexion a échoué.',
     },
     disconnect: {

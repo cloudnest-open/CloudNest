@@ -221,6 +221,24 @@ export class ProviderAccountService {
     return this.queries.getAccount.get(id) as ProviderAccountRow;
   }
 
+  /** M0019 (connect wizard §3): the owner's name for an S3-compatible
+   * provider; null restores the honest generic label. */
+  setProviderDisplayName(id: string, name: string | null): ProviderAccountRow {
+    const trimmed = name === null ? null : name.trim().slice(0, 60) || null;
+    this.queries.setProviderDisplayName.run({
+      id,
+      provider_display_name: trimmed,
+      updated_at: new Date().toISOString(),
+    });
+    return this.queries.getAccount.get(id) as ProviderAccountRow;
+  }
+
+  /** Identity lookup for the connect wizard's honest already-connected rule. */
+  findByIdentity(provider: string, identifier: string): ProviderAccountRow | undefined {
+    if (!identifier) return undefined;
+    return this.queries.getByIdentity.get(provider, identifier) as ProviderAccountRow | undefined;
+  }
+
   /**
    * CloudNest-tracked bytes per S3-compatible account: the sum of bytes in
    * ACTIVE placements. S3 exposes no quota API, so this local sum plus the

@@ -3,6 +3,7 @@ import { api, type ProviderInfo, type AccountInfo } from '../api.js';
 import { confirmDestructive } from '../confirm.js';
 import { Dialog, RowMenu, RowMenuItem, formatBytes, formatDateTime } from '../components/ui.js';
 import { ProviderLogo } from '../components/ProviderLogo.js';
+import { ProviderSetupCard } from '../components/ProviderSetupCard.js';
 import { useI18n } from '../i18n-context.js';
 import { useUiMode } from '../ui-mode-context.js';
 import { providerTier } from '../ui-mode.js';
@@ -60,6 +61,9 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   const [megaOpen, setMegaOpen] = useState(false);
   const [megaEmail, setMegaEmail] = useState('');
   const [megaPassword, setMegaPassword] = useState('');
+  // wizard §2: MEGA's one-time TOTP code (never durable — re-login asks again)
+  const [mega2fa, setMega2fa] = useState('');
+  const [mega2faRevealed, setMega2faRevealed] = useState(false);
   // Roadmap Phase 1: two tiers, one engine — the list is filtered by the
   // selected tier tab, and S3-compatible buckets connect through the form below.
   // UI mode (personal vs business) decides which tier tab exists at all; the
@@ -77,6 +81,8 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   const [s3Bucket, setS3Bucket] = useState('');
   const [s3Prefix, setS3Prefix] = useState('');
   const [s3Cap, setS3Cap] = useState('');
+  // wizard §3: the owner's name for this S3-compatible provider (Wasabi, …)
+  const [s3ProviderName, setS3ProviderName] = useState('');
   // The connect picker stays open across navigation so a user who followed the
   // explicit "Configure Provider" jump into Settings returns to their context.
   const [pickerOpen, setPickerOpen] = useState(() => {
@@ -84,7 +90,6 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   });
   // Set when an OAuth start fails because this instance lacks the provider's
   // application configuration; rendered as the explanatory dialog below.
-  const [setupNeeded, setSetupNeeded] = useState<ProviderInfo | null>(null);
   // Set when the user returned from Provider Setup having deliberately chosen
   // "Continue connecting {provider}": we then resume that provider's connect.
   const [continueProvider, setContinueProvider] = useState<string | null>(null);
@@ -92,6 +97,23 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   // grouped, plus the currently selected member set (always includes it).
   const [scopeTarget, setScopeTarget] = useState<AccountInfo | null>(null);
   const [scopeSelection, setScopeSelection] = useState<string[]>([]);
+  // wizard §1 (one-time credential step): an OAuth Connect that found the
+  // instance's app credentials missing opens the setup form INLINE — no
+  // bouncing to Settings; once saved the config exists for life.
+  const [wizardSetup, setWizardSetup] = useState<ProviderInfo | null>(null);
+  // wizard §4 (one surface): per-account Edit-Replace-credentials dialog.
+  const [editTarget, setEditTarget] = useState<AccountInfo | null>(null);
+  const [editEndpoint, setEditEndpoint] = useState('');
+  const [editRegion, setEditRegion] = useState('');
+  const [editAccessKey, setEditAccessKey] = useState('');
+  const [editSecret, setEditSecret] = useState('');
+  const [editBucket, setEditBucket] = useState('');
+  const [editPrefix, setEditPrefix] = useState('');
+  const [editCap, setEditCap] = useState('');
+  const [editProviderName, setEditProviderName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [edit2fa, setEdit2fa] = useState('');
 
   // On arrival, honour a pending "continue connecting" hand-off from Settings.
   useEffect(() => {
@@ -100,6 +122,22 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     writeHandoff(CONTINUE_KEY, null);
     setPickerOpen(true);
     setContinueProvider(pending.provider);
+  }, []);
+
+  // wizard §1: the OAuth callback redirects back with ?connect=<result>.
+  // Surface the honest result once, then clean the URL — a silent return told
+  // the user nothing (and never explained an already_connected refusal).
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get('connect');
+    if (!result) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    setPickerOpen(true);
+    if (result === 'connected') setNotice(t.accounts.result.connected);
+    else if (result === 'already_connected') setNotice(t.accounts.result.alreadyConnected);
+    else if (result === 'oauth_denied') setNotice(t.accounts.result.denied);
+    else if (result === 'refresh_token_missing') setNotice(t.accounts.result.refreshMissing);
+    else setError(tf(t.accounts.result.failed, { code: result }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on arrival
   }, []);
 
   // Resume only once the provider catalog is loaded (connect() needs the record).
@@ -161,9 +199,11 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     }
     const data = res.data as { error?: string; code?: string };
     if (data.code === 'provider_not_configured') {
-      // Stay on Cloud Accounts: explain, and let the user choose to open
-      // Settings. Nothing navigates automatically and nothing was connected.
-      setSetupNeeded(p);
+      // wizard §1 (rclone-style): the FIRST-EVER connect opens the one-time
+      // credential step right here — exact Redirect URI with a copy button,
+      // console links, the known pitfalls. Once saved, it exists for life and
+      // this step never shows again; Connect stays one click.
+      setWizardSetup(p);
       return;
     }
     setError(data.error ?? t.accounts.startFailed);
@@ -218,6 +258,19 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
 
   async function reconnect(account: AccountInfo) {
     await withBusy(account.id, async () => {
+      // wizard §4: Reconnect = silent token refresh first (the scheduler's own
+      // path); a provider that has revoked the grant honestly fails, and the
+      // browser re-auth flow takes over — never a dead button.
+      const refresh = await api.reconnect(account.id, { mode: 'refresh' });
+      const rData = refresh.data as { mode?: string; result?: { ok: boolean; code?: string } };
+      if (rData.mode === 'refreshed') {
+        if (rData.result?.ok) {
+          setNotice(tf(t.accounts.reconnect.refreshed, { label: account.displayLabel }));
+          await reload();
+          return;
+        }
+        // fall through to the browser flow below
+      }
       const res = await api.reconnect(account.id);
       const data = res.data as { mode?: string; authorizationUrl?: string; message?: string };
       if (data.mode === 'oauth' && data.authorizationUrl) {
@@ -225,12 +278,81 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
         return;
       }
       if (data.mode === 'credentials') {
-        if (account.provider === 's3') setS3Open(true);
-        else setMegaOpen(true);
+        openEditDialog(account);
         setNotice(data.message ?? t.accounts.mega.reauthNotice);
         return;
       }
       setError((res.data as { error?: string }).error ?? t.accounts.reconnect.failed);
+    });
+  }
+
+  /** wizard §4: Test/Verify — the provider's own cheapest identity call. */
+  async function verify(account: AccountInfo) {
+    await withBusy(account.id, async () => {
+      const res = await api.verifyAccount(account.id);
+      const data = res.data as { ok?: boolean; quotaStatus?: string; code?: string };
+      if (res.status === 200 && data.ok) {
+        setNotice(tf(t.accounts.verify.ok, { label: account.displayLabel }));
+      } else if (data.code === 'two_factor_required') {
+        setError(t.accounts.verify.twoFactor);
+      } else {
+        setError(tf(t.accounts.verify.failed, { code: data.code ?? 'unknown' }));
+      }
+      await reload();
+    });
+  }
+
+  /** wizard §4: OAuth accounts edit their APP config (browser-granted tokens
+   * are never hand-typed); S3/MEGA get the credential dialog instead. */
+  function openWizardSetup(account: AccountInfo) {
+    const p = providers.find((x) => x.id === account.provider);
+    if (p) setWizardSetup(p);
+  }
+
+  function openEditDialog(account: AccountInfo) {
+    setEditTarget(account);
+    setEditSecret('');
+    setEditPassword('');
+    setEdit2fa('');
+    setEditEndpoint(account.provider === 's3' ? '' : '');
+    setEditRegion('');
+    setEditAccessKey('');
+    setEditBucket('');
+    setEditPrefix('');
+    setEditCap(account.capacityCapBytes !== null && account.capacityCapBytes !== undefined ? String(account.capacityCapBytes) : '');
+    setEditProviderName(account.providerDisplayName ?? '');
+    setEditEmail('');
+  }
+
+  async function submitEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editTarget) return;
+    setError(null);
+    const account = editTarget;
+    await withBusy(account.id, async () => {
+      const body: Record<string, unknown> = account.provider === 's3'
+        ? {
+            endpoint: editEndpoint.trim(),
+            region: editRegion.trim() || 'auto',
+            accessKeyId: editAccessKey.trim(),
+            secretAccessKey: editSecret,
+            bucket: editBucket.trim(),
+            prefix: editPrefix.trim() || 'cloudnest',
+          }
+        : {
+            email: editEmail.trim(),
+            password: editPassword,
+            ...(edit2fa.trim() ? { secondFactorCode: edit2fa.trim() } : {}),
+          };
+      const res = await api.editAccountCredentials(account.id, body);
+      const data = (res.data ?? {}) as { error?: string; code?: string };
+      if (res.status === 200) {
+        setEditTarget(null);
+        setNotice(tf(t.accounts.edit.saved, { label: account.displayLabel }));
+        await reload();
+        return;
+      }
+      setError(data.code === 'invalid_credentials' ? t.accounts.edit.badCredentials : data.error ?? t.accounts.edit.failed);
     });
   }
 
@@ -286,15 +408,23 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
   async function submitMega(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const res = await api.megaConnect(megaEmail, megaPassword);
+    const res = await api.megaConnect(megaEmail, megaPassword, mega2fa.trim() || undefined);
     setMegaPassword('');
     if (res.status === 201) {
       setMegaOpen(false);
       setMegaEmail('');
+      setMega2fa('');
+      setMega2faRevealed(false);
       setNotice(t.accounts.mega.connected);
       await reload();
     } else {
       const data = res.data as { error?: string; code?: string };
+      if (data.code === 'two_factor_required') {
+        // wizard §2: reveal the TOTP field with the honest one-time note
+        setMega2faRevealed(true);
+        setError(t.accounts.mega.twoFactorRequired);
+        return;
+      }
       setError(data.code === 'invalid_credentials' ? t.accounts.mega.badCredentials : data.error ?? t.accounts.mega.failed);
     }
   }
@@ -311,11 +441,12 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
       bucket: s3Bucket.trim(),
       prefix: s3Prefix.trim() || 'cloudnest',
       capacityCapBytes: capBytes !== null && Number.isInteger(capBytes) && capBytes > 0 ? capBytes : null,
+      providerName: s3ProviderName.trim() || null,
     });
     setS3Secret('');
     if (res.status === 201) {
       setS3Open(false);
-      setS3Endpoint(''); setS3Region(''); setS3AccessKey(''); setS3Bucket(''); setS3Prefix(''); setS3Cap('');
+      setS3Endpoint(''); setS3Region(''); setS3AccessKey(''); setS3Bucket(''); setS3Prefix(''); setS3Cap(''); setS3ProviderName('');
       setTierTab('business');
       setNotice(t.accounts.s3.connected);
       await reload();
@@ -392,33 +523,79 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
         </section>
       )}
 
-      {setupNeeded && (
+      {wizardSetup && (
         <Dialog
-          title={tf(t.accounts.setupNeeded.title, { provider: setupNeeded.displayName })}
-          description={tf(t.accounts.setupNeeded.desc, { provider: setupNeeded.displayName })}
-          onClose={() => setSetupNeeded(null)}
+          title={tf(t.accounts.setupNeeded.title, { provider: wizardSetup.displayName })}
+          description={tf(t.accounts.setupNeeded.desc, { provider: wizardSetup.displayName })}
+          onClose={() => setWizardSetup(null)}
           footer={
             <>
-              <button type="button" className="btn-secondary" onClick={() => setSetupNeeded(null)}>
+              <button type="button" className="btn-secondary" onClick={() => setWizardSetup(null)}>
                 {t.accounts.setupNeeded.back}
               </button>
               <button
                 type="button"
                 className="btn-primary"
                 onClick={() => {
-                  // remember WHICH provider the user was connecting so the
-                  // setup section can open it and offer the way back
-                  writeHandoff(PENDING_KEY, { provider: setupNeeded.id, displayName: setupNeeded.displayName });
-                  setSetupNeeded(null);
-                  onGoToSettings();
+                  const p = wizardSetup;
+                  setWizardSetup(null);
+                  void connect(p);
                 }}
               >
-                {t.accounts.setupNeeded.configure}
+                {tf(t.accounts.wizard.continueConnect, { provider: wizardSetup.displayName })}
               </button>
             </>
           }
         >
           <p className="small muted">{t.accounts.setupNeeded.body}</p>
+          {/* wizard §1: the one-time credential form lives HERE — exact
+              Redirect URI (copy button), provider-console links, the known
+              Google/Dropbox pitfalls. Saved once, it exists for life. */}
+          <ProviderSetupCard onChanged={() => void reload()} />
+        </Dialog>
+      )}
+
+      {editTarget && (
+        <Dialog
+          title={tf(t.accounts.edit.title, { label: editTarget.displayLabel })}
+          onClose={() => setEditTarget(null)}
+        >
+          {editTarget.provider === 's3' || editTarget.provider === 'mega' ? (
+            <form onSubmit={submitEdit} className="password-form">
+              {editTarget.provider === 's3' ? (
+                <>
+                  <label htmlFor="edit-endpoint">{t.accounts.s3.endpoint}</label>
+                  <input id="edit-endpoint" type="url" placeholder="https://acc123.r2.cloudflarestorage.com" value={editEndpoint} onChange={(e) => setEditEndpoint(e.target.value)} required />
+                  <label htmlFor="edit-region">{t.accounts.s3.region}</label>
+                  <input id="edit-region" type="text" placeholder="auto" value={editRegion} onChange={(e) => setEditRegion(e.target.value)} />
+                  <label htmlFor="edit-access">{t.accounts.s3.accessKey}</label>
+                  <input id="edit-access" type="text" value={editAccessKey} onChange={(e) => setEditAccessKey(e.target.value)} required autoComplete="off" />
+                  <label htmlFor="edit-secret">{t.accounts.s3.secretKey}</label>
+                  <input id="edit-secret" type="password" value={editSecret} onChange={(e) => setEditSecret(e.target.value)} required autoComplete="new-password" />
+                  <label htmlFor="edit-bucket">{t.accounts.s3.bucket}</label>
+                  <input id="edit-bucket" type="text" value={editBucket} onChange={(e) => setEditBucket(e.target.value)} required />
+                  <label htmlFor="edit-prefix">{t.accounts.s3.prefix}</label>
+                  <input id="edit-prefix" type="text" placeholder="cloudnest" value={editPrefix} onChange={(e) => setEditPrefix(e.target.value)} />
+                  <label htmlFor="edit-name">{t.accounts.s3.providerName}</label>
+                  <input id="edit-name" type="text" placeholder={t.accounts.s3.providerNamePlaceholder} value={editProviderName} onChange={(e) => setEditProviderName(e.target.value)} />
+                </>
+              ) : (
+                <>
+                  <label htmlFor="edit-email">{t.accounts.mega.email}</label>
+                  <input id="edit-email" type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} required />
+                  <label htmlFor="edit-password">{t.accounts.mega.password}</label>
+                  <input id="edit-password" type="password" value={editPassword} onChange={(e) => setEditPassword(e.target.value)} required autoComplete="new-password" />
+                  <label htmlFor="edit-2fa">{t.accounts.mega.twoFactor}</label>
+                  <input id="edit-2fa" type="text" inputMode="numeric" value={edit2fa} onChange={(e) => setEdit2fa(e.target.value)} />
+                  <p className="muted small">{t.accounts.mega.twoFactorNote}</p>
+                </>
+              )}
+              <button type="submit" className="btn-primary">{t.accounts.edit.submit}</button>
+              <button type="button" className="btn-secondary" onClick={() => setEditTarget(null)}>{t.dialog.cancel}</button>
+            </form>
+          ) : (
+            <p className="muted">{t.accounts.edit.oauthNote}</p>
+          )}
         </Dialog>
       )}
 
@@ -431,6 +608,11 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
             <input id="mega-email" type="email" value={megaEmail} onChange={(e) => setMegaEmail(e.target.value)} required />
             <label htmlFor="mega-password">{t.accounts.mega.password}</label>
             <input id="mega-password" type="password" value={megaPassword} onChange={(e) => setMegaPassword(e.target.value)} required />
+            {/* wizard §2: the optional TOTP field stays visible — a 2FA account
+                can never connect without it, and hiding it would fail silently */}
+            <label htmlFor="mega-2fa">{t.accounts.mega.twoFactor}</label>
+            <input id="mega-2fa" type="text" inputMode="numeric" value={mega2fa} onChange={(e) => setMega2fa(e.target.value)} autoComplete="one-time-code" />
+            <p className="muted small">{mega2faRevealed ? t.accounts.mega.twoFactorRequired : t.accounts.mega.twoFactorNote}</p>
             <button type="submit" className="btn-primary">{t.accounts.mega.submit}</button>
             <button type="button" className="btn-secondary" onClick={() => { setMegaOpen(false); setMegaPassword(''); }}>
               {t.dialog.cancel}
@@ -456,6 +638,9 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
             <input id="s3-bucket" type="text" value={s3Bucket} onChange={(e) => setS3Bucket(e.target.value)} required />
             <label htmlFor="s3-prefix">{t.accounts.s3.prefix}</label>
             <input id="s3-prefix" type="text" placeholder="cloudnest" value={s3Prefix} onChange={(e) => setS3Prefix(e.target.value)} />
+            <label htmlFor="s3-provider-name">{t.accounts.s3.providerName}</label>
+            <input id="s3-provider-name" type="text" placeholder={t.accounts.s3.providerNamePlaceholder} value={s3ProviderName} onChange={(e) => setS3ProviderName(e.target.value)} />
+            <p className="muted small">{t.accounts.s3.providerNameHint}</p>
             <label htmlFor="s3-cap">{t.accounts.s3.cap}</label>
             <input id="s3-cap" type="number" min="1" step="1" inputMode="numeric" value={s3Cap} onChange={(e) => setS3Cap(e.target.value)} />
             <p className="muted small">{t.accounts.s3.capHint}</p>
@@ -523,7 +708,9 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                     <td>
                       <span className="file-name-cell">
                         <ProviderLogo provider={a.provider} size={20} />
-                        {a.displayName}
+                        {/* wizard §3: S3-compatible rows show the owner's
+                            provider name (Wasabi, …) over the generic label */}
+                        {a.provider === 's3' && a.providerDisplayName ? a.providerDisplayName : a.displayName}
                       </span>
                       {a.experimental && <span className="tag tag-warn">{t.accounts.picker.experimental}</span>}
                     </td>
@@ -555,11 +742,20 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                     </td>
                     <td className="actions">
                       {a.status === 'connected' ? (
-                        <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void refreshOne(a.id)}>{t.accounts.list.refreshQuota}</button>
+                        <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void verify(a)}>{t.accounts.list.test}</button>
                       ) : (
                         <button type="button" className="btn-secondary" disabled={busyId === a.id} onClick={() => void reconnect(a)}>{t.accounts.list.reconnect}</button>
                       )}
                       <RowMenu label={t.accounts.list.actions}>
+                        {/* wizard §4: the whole management surface is this row —
+                            Reconnect (token refresh → browser fallback), Edit/
+                            Replace credentials, Test, Disconnect; S3 keeps its
+                            capacity/participation powers. */}
+                        <RowMenuItem disabled={busyId === a.id} onSelect={() => void reconnect(a)}>{t.accounts.list.reconnect}</RowMenuItem>
+                        <RowMenuItem disabled={busyId === a.id} onSelect={() => (a.provider === 's3' || a.provider === 'mega' ? openEditDialog(a) : openWizardSetup(a))}>
+                          {a.provider === 's3' || a.provider === 'mega' ? t.accounts.edit.menuItem : t.accounts.edit.appConfigItem}
+                        </RowMenuItem>
+                        <RowMenuItem disabled={busyId === a.id} onSelect={() => void refreshOne(a.id)}>{t.accounts.list.refreshQuota}</RowMenuItem>
                         <RowMenuItem disabled={busyId === a.id} onSelect={() => void rename(a)}>{t.accounts.list.rename}</RowMenuItem>
                         <RowMenuItem disabled={busyId === a.id} onSelect={() => void toggleParticipation(a)}>
                           {a.participatesInUploads ? t.accounts.list.excludeUploads : t.accounts.list.includeUploads}
