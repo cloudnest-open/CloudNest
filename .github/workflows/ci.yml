@@ -37,3 +37,24 @@ jobs:
         run: npm test
       - name: Production build
         run: npm run build
+
+  # F23 hardening: the web UI has no automated coverage inside npm test (that
+  # suite is server-side by design); this opt-in job boots the REAL built app
+  # in a browser and proves the entry → login → shell → dashboard path.
+  ui-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # post-v4.2.2 backport (2026-07-16)
+      - name: Use Node.js 24.x
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24.x
+          cache: npm
+      - name: Install (lockfile-exact)
+        run: npm ci
+      - name: Production build
+        run: npm run build
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+      - name: UI smoke
+        run: npm run test:ui
