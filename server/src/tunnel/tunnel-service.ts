@@ -71,6 +71,10 @@ export interface TunnelRuntimePaths {
 export interface TunnelServiceOptions {
   /** Injected for tests; production omits it and the real `spawn` is used. */
   spawnImpl?: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+  /** Injected for tests: fixes the binary discovery (the real discovery is
+   * process-wide cached, so a CI runner without cloudflared must not poison
+   * the fake-spawn tests). Production omits it. */
+  cloudflaredPathImpl?: () => string | null;
 }
 
 export interface TunnelStartOptions {
@@ -99,6 +103,19 @@ const CONNECTOR_REGISTERED_RE = /Registered tunnel connection/i;
 const CLOUDFLARED_REFRESH_MS = 1_500;
 /** Non-secret start metadata (hostname/tunnel id), 0600 in the tunnel dir. */
 const META_FILE = 'tunnel-meta.json';
+
+/** The real well-known-path discovery (injectable for tests). */
+function realCloudflaredPath(): string | null {
+  const candidates = ['/usr/local/bin/cloudflared', '/usr/bin/cloudflared', '/opt/homebrew/bin/cloudflared'];
+  for (const candidate of candidates) {
+    try {
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch {
+      // not present at this location
+    }
+  }
+  return null;
+}
 
 function normalizeHost(value: string): string {
   return value.trim().toLowerCase();
@@ -177,6 +194,7 @@ export class TunnelService {
   private readonly keyProvider: () => CredentialKey;
   private readonly spawnImpl: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
   private readonly say: (message: string) => void;
+  private readonly pathImpl: () => string | null;
   private cachedBinary: string | null | undefined = undefined;
   /** Browser-authorized cert/credentials (the design §6 lifecycle owner). */
   readonly browserAuth: BrowserAuthorization;
@@ -190,6 +208,7 @@ export class TunnelService {
     this.spawnImpl =
       options.spawnImpl ??
       ((command, args, spawnOptions) => spawn(command, args as string[], spawnOptions));
+    this.pathImpl = options.cloudflaredPathImpl ?? realCloudflaredPath;
     this.say = (message: string) => {
       console.log(message); // never contains credential material; callers pass fixed text
     };
@@ -204,24 +223,13 @@ export class TunnelService {
 
   /**
    * Locate a cloudflared binary. Only well-known installation paths are
-   * inspected; an arbitrary user-supplied path is never executed.
+   * inspected; an arbitrary user-supplied path is never executed. Tests inject
+   * the lookup, because the real result is cached process-wide.
    */
   cloudflaredPath(): string | null {
     if (this.cachedBinary !== undefined) return this.cachedBinary;
-    const candidates = ['/usr/local/bin/cloudflared', '/usr/bin/cloudflared', '/opt/homebrew/bin/cloudflared'];
-    let found: string | null = null;
-    for (const candidate of candidates) {
-      try {
-        if (fs.statSync(candidate).isFile()) {
-          found = candidate;
-          break;
-        }
-      } catch {
-        // not present at this location
-      }
-    }
-    this.cachedBinary = found;
-    return found;
+    this.cachedBinary = this.pathImpl();
+    return this.cachedBinary;
   }
 
   available(): boolean {

@@ -14,9 +14,9 @@ import { CredentialKey } from '../src/providers/encryption.js';
 /** M12.a/c/d — settings validation, backup/restore and redaction. */
 
 /** A TunnelService with a deterministic, throwaway encryption key for tests. */
-function makeTunnel(dir: string): TunnelService {
+function makeTunnel(dir: string, cloudflaredPath?: () => string | null): TunnelService {
   const key = CredentialKey.loadOrCreate(dir, false);
-  return new TunnelService(dir, { keyProvider: () => key });
+  return new TunnelService(dir, { keyProvider: () => key, cloudflaredPathImpl: cloudflaredPath ?? (() => '/usr/local/bin/cloudflared') });
 }
 
 function setup() {
@@ -294,18 +294,17 @@ test('the diagnostics report never contains a stored secret', () => {
 
 test('the tunnel reports unavailable when cloudflared is not installed', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cn-tunnel-'));
-  const tunnel = makeTunnel(dir);
+  const tunnel = makeTunnel(dir, () => null);
   const status = tunnel.status();
   assert.equal(status.state, 'disconnected');
   assert.equal(status.enabled, false);
   assert.equal(status.authorization.certStored, false);
+  assert.equal(tunnel.available(), false);
   // starting without a binary fails with an actionable code rather than hanging
-  if (!tunnel.available()) {
-    await assert.rejects(
-      () => tunnel.start({ hostname: 'files.example.com' }),
-      (e: unknown) => e instanceof TunnelError && (e as TunnelError).safeCode === 'cloudflared_not_installed',
-    );
-  }
+  await assert.rejects(
+    () => tunnel.start({ hostname: 'files.example.com' }),
+    (e: unknown) => e instanceof TunnelError && (e as TunnelError).safeCode === 'cloudflared_not_installed',
+  );
   // an unsafe hostname is refused before any process work
   await assert.rejects(
     () => tunnel.start({ hostname: 'bad host; rm -rf /' }),

@@ -44,9 +44,9 @@ function makeFakeSpawn(script: (call: SpawnCall, child: FakeChild) => void) {
   return { calls, spawnImpl };
 }
 
-function makeTunnel(dir: string, spawnImpl: (command: string, args: readonly string[], options: never) => ChildProcess): TunnelService {
+function makeTunnel(dir: string, spawnImpl: (command: string, args: readonly string[], options: never) => ChildProcess, cloudflaredPath: () => string | null = () => '/usr/local/bin/cloudflared'): TunnelService {
   const key = CredentialKey.loadOrCreate(dir, false);
-  return new TunnelService(dir, { keyProvider: () => key, spawnImpl: spawnImpl as never });
+  return new TunnelService(dir, { keyProvider: () => key, spawnImpl: spawnImpl as never, cloudflaredPathImpl: cloudflaredPath });
 }
 
 function seedAuthorization(tunnel: TunnelService, credJson: string): void {
