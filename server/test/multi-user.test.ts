@@ -6,6 +6,7 @@ import path from 'node:path';
 import { startTestApp, type TestApp, Client } from './helpers.js';
 import { openDatabase, runMigrations } from '../src/db/index.js';
 import { allMigrations } from '../src/db/migrations.js';
+import { UserService, UserError } from '../src/users/user-service.js';
 
 /**
  * Roadmap Phase 3 — multi-user foundation over the real HTTP API:
@@ -395,6 +396,51 @@ test('share links record their creator and a member lists only their own', async
     const stored = app.db.prepare('SELECT created_by FROM share_links WHERE id = ?')
       .get((created.body as { id: string }).id) as { created_by: string };
     assert.equal(stored.created_by, userId);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a failed token claim is audited with its safe code', async () => {
+  const app = await startTestApp();
+  try {
+    const anonymous = new Client(app.url);
+    const claim = await anonymous.post('/api/auth/accept-invite', { token: 'no-such-token', password: 'whatever passphrase', confirm: 'whatever passphrase' });
+    assert.equal(claim.status, 400);
+    assert.equal((claim.body as { code?: string }).code, 'token_invalid');
+
+    const row = app.db.prepare(
+      "SELECT success, reason_code FROM audit_events WHERE event_type = 'user_token_claimed' AND success = 0 ORDER BY created_at DESC LIMIT 1",
+    ).get() as { success: number; reason_code: string } | undefined;
+    assert.ok(row, 'the failed claim is audited');
+    assert.equal(row!.reason_code, 'token_invalid');
+  } finally {
+    await app.close();
+  }
+});
+
+test('an invite that loses the email race returns 409, not a 500', async () => {
+  const app = await startTestApp();
+  try {
+    const admin = new Client(app.url);
+    await admin.setup(PASSWORD);
+    const svc = new UserService(app.db);
+    svc.inviteUser({ email: 'race@example.com', displayName: 'first', role: 'member', allowanceBytes: null, baseUrl: app.url });
+
+    // simulate the concurrent invite: its pre-check ran before the first
+    // insert committed, so it misses the duplicate and only the UNIQUE
+    // constraint on users.email can stop it
+    const q = (svc as unknown as { q: { getUserByEmail: { get: (email: string) => unknown } } }).q;
+    const original = q.getUserByEmail;
+    q.getUserByEmail = { get: () => undefined };
+    try {
+      assert.throws(
+        () => svc.inviteUser({ email: 'race@example.com', displayName: 'second', role: 'member', allowanceBytes: null, baseUrl: app.url }),
+        (err: unknown) => err instanceof UserError && (err as UserError).safeCode === 'email_already_exists' && (err as UserError).httpStatus === 409,
+      );
+    } finally {
+      q.getUserByEmail = original;
+    }
   } finally {
     await app.close();
   }

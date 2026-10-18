@@ -122,18 +122,28 @@ export class UserService {
 
     const id = this.q.newId();
     const now = new Date().toISOString();
-    this.q.insertUser.run({
-      id,
-      email,
-      display_name: displayName,
-      role: input.role,
-      status: 'invited',
-      password_hash: null,
-      password_changed_at: null,
-      allowance_bytes: input.allowanceBytes,
-      created_at: now,
-      updated_at: now,
-    });
+    try {
+      this.q.insertUser.run({
+        id,
+        email,
+        display_name: displayName,
+        role: input.role,
+        status: 'invited',
+        password_hash: null,
+        password_changed_at: null,
+        allowance_bytes: input.allowanceBytes,
+        created_at: now,
+        updated_at: now,
+      });
+    } catch (err) {
+      // a concurrent invite can pass the pre-check above; the UNIQUE
+      // constraint on users.email is the real gate — surface it as 409,
+      // not as a generic 500
+      if (err instanceof Error && err.message.includes('UNIQUE constraint failed: users.email')) {
+        throw new UserError('email_already_exists', 409);
+      }
+      throw err;
+    }
     const rawToken = crypto.randomBytes(TOKEN_BYTES).toString('base64url');
     this.q.insertToken.run(sha256(rawToken), id, 'invite', Date.now() + INVITE_TTL_MS, now);
     return { user: this.getUser(id)!, acceptUrl: tokenUrl(input.baseUrl, rawToken) };

@@ -266,6 +266,8 @@ export function authRouter(
       res.json({ ok: true, email: claimed.email });
     } catch (err) {
       if (err instanceof UserError) {
+        // a failed claim is a pre-auth public write — audited like login
+        queries.recordAudit('user_token_claimed', false, err.safeCode);
         res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode });
         return;
       }

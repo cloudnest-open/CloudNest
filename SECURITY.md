@@ -20,7 +20,10 @@ accounts. It is not designed as a multi-user service.
 - **Authentication.** First-run setup creates the administrator (no default
   password; scrypt-hashed). Sessions are server-side in SQLite, rotate on
   login, and expire on a rolling 12-hour timeout. Every state-changing route
-  requires the session plus a double-submit CSRF token.
+  requires the session plus a double-submit CSRF token. Changing the root
+  admin's password invalidates every session — members' included — as a
+  deliberate precaution; a member changing their own password invalidates
+  only their own sessions.
 - **Public surface.** Only the share endpoints, the OAuth callback, and
   health/setup status are reachable unauthenticated. Share tokens are 256-bit
   random values stored as SHA-256 hashes; password-protected links reveal no
