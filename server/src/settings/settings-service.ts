@@ -167,7 +167,14 @@ export class SettingsService {
 
   /** Effective chunk size for new uploads (documented default is 64 MiB). */
   effectiveChunkSizeMiB(): ChunkSizeMiB {
-    return this.get('upload.chunkSizeMiB') as ChunkSizeMiB;
+    const value = this.get('upload.chunkSizeMiB') as unknown;
+    // a hand-edited app_settings row can hold valid JSON with a disallowed
+    // value: re-validate here instead of feeding it to planChunks — the
+    // client-supplied path validates, this fallback path did not
+    // (download.concurrency re-clamps for the same reason)
+    return (ALLOWED_CHUNK_SIZES as readonly number[]).includes(value as number)
+      ? (value as ChunkSizeMiB)
+      : (SETTINGS_DEFAULTS['upload.chunkSizeMiB'] as ChunkSizeMiB);
   }
 
   /** Effective worker limit, clamped to the hard ceiling. */

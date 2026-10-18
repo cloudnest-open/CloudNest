@@ -303,29 +303,40 @@ export class DownloadService {
     const remoteId = placement.remote_object_id;
     if (!remoteId) throw new DownloadError('chunk_missing', 409);
 
-    const out = await adapter.downloadObjectStream(bundle, remoteId, appConfig);
-    onStream(out.stream);
-    // expose the live stream so an abandoned read can be destroyed promptly
-    if (handle) handle.stream = out.stream;
-    const parts: Buffer[] = [];
-    let received = 0;
-    for await (const piece of out.stream) {
-      if (signal?.aborted) throw new DownloadError('download_cancelled', 499);
-      const buf = Buffer.isBuffer(piece) ? piece : Buffer.from(piece as unknown as Uint8Array);
-      received += buf.length;
-      if (received > slice.chunkSizeBytes) {
+    let payload: Buffer;
+    try {
+      const out = await adapter.downloadObjectStream(bundle, remoteId, appConfig);
+      onStream(out.stream);
+      // expose the live stream so an abandoned read can be destroyed promptly
+      if (handle) handle.stream = out.stream;
+      const parts: Buffer[] = [];
+      let received = 0;
+      for await (const piece of out.stream) {
+        if (signal?.aborted) throw new DownloadError('download_cancelled', 499);
+        const buf = Buffer.isBuffer(piece) ? piece : Buffer.from(piece as unknown as Uint8Array);
+        received += buf.length;
+        if (received > slice.chunkSizeBytes) {
+          throw new DownloadError('chunk_hash_mismatch', 502);
+        }
+        parts.push(buf);
+      }
+      payload = Buffer.concat(parts);
+      if (payload.length !== slice.chunkSizeBytes) {
         throw new DownloadError('chunk_hash_mismatch', 502);
       }
-      parts.push(buf);
-    }
-    const payload = Buffer.concat(parts);
-    if (payload.length !== slice.chunkSizeBytes) {
-      throw new DownloadError('chunk_hash_mismatch', 502);
-    }
-    // the ONLY authority on integrity is our own digest of the received bytes
-    const digest = crypto.createHash('sha256').update(payload).digest('hex');
-    if (digest !== chunk.sha256) {
-      throw new DownloadError('chunk_hash_mismatch', 502);
+      // the ONLY authority on integrity is our own digest of the received bytes
+      const digest = crypto.createHash('sha256').update(payload).digest('hex');
+      if (digest !== chunk.sha256) {
+        throw new DownloadError('chunk_hash_mismatch', 502);
+      }
+    } catch (err) {
+      // every other engine path records failed provider calls; download must
+      // too, or the health badge overstates its reliability. A client abort is
+      // not a provider outcome and stays unrecorded.
+      if (!(err instanceof DownloadError && err.safeCode === 'download_cancelled')) {
+        recordProviderCall(account.provider, false, err instanceof DownloadError ? err.safeCode : 'download_failed');
+      }
+      throw err;
     }
     recordProviderCall(account.provider, true, null);
     return { bytes: payload };

@@ -10,6 +10,9 @@ import { MemoryBudget, GLOBAL_BUDGET_BYTES } from '../src/downloads/memory-budge
 import { DownloadService, DownloadError } from '../src/downloads/download-service.js';
 import { CredentialsStore } from '../src/providers/credentials-store.js';
 import { SettingsService } from '../src/settings/settings-service.js';
+import { installTestAdapter, clearTestAdapters } from '../src/providers/registry.js';
+import { makeFakeAdapter } from './fake-adapter.js';
+import { ProviderMetrics, configureProviderMetrics } from '../src/metrics/provider-metrics.js';
 
 const MIB = 1024 * 1024;
 
@@ -302,6 +305,48 @@ test('concurrent downloads do not share mutable service state', () => {
     // the service exposes no per-download instance state that could be crossed
     assert.equal(Object.keys(service).some((k) => k.toLowerCase().includes('currentfile')), false);
   } finally {
+    close();
+  }
+});
+
+test('a failed provider read is recorded in the provider metrics', async () => {
+  const { db, close, service, dir } = setup();
+  const fake = makeFakeAdapter('google_drive', undefined);
+  installTestAdapter('google_drive', fake.adapter);
+  // the recorder is process-wide; restored to the no-op state in finally
+  configureProviderMetrics(new ProviderMetrics(db));
+  try {
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO provider_accounts (id, provider, display_label, account_identifier, status, quota_status, created_at, updated_at)
+       VALUES ('acc-dl', 'google_drive', 'acc-dl', 'ident-dl', 'connected', 'current', ?, ?)`,
+    ).run(now, now);
+    new CredentialsStore(db, dir).saveAccountBundle('acc-dl', 'google_drive', {
+      schemaVersion: 1, provider: 'google_drive', accessToken: 'tok-dl', refreshToken: 'refresh-dl', grantedScopes: [],
+    });
+    const sha = crypto.createHash('sha256').update('x').digest('hex');
+    seedFile(db, { fileId: 'f-metrics', name: 'a.bin', size: 100, chunkSize: 100, chunks: [{ index: 0, offset: 0, size: 100, sha256: sha }] });
+    const chunk = db.prepare('SELECT id FROM file_chunks WHERE file_id = ?').get('f-metrics') as { id: string };
+    db.prepare(
+      `INSERT INTO chunk_placements (id, chunk_id, provider_account_id, remote_object_id, state, is_active, created_at, updated_at)
+       VALUES ('pl-metrics', ?, 'acc-dl', 'gone-obj', 'verified', 1, ?, ?)`,
+    ).run(chunk.id, now, now);
+
+    // the placement points at an object the adapter does not have: the read
+    // fails at the provider call, and the failure must reach the metrics
+    const prepared = service.prepare('f-metrics', null, true);
+    await assert.rejects(
+      (async () => { for await (const _ of service.stream(prepared)) void _; })(),
+    );
+    const row = db.prepare(
+      "SELECT requests_total, requests_failed, last_error_code FROM provider_metrics WHERE provider = 'google_drive'",
+    ).get() as { requests_total: number; requests_failed: number; last_error_code: string };
+    assert.equal(row.requests_total, 1);
+    assert.equal(row.requests_failed, 1);
+    assert.equal(row.last_error_code, 'download_failed');
+  } finally {
+    configureProviderMetrics(null as unknown as ProviderMetrics);
+    clearTestAdapters();
     close();
   }
 });

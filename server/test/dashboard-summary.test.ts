@@ -216,3 +216,32 @@ test('a reserved amount is surfaced so the UI can distinguish it from usable spa
     await app.close();
   }
 });
+
+test('activeJobs counts jobs the 200-row listing page cannot show', async () => {
+  const { app, client } = await authed();
+  try {
+    const { db, close } = openDatabase(app.dbPath);
+    try {
+      db.prepare(
+        `INSERT INTO files (id, user_id, original_name, size_bytes, chunk_size_bytes, chunk_count, state, created_at)
+         VALUES ('f-jobs', 'usr_admin', 'jobs.bin', 0, 8388608, 0, 'completed', ?)`,
+      ).run(new Date().toISOString());
+      const insert = db.prepare(
+        `INSERT INTO transfer_jobs (id, file_id, job_type, state, created_at, updated_at)
+         VALUES (?, 'f-jobs', 'upload', 'running', ?, ?)`,
+      );
+      const base = Date.now();
+      for (let i = 0; i < 205; i++) {
+        // staggered so the oldest 5 fall below the 200-row listing page
+        const iso = new Date(base - (10_000 + i)).toISOString();
+        insert.run(crypto.randomUUID(), iso, iso);
+      }
+    } finally {
+      close();
+    }
+    const s = await summary(client);
+    assert.equal(s.activeJobs, 205);
+  } finally {
+    await app.close();
+  }
+});

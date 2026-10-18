@@ -752,3 +752,38 @@ test('reservation cache is corrected from durable rows, never trusted blindly', 
     close();
   }
 });
+
+test('re-uploading a chunk leaves a cleanup obligation for the superseded object', () => {
+  const { db, close, service } = setup();
+  try {
+    seedAccount(db, { id: 'acc-a', provider: 'google_drive', total: 100 * MIB, used: 0 });
+    const plan = service.plan({ originalName: 'a.bin', sizeBytes: 8 * MIB, chunkSizeMiB: 8, idempotencyKey: KEY });
+    const a0 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.commitChunk({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a0.objectKey,
+      remoteObjectId: 'r1', sha256: 'a'.repeat(64), sizeBytes: 8 * MIB,
+    });
+    const before = db.prepare('SELECT state FROM upload_attempts WHERE object_key = ?').get(a0.objectKey) as { state: string };
+    assert.equal(before.state, 'committed');
+
+    const a1 = service.beginAttempt({ jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a' });
+    service.commitChunk({
+      jobId: plan.jobId, chunkIndex: 0, accountId: 'acc-a', objectKey: a1.objectKey,
+      remoteObjectId: 'r2', sha256: 'b'.repeat(64), sizeBytes: 8 * MIB,
+    });
+
+    const old = db.prepare('SELECT state, safe_error_code FROM upload_attempts WHERE object_key = ?').get(a0.objectKey) as {
+      state: string; safe_error_code: string;
+    };
+    assert.equal(old.state, 'cleanup_pending', 'the superseded object owes a cleanup');
+    assert.equal(old.safe_error_code, 'superseded_by_reupload');
+    const live = db.prepare('SELECT state FROM upload_attempts WHERE object_key = ?').get(a1.objectKey) as { state: string };
+    assert.equal(live.state, 'committed', 'the live object is untouched');
+    assert.ok(
+      service.pendingCleanups().some((p) => p.object_key === a0.objectKey),
+      'the cleanup sweep sees the obligation',
+    );
+  } finally {
+    close();
+  }
+});

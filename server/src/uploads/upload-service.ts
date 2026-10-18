@@ -699,6 +699,40 @@ export class UploadService {
       const existingChunk = this.q.getChunk.get(file.id, input.chunkIndex) as { id: string } | undefined;
       const chunkId = existingChunk?.id ?? this.q.newId();
       if (existingChunk) {
+        // UL-3 for re-uploads: every superseded active placement still owns a
+        // live remote object. Record its cleanup obligation BEFORE the
+        // deactivation so a crash cannot leak the bytes; retryPendingCleanups
+        // and cancel() both sweep cleanup_pending attempts.
+        const superseded = this.db.prepare(
+          `SELECT id, provider_account_id, remote_object_id, remote_object_key
+             FROM chunk_placements WHERE chunk_id = ? AND is_active = 1`,
+        ).all(chunkId) as Array<{
+          id: string; provider_account_id: string; remote_object_id: string | null; remote_object_key: string | null;
+        }>;
+        for (const old of superseded) {
+          if (!old.remote_object_id || !old.remote_object_key) continue;
+          const oldAttempt = this.q.getAttemptByObjectKey.get(old.remote_object_key) as { id: string } | undefined;
+          if (oldAttempt) {
+            this.q.markAttemptCleanupPending.run({
+              id: oldAttempt.id, safe_error_code: 'superseded_by_reupload', updated_at: now,
+            });
+          } else {
+            // no attempt row (e.g. a mirror-created placement): record the
+            // object under this job so the cleanup sweep can still find it
+            this.q.insertAttempt.run({
+              id: this.q.newId(), job_id: input.jobId, chunk_index: input.chunkIndex,
+              provider_account_id: old.provider_account_id, object_key: old.remote_object_key,
+              resume_ciphertext: null, resume_nonce: null, resume_auth_tag: null, resume_key_version: null,
+              created_at: now, updated_at: now,
+            });
+            const fresh = this.q.getAttemptByObjectKey.get(old.remote_object_key) as { id: string } | undefined;
+            if (fresh) {
+              this.q.markAttemptCleanupPending.run({
+                id: fresh.id, safe_error_code: 'superseded_by_reupload', updated_at: now,
+              });
+            }
+          }
+        }
         this.q.deactivatePlacements.run(now, chunkId);
         // UL-2: the re-uploaded bytes are now the truth for this index; the
         // stored digest must follow, or later verification would compare the
@@ -1494,7 +1528,16 @@ export class UploadService {
       status: a.status, quotaStatus: a.quota_status,
     }));
     const jobs = this.listJobs(200, userId);
-    const activeJobs = jobs.filter((j) => j.state === 'running' || j.state === 'queued' || j.state === 'paused').length;
+    // honest active-job count: the 200-row listing page above must not bound
+    // this number, so it is its own COUNT (same upload-job scope as the list)
+    const activeJobs = userId === null
+      ? (this.db.prepare(
+          "SELECT COUNT(*) AS n FROM transfer_jobs WHERE job_type = 'upload' AND state IN ('running','queued','paused')",
+        ).get() as { n: number }).n
+      : (this.db.prepare(
+          `SELECT COUNT(*) AS n FROM transfer_jobs j JOIN files f ON f.id = j.file_id
+           WHERE f.user_id = ? AND j.job_type = 'upload' AND j.state IN ('running','queued','paused')`,
+        ).get(userId) as { n: number }).n;
     const files = this.listFiles(5, 0, userId);
     const activeShareLinks = userId === null
       ? (this.db.prepare("SELECT COUNT(*) AS n FROM share_links WHERE state = 'active'").get() as { n: number }).n

@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { allocateChunks, assessCapacity, type AccountCapacityInput } from '../src/uploads/capacity.js';
 import { compareProviderChecksum } from '../src/uploads/upload-service.js';
+import { openDatabase, runMigrations } from '../src/db/index.js';
+import { allMigrations } from '../src/db/migrations.js';
+import { SettingsService } from '../src/settings/settings-service.js';
 
 /**
  * M12.a settings wiring (server side).
@@ -116,5 +122,24 @@ test('an unknown vendor algorithm is never compared as if it were SHA-256', () =
       'not-comparable',
       `${type} must never be treated as SHA-256`,
     );
+  }
+});
+
+test('effectiveChunkSizeMiB re-validates a hand-edited settings row', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cn-chunk-'));
+  try {
+    const { db, close } = openDatabase(path.join(dir, 't.db'));
+    runMigrations(db, allMigrations);
+    const settings = new SettingsService(db);
+    assert.equal(settings.effectiveChunkSizeMiB(), 64, 'the default stands with no row');
+    db.prepare(
+      "INSERT INTO app_settings (setting_key, value_json, updated_at) VALUES ('upload.chunkSizeMiB', '37', ?)",
+    ).run(new Date().toISOString());
+    assert.equal(settings.effectiveChunkSizeMiB(), 64, 'a disallowed value falls back to the default');
+    db.prepare("UPDATE app_settings SET value_json = '32' WHERE setting_key = 'upload.chunkSizeMiB'").run();
+    assert.equal(settings.effectiveChunkSizeMiB(), 32, 'an allowed value still passes through');
+    close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
