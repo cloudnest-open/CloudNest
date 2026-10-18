@@ -396,8 +396,16 @@ export class TunnelService {
     this.releaseTempFile();
     const paths = this.runtimePaths();
     // write through an exclusive-create descriptor so a stale file cannot be
-    // reused and the permissions are applied at creation time
-    const fd = fs.openSync(paths.tokenFile, 'w', 0o600);
+    // reused and the permissions are applied at creation time; a leftover file
+    // from a previous run is removed and the exclusive create retried
+    let fd: number;
+    try {
+      fd = fs.openSync(paths.tokenFile, 'wx', 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      fs.rmSync(paths.tokenFile, { force: true });
+      fd = fs.openSync(paths.tokenFile, 'wx', 0o600);
+    }
     try {
       fs.writeFileSync(fd, token);
       fs.fsyncSync(fd);

@@ -289,3 +289,22 @@ test('only state-changing methods are treated as such', () => {
   for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) assert.equal(isStateChangingMethod(method), true);
   for (const method of ['GET', 'HEAD', 'OPTIONS']) assert.equal(isStateChangingMethod(method), false);
 });
+
+test('the temp token file is created exclusively and a stale file is replaced', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cn-tunnel-tok-'));
+  try {
+    const tunnel = makeTunnel(dir);
+    const access = tunnel as unknown as { materializeTempTokenFile: (token: string) => string };
+    const first = access.materializeTempTokenFile(fakeRuntimeToken());
+    assert.equal(fs.statSync(first).mode & 0o777, 0o600, 'the file is 0600 at creation');
+
+    // a leftover file from a previous run must be replaced, never reused
+    fs.writeFileSync(first, 'stale-material-from-a-previous-run');
+    const second = access.materializeTempTokenFile(fakeRuntimeToken());
+    assert.equal(second, first, 'the same runtime path is used');
+    assert.equal(fs.readFileSync(second, 'utf8'), fakeRuntimeToken(), 'the stale content is gone');
+    assert.equal(fs.statSync(second).mode & 0o777, 0o600);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

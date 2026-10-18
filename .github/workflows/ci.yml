@@ -29,6 +29,8 @@ jobs:
           cache: npm
       - name: Install (lockfile-exact)
         run: npm ci
+      - name: Dependency audit (production)
+        run: npm audit --omit=dev --audit-level=low
       - name: Typecheck
         run: npm run typecheck
       - name: Tests
