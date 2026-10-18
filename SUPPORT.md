@@ -11,6 +11,8 @@ Most setup and operations questions are answered in the repository docs:
 
 | Topic | Where |
 |---|---|
+| How CloudNest works, in diagrams | [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md) |
+| Connecting your cloud accounts, step by step (beginner) | [docs/connect-your-cloud.md](docs/connect-your-cloud.md) |
 | Installing, running, upgrading, backups | [RELEASE.md](RELEASE.md) |
 | Connecting your cloud accounts (OAuth apps, scopes, redirect URIs) | [docs/provider-setup.md](docs/provider-setup.md) |
 | Error codes and recovery steps | [docs/troubleshooting.md](docs/troubleshooting.md) |

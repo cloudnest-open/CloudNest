@@ -3,8 +3,14 @@
 CloudNest connects to your **own** cloud accounts through official OAuth flows.
 CloudNest does not ship, host, or share any provider application credentials:
 you register the application with each provider yourself, then paste the
-client ID/secret into Settings → Provider Setup. Secrets are stored encrypted
-(AES-256-GCM) and are never displayed again after saving.
+client ID/secret into CloudNest — the first-time **Connect wizard** walks you
+through it (it shows the exact callback address to copy), or Settings →
+Provider Setup afterwards. Secrets are stored encrypted (AES-256-GCM) and are
+never displayed again after saving.
+
+This page is the technical reference (exact scopes, redirect URIs, limits). A
+click-by-click beginner walkthrough lives in
+[connect-your-cloud.md](connect-your-cloud.md).
 
 Each connected account gets a dedicated CloudNest root folder; CloudNest only
 ever lists, reads, uploads, and deletes objects inside that root.
@@ -33,6 +39,12 @@ provider supports it.
 
 Scope requested: `https://www.googleapis.com/auth/drive.file` — CloudNest can
 only see files it created, never your other Drive content.
+
+> **Testing mode expires tokens weekly.** While the consent screen is
+> unpublished (Testing), Google invalidates refresh tokens after 7 days, so
+> the account needs re-approval weekly. Publish the app (**Publish app** on
+> the consent screen) to avoid it — the narrow `drive.file` scope needs no
+> Google verification for personal use.
 
 ## Dropbox
 
@@ -77,8 +89,10 @@ labelled **experimental**. Until a live smoke test proves streaming upload and
 recovery end to end, MEGA is **excluded from automatic upload placement** — you
 can connect it and inspect its quota, but new chunks are not routed to it.
 
-Provide the MEGA e-mail and password in Settings → Provider Setup. Two-factor
-accounts may not complete the automated login.
+Provide the MEGA e-mail and password in CloudNest's connect form (or Settings
+→ Provider Setup). Two-factor accounts are supported: the form asks for a
+one-time code from your authenticator app at connect time — and again at each
+re-authentication, because the code is valid only once by design.
 
 ## Usage notes and provider limitations
 
@@ -99,5 +113,7 @@ accounts may not complete the automated login.
   chunks live there, they are marked unavailable pending a reconnect.
 - **Provider-native upload limits** are honoured: CloudNest refuses an object
   larger than a provider's single-request ceiling rather than attempting it.
-- **Live testing**: no connector has been verified against a live account in the
-  development environment. See `PROVIDER_STATUS.md` for the per-provider truth.
+- **Live testing**: Google Drive has been connected live with two real
+  accounts (real OAuth flow and real quota reads verified; transfer paths on
+  real accounts not exercised here). Every other connector remains
+  mock-tested. See `PROVIDER_STATUS.md` for the per-provider truth.

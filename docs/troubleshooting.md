@@ -26,6 +26,9 @@
   the tunnel is active the session cookie is marked `Secure`; make sure you are
   reaching the app over HTTPS (through the tunnel) rather than a plain-http
   public address.
+- **Signed in before with a different name?** The administrator can rename the
+  login name (Profile → Change login name). Login matches the current name
+  case-insensitively; the old name stops working the moment it is changed.
 
 ## Downloads
 
@@ -58,8 +61,15 @@
 ## Cloud accounts
 
 - **Connect fails immediately** — provider app credentials are wrong or the
-  redirect URI differs from the one registered. Re-check Settings → Provider
-  Setup and the exact callback URL in `docs/provider-setup.md`.
+  redirect URI differs from the one registered. Re-check the wizard's shown
+  callback URL and the steps in `docs/provider-setup.md`.
+- **`already_connected`** — that exact provider identity is already connected
+  (CloudNest refuses a silent duplicate). Use the account row's **Reconnect**
+  action to renew it, or disconnect the existing row first.
+- **`two_factor_required`** (MEGA) — your MEGA account uses two-factor
+  authentication; the connect form asks for a one-time code from your
+  authenticator app. It is valid once, so a later re-authentication asks for
+  a fresh code.
 - **`refresh_token_missing`** — the provider did not return a durable refresh
   token. Reconnect and grant offline access.
 - **Disconnect warns about stored chunks** — that is expected; disconnecting
@@ -77,12 +87,20 @@
 
 ## Remote access (Cloudflare Tunnel)
 
+CloudNest's tunnel is authorized **in your own browser** (Settings → Domain →
+Connect your domain): CloudNest runs `cloudflared` for you, and you approve
+the domain on Cloudflare's page. No Cloudflare API tokens are involved at all.
+
 - **`cloudflared_not_installed`** — install the `cloudflared` binary yourself;
   CloudNest does not install it.
-- **Global API Key rejected** — CloudNest deliberately refuses it. Create a
-  narrowly scoped API token with DNS edit rights for the chosen zone.
-- **DNS record conflict** — an existing record that CloudNest does not own is
-  never overwritten; remove or rename it yourself.
+- **`tunnel_login_failed`** — the browser authorization did not complete
+  (cancelled, timed out, or cloudflared could not reach Cloudflare). Start the
+  authorization again.
+- **DNS record conflict** — cloudflared refuses to overwrite a DNS record it
+  does not own. Remove or rename the existing record yourself, then retry.
+- **Disconnected but still unreachable later** — use **Check connection** on
+  the Domain page; it reports the tunnel connector's own registration status,
+  not a guess.
 - **Local use must work without Cloudflare** — if it does not, start CloudNest
   without the tunnel and use `http://127.0.0.1:8787`.
 

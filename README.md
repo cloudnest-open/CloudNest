@@ -1,6 +1,6 @@
 # CloudNest
 
-A self-hosted personal cloud-storage aggregator (working name, subject to owner approval).
+A self-hosted personal cloud-storage aggregator.
 
 CloudNest stores file **metadata** in a local SQLite database and file **content**
 as chunk objects inside the cloud accounts you connect (Google Drive, Dropbox,
@@ -9,18 +9,20 @@ logical chunks, placed across eligible accounts, and reconstructed byte-for-byte
 on download — the full original file is never stored on, or staged on, this host.
 
 **Status:** Implemented: first-run admin + sessions/CSRF, provider account
-lifecycle with encrypted credentials, chunked upload engine with
-capacity-aware routing, download/reconstruction with per-chunk verification,
-CloudNest share links with expiry/password/limits, safe deletion with a
-7-day trash window, multi-user (admin/member with one-time invite/reset
-links and per-user allowances), folders, notifications, S3-compatible
-business tier with browser-direct pre-signed transfers, chunk-level
-mirroring with download fallback, a background scheduler (quota refresh,
-cleanup retries), provider health metrics, Settings/Diagnostics/Backup, and
-an optional Cloudflare Tunnel. Provider evidence status: see
-[PROVIDER_STATUS.md](PROVIDER_STATUS.md) — **no provider has been live-tested
-in this environment**; every connector is mock-tested, and MEGA is
-experimental.
+lifecycle with encrypted credentials and a built-in connect wizard, chunked
+upload engine with capacity-aware routing, download/reconstruction with
+per-chunk verification, CloudNest share links with expiry/password/limits, safe
+deletion with a 7-day trash window, multi-user (admin/member with one-time
+invite/reset links and per-user allowances), folders, Personal/Business mode
+context, notifications, S3-compatible business tier with browser-direct
+pre-signed transfers, chunk-level mirroring with download fallback, a
+background scheduler (quota refresh, cleanup retries), provider health
+metrics, Settings/Diagnostics/Backup, a renameable admin login name, and an
+optional Cloudflare Tunnel with browser-based authorization. Provider evidence
+status: see [PROVIDER_STATUS.md](PROVIDER_STATUS.md) — Google Drive has been
+connected live with two real accounts (OAuth and real quota reads verified;
+transfer paths remain mock-tested); every other connector is mock-tested, and
+MEGA is experimental.
 
 ## Features
 
@@ -58,7 +60,10 @@ the optional, explicitly enabled Cloudflare Tunnel.
 
 - Node.js **24 LTS** (`.nvmrc` contains `24`; installing on any other Node
   fails — `engines.node` + `engine-strict` for dependencies, a `preinstall`
-  guard for the project itself, because npm never enforces root `engines`)
+  guard for the project itself, because npm never enforces root `engines`).
+  New to Node? Install it from [nodejs.org](https://nodejs.org) (the LTS
+  download bundles `npm`), or with [nvm](https://github.com/nvm-sh/nvm):
+  `nvm install 24`. Check with `node --version` — it should print `v24.x`.
 - npm (bundled with Node)
 - Optional: a `cloudflared` binary you installed yourself, only if you want
   remote access
@@ -84,6 +89,12 @@ npm test          # live provider tests are opt-in and skipped by default
 
 Documentation:
 
+- **[docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md)** — how CloudNest works,
+  explained with simple diagrams: install → accounts → uploads → downloads →
+  shares → remote access
+- **[docs/connect-your-cloud.md](docs/connect-your-cloud.md)** — the
+  beginner guide to connecting cloud accounts (Personal tier), with a short
+  S3 section for business users
 - **[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)** — the user guide:
   getting started, files/folders/trash, uploads, shares, multi-user, backups
 - **[docs/provider-setup.md](docs/provider-setup.md)** — per-provider OAuth

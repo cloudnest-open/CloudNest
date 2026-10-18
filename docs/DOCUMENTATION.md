@@ -20,12 +20,14 @@ This guide explains day-to-day use. For installing and running, see
 2. **First run** — the first-run screen asks you to create the administrator
    password. There is no default password.
 3. **Configure a provider** — each provider needs an OAuth application you
-   register yourself (client ID/secret pasted in Settings → Provider Setup),
-   except S3, where you paste access/secret keys, and MEGA (experimental,
-   email/password). Full per-provider steps and redirect URIs:
-   [docs/provider-setup.md](provider-setup.md).
-4. **Connect an account** — Cloud Accounts → Connect; authorize in the
-   provider's window. Each connected account gets a dedicated CloudNest root
+   register yourself, except S3 (access/secret keys) and MEGA (experimental,
+   email/password with optional one-time 2FA code). CloudNest's connect
+   wizard shows the exact callback address to copy and links to the right
+   console; credentials can also be managed in Settings → Provider Setup.
+   Full per-provider steps: [docs/connect-your-cloud.md](connect-your-cloud.md)
+   (beginner) and [docs/provider-setup.md](provider-setup.md) (reference).
+4. **Connect an account** — Cloud Accounts → Connect; authorize on the
+   provider's own page. Each connected account gets a dedicated CloudNest root
    folder; CloudNest only touches objects inside it.
 5. **Upload** — Uploads → choose files or folders. CloudNest plans the
    placement across your accounts, uploads chunks (resumable, verifiable),
@@ -95,6 +97,12 @@ forgets their password gets a fresh one-time reset link from the
 administrator — there is no email flow in this product. Changing a password
 or disabling a member immediately invalidates their sessions.
 
+The administrator's own account: the login name starts as `admin` and can be
+changed any time in **Profile → Change login name** (re-proofing the current
+password; the current session stays signed in, and from then on the new name
+signs in). Changing the admin password still signs out every session as a
+precaution.
+
 ## Cloud Accounts
 
 - Connect several accounts, including several accounts from the same
@@ -127,7 +135,8 @@ data directory), **Diagnostics**, **Provider Setup** (OAuth credentials), and
 - **Diagnostics** — a one-page report of configuration state for support
   requests.
 - **Cloudflare Tunnel** (Domain) — optional, explicitly enabled remote
-  access; the server itself keeps binding to loopback only.
+  access, authorized in **your own browser** on Cloudflare's page (no API
+  tokens to create); the server itself keeps binding to loopback only.
 
 ## Notifications
 
@@ -138,19 +147,25 @@ counts and mark-all-read are live.
 
 ## Current limitations (stated honestly)
 
-- No cloud provider has been live-tested from the development environment;
-  every connector is verified against mocks and synthetic fixtures (evidence
-  status: [PROVIDER_STATUS.md](../PROVIDER_STATUS.md)). Real-provider
-  behaviour is exercised the first time you connect your own accounts.
+- Connector evidence status: Google Drive has been connected live with two
+  real accounts (real OAuth and real quota reads); transfer paths on real
+  accounts have not been exercised here. Every other connector is verified
+  against mocks and synthetic fixtures only (evidence status:
+  [PROVIDER_STATUS.md](../PROVIDER_STATUS.md)).
 - MEGA is **experimental**: it cannot participate in uploads yet.
-- Continuous folder-sync is not implemented (the Uploads toggle is an honest
-  disabled placeholder).
-- Two-factor authentication (TOTP) is not implemented.
+- Continuous folder-sync is not implemented (the Uploads page says so
+  explicitly).
+- Two-factor authentication (TOTP) for signing into CloudNest itself is not
+  implemented. (MEGA's own two-factor code is supported at connect time.)
 - The product is a single-instance, self-hosted gateway — it is not a
   multi-tenant cloud service.
 
 ## More documentation
 
+- [docs/HOW-IT-WORKS.md](HOW-IT-WORKS.md) — the whole system in simple
+  diagrams
+- [docs/connect-your-cloud.md](connect-your-cloud.md) — beginner guide to
+  connecting each provider
 - [docs/provider-setup.md](provider-setup.md) — per-provider setup, scopes,
   redirect URIs, usage limits
 - [docs/troubleshooting.md](troubleshooting.md) — error codes and recovery

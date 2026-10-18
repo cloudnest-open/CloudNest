@@ -12,7 +12,10 @@ network unless you deliberately enable the optional Cloudflare Tunnel.
 
 ## Requirements
 
-- **Node.js 24 LTS** (`.nvmrc` contains `24`; `engines.node` enforces `24.x`)
+- **Node.js 24 LTS** (`.nvmrc` contains `24`; `engines.node` enforces `24.x`).
+  New to Node? Install the LTS from [nodejs.org](https://nodejs.org) — it
+  bundles `npm` — or with [nvm](https://github.com/nvm-sh/nvm): `nvm install
+  24`. Verify with `node --version` (expect `v24.x`).
 - npm (bundled with Node)
 - A modern browser (Chrome, Firefox or Edge)
 - Optional, only for remote access: a `cloudflared` binary installed by you
@@ -83,8 +86,11 @@ makes the next start show the first-run setup screen again.
 
 ## Known limitations (read this before trusting it with data)
 
-1. **No provider has been tested against a live account in this environment.**
-   See `PROVIDER_STATUS.md`. Treat every connector as `mock-tested`.
+1. **Live-provider evidence is still limited.** Google Drive has been
+   connected live with two real accounts (real OAuth and real quota reads);
+   no connector's upload/download path has been exercised against a real
+   account here. See `PROVIDER_STATUS.md`. Treat transfer paths as
+   `mock-tested` until you try them with your own accounts.
 2. **MEGA is experimental** and is excluded from automatic upload placement
    until a live smoke test proves streaming upload and recovery.
 3. **Browser-native downloads**: on browsers with the File System Access API
@@ -102,7 +108,7 @@ makes the next start show the first-run setup screen again.
 
 ## Upgrade behaviour
 
-- Schema changes are additive migrations; `schema_migrations` records the
+- Schema changes are versioned migrations; `schema_migrations` records the
   applied set and a repeat start re-applies nothing.
 - **Take a backup before upgrading.** Some migrations rebuild tables; a rollback
   is not automatic.
@@ -116,7 +122,7 @@ makes the next start show the first-run setup screen again.
 - [x] Migrations applied transactionally, `PRAGMA foreign_key_check` clean
 - [x] No secrets, databases, logs or build output in version control
 - [x] Provider status documented truthfully in `PROVIDER_STATUS.md`
-- [ ] Live provider smoke tests — **not run in this environment**
+- [ ] Full live provider smoke tests (upload/download on real accounts) — not run in this environment; Google Drive OAuth + quota reads verified live
 - [ ] Creating a GitHub Release, tag or production deployment — requires explicit owner authorization
 
 ## Licensing

@@ -10,20 +10,24 @@ an acknowledgement; fixes land in `main` and are called out in release notes.
 
 ## Threat model in one page
 
-CloudNest is a **single-owner**, self-hosted gateway. One administrator uses
-the web UI; the process holds OAuth credentials for that owner's cloud
-accounts. It is not designed as a multi-user service.
+CloudNest is a **single-instance**, self-hosted gateway. One trusted
+administrator (the built-in `admin` account) owns the instance and the cloud
+credentials; the administrator may invite **members**, who are strictly
+isolated to their own files, shares and quota and are rejected server-side
+from admin surfaces. It is not a multi-tenant cloud service — do not invite
+strangers; every member is someone the administrator chose to trust.
 
 - **Bind address.** The server binds to `127.0.0.1` only. Remote access exists
   solely through the optional Cloudflare Tunnel, which the owner starts
   explicitly. There is no listening interface beyond loopback.
 - **Authentication.** First-run setup creates the administrator (no default
-  password; scrypt-hashed). Sessions are server-side in SQLite, rotate on
-  login, and expire on a rolling 12-hour timeout. Every state-changing route
-  requires the session plus a double-submit CSRF token. Changing the root
-  admin's password invalidates every session — members' included — as a
-  deliberate precaution; a member changing their own password invalidates
-  only their own sessions.
+  password; scrypt-hashed; the login name is renameable in-app). Sessions are
+  server-side in SQLite, rotate on login, and expire on a rolling 12-hour
+  timeout. Every state-changing route requires the session plus a
+  double-submit CSRF token. Changing the root admin's password invalidates
+  every session — members' included — as a deliberate precaution; a member
+  changing their own password invalidates only their own sessions (renaming
+  the login name invalidates none — sessions reference the fixed account id).
 - **Public surface.** Only the share endpoints, the OAuth callback, and
   health/setup status are reachable unauthenticated. Share tokens are 256-bit
   random values stored as SHA-256 hashes; password-protected links reveal no
