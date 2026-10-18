@@ -259,16 +259,16 @@ export const api = {
   restoreBackup: (databasePath: string, targetDir: string, confirmOverwrite = false) =>
     request('POST', '/api/maintenance/restore', { databasePath, targetDir, confirmOverwrite }),
   getDiagnostics: () => request('GET', '/api/maintenance/diagnostics'),
+  // Tunnel (design §6 — browser-authorized; NO API token anywhere).
   getTunnel: () => request('GET', '/api/tunnel'),
-  startTunnel: (body: {
-    hostname: string;
-    runtimeToken: string;
-    /** Scoped Cloudflare API token: enables the DNS pre-check; never stored. */
-    cloudflareToken?: string;
-    /** Optional zone hint when the token can see several zones. */
-    zoneId?: string;
-  }) => request('POST', '/api/tunnel/start', body),
+  /** Wizard step 1: get the Cloudflare authorize URL (opens in a new tab). */
+  startTunnelAuth: () => request('POST', '/api/tunnel/auth/start'),
+  /** Wizard step 2: poll until the owner finishes (or fails) the authorize. */
+  getTunnelAuthStatus: () => request('GET', '/api/tunnel/auth/status'),
+  startTunnel: (hostname: string) => request('POST', '/api/tunnel/start', { hostname }),
   stopTunnel: () => request('POST', '/api/tunnel/stop'),
+  /** The explicit "start over": deletes the stored cert/credentials. */
+  forgetTunnelAuth: () => request('POST', '/api/tunnel/forget'),
 
   /** URL for a browser-native download (Range/resume handled by the browser). */
   downloadUrl: (fileId: string) => `/api/files/${fileId}/download`,

@@ -290,24 +290,7 @@ test('the diagnostics report never contains a stored secret', () => {
   }
 });
 
-// ---- tunnel safety ----
-
-test('a Cloudflare Global API Key is refused outright', () => {
-  assert.throws(
-    () => TunnelService.validateTokenShape('0123456789abcdef0123456789abcdef01234'),
-    (e: unknown) => e instanceof TunnelError && (e as TunnelError).safeCode === 'global_api_key_not_accepted',
-  );
-  assert.throws(() => TunnelService.validateTokenShape(''), (e: unknown) => e instanceof TunnelError);
-  assert.throws(() => TunnelService.validateTokenShape('short'), (e: unknown) => e instanceof TunnelError);
-  // a scoped token shape is accepted
-  assert.doesNotThrow(() => TunnelService.validateTokenShape('a'.repeat(40)));
-});
-
-test('the required permissions are stated in plain language', () => {
-  const perms = TunnelService.requiredPermissions();
-  assert.ok(perms.some((p) => p.includes('Cloudflare Tunnel')));
-  assert.ok(perms.some((p) => p.includes('DNS')));
-});
+// ---- tunnel safety (browser-authorized — the API-token step is gone) ----
 
 test('the tunnel reports unavailable when cloudflared is not installed', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cn-tunnel-'));
@@ -315,37 +298,42 @@ test('the tunnel reports unavailable when cloudflared is not installed', async (
   const status = tunnel.status();
   assert.equal(status.state, 'disconnected');
   assert.equal(status.enabled, false);
+  assert.equal(status.authorization.certStored, false);
   // starting without a binary fails with an actionable code rather than hanging
   if (!tunnel.available()) {
     await assert.rejects(
-      () => tunnel.start({ runtimeToken: 'a'.repeat(40), hostname: 'files.example.com' }),
+      () => tunnel.start({ hostname: 'files.example.com' }),
       (e: unknown) => e instanceof TunnelError && (e as TunnelError).safeCode === 'cloudflared_not_installed',
     );
   }
   // an unsafe hostname is refused before any process work
   await assert.rejects(
-    () => tunnel.start({ runtimeToken: 'a'.repeat(40), hostname: 'bad host; rm -rf /' }),
+    () => tunnel.start({ hostname: 'bad host; rm -rf /' }),
     (e: unknown) => e instanceof TunnelError,
   );
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('a disconnect removes the temporary runtime token file', () => {
+test('a start without browser authorization refuses honestly', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cn-tunnel-'));
   const tunnel = makeTunnel(dir);
-  tunnel.saveRuntimeToken('a'.repeat(40), { hostname: 'files.example.com' });
-  assert.equal(tunnel.hasStoredToken(), true, 'the token is stored (encrypted) after a save');
+  await assert.rejects(
+    () => tunnel.start({ hostname: 'files.example.com' }),
+    (e: unknown) => e instanceof TunnelError && (e as TunnelError).safeCode === 'tunnel_not_authorized',
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a disconnect KEEPS the stored authorization (Reconnect never re-asks)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cn-tunnel-'));
+  const tunnel = makeTunnel(dir);
+  // simulate a completed browser authorization's credential storage
+  tunnel.browserAuth.storeCredJson(JSON.stringify({ TunnelID: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', AccountTag: 'a', TunnelSecret: 's' }));
+  assert.equal(tunnel.browserAuth.credStored(), true);
   tunnel.stop();
-  assert.equal(tunnel.hasStoredToken(), false, 'the secret does not survive a disconnect');
-});
-
-test('the stored runtime token is never written in plaintext', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cn-tunnel-'));
-  const tunnel = makeTunnel(dir);
-  const secret = `cf-${'A1b2C3d4'.repeat(6)}`;
-  tunnel.saveRuntimeToken(secret, { hostname: 'files.example.com' });
-  const stored = tunnel.tokenPath();
-  assert.ok(fs.existsSync(stored), 'an encrypted token file exists');
-  const bytes = fs.readFileSync(stored).toString('utf8');
-  assert.ok(!bytes.includes(secret), 'the raw token never appears on disk');
-  assert.equal(fs.statSync(stored).mode & 0o777, 0o600, 'the encrypted token file is restrictive');
+  assert.equal(tunnel.browserAuth.credStored(), true, 'the authorization survives a disconnect');
+  tunnel.forgetAuthorization();
+  assert.equal(tunnel.browserAuth.credStored(), false, 'forget is the explicit deletion');
+  assert.equal(tunnel.status().hostname, null);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

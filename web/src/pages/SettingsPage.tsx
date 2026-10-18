@@ -4,7 +4,7 @@ import { ChangePasswordPanel } from './AuthPages.js';
 import { UsersPanel } from './UsersPanel.js';
 import { ProviderSetupCard } from '../components/ProviderSetupCard.js';
 import { applyTheme, currentTheme, type Theme } from '../theme.js';
-import { setConfirmDestructivePreference } from '../confirm.js';
+import { setConfirmDestructivePreference, confirmDestructive } from '../confirm.js';
 import { formatBytes, formatDateTime } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
 import { LOCALES, LOCALE_NAMES, type Locale } from '../i18n.js';
@@ -55,6 +55,10 @@ interface TunnelInfo {
   hostname: string | null;
   cloudflaredAvailable: boolean;
   safeErrorCode: string | null;
+  /** Browser-authorization lifecycle (design §6 — no API token anywhere). */
+  authorization: { state: string; authUrl: string | null; safeErrorCode: string | null; certStored: boolean };
+  /** The connector's own "Registered tunnel connection" evidence. */
+  connectorRegistered: boolean | null;
 }
 
 interface BackupInfo {
@@ -86,9 +90,7 @@ export function SettingsPage({ onGoToCloudAccounts, initialSection }: { onGoToCl
   const [numericDrafts, setNumericDrafts] = useState<NumericDrafts>({ workers: '', downloadConcurrency: '', expiryDays: '', downloadLimit: '' });
   const [diagnostics, setDiagnostics] = useState<string>('');
   const [tunnelHost, setTunnelHost] = useState('');
-  const [tunnelToken, setTunnelToken] = useState('');
-  const [cloudflareToken, setCloudflareToken] = useState('');
-  const [zoneId, setZoneId] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
   const [dnsResult, setDnsResult] = useState<{ record: string | null; actions: string[] } | null>(null);
   const [theme, setTheme] = useState<Theme>(currentTheme());
 
@@ -118,6 +120,32 @@ export function SettingsPage({ onGoToCloudAccounts, initialSection }: { onGoToCl
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Wizard step 2: poll the authorize status until the owner finishes. */
+  const pollAuthorize = useCallback(async (): Promise<void> => {
+    setAuthBusy(true);
+    for (let i = 0; i < 150; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const res = await api.getTunnelAuthStatus();
+        if (res.status !== 200) break;
+        const auth = (res.data as { authorization: TunnelInfo['authorization'] }).authorization;
+        setTunnel((prev) => (prev ? { ...prev, authorization: auth } : prev));
+        if (auth.state === 'authorized') {
+          setNotice(t.settings.domain.authorizeDone);
+          break;
+        }
+        if (auth.state === 'failed') {
+          setError(tf(t.settings.domain.authorizeFailed, { code: auth.safeErrorCode ?? 'unknown' }));
+          break;
+        }
+      } catch {
+        break; // the next manual retry is honest
+      }
+    }
+    setAuthBusy(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a language change must not restart the poll
+  }, []);
 
   useEffect(() => {
     if (!settings) return;
@@ -525,88 +553,151 @@ export function SettingsPage({ onGoToCloudAccounts, initialSection }: { onGoToCl
             {tunnel?.hostname ? ` ${tf(t.settings.domain.tunnelHostSuffix, { hostname: tunnel.hostname })}` : ''}
             {tunnel?.cloudflaredAvailable ? '' : ` ${t.settings.domain.tunnelNotInstalled}`}
           </p>
-          <p className="muted small">{t.settings.domain.tokenIntro}</p>
-          <ul className="plain-list">
-            <li>{t.settings.domain.permTunnel}</li>
-            <li>{t.settings.domain.permDns}</li>
-          </ul>
-          <div className="upload-form">
-            <label htmlFor="tunnel-host">{t.settings.domain.host}</label>
-            <input id="tunnel-host" type="text" value={tunnelHost} onChange={(e) => setTunnelHost(e.target.value)} />
-            <label htmlFor="tunnel-token">{t.settings.domain.runtimeToken}</label>
-            <input id="tunnel-token" type="password" value={tunnelToken} onChange={(e) => setTunnelToken(e.target.value)} />
-            <label htmlFor="cf-token">{t.settings.domain.cfToken}</label>
-            <input id="cf-token" type="password" value={cloudflareToken} onChange={(e) => setCloudflareToken(e.target.value)} />
-            <label htmlFor="cf-zone">{t.settings.domain.zoneId}</label>
-            <input id="cf-zone" type="text" value={zoneId} onChange={(e) => setZoneId(e.target.value)} />
-          </div>
-          {cloudflareToken === '' && (
-            <p className="muted small">{t.settings.domain.noTokenNote}</p>
+
+          {/* design §6 wizard: browser authorization → hostname → live.
+              NO API token step exists anymore. */}
+          {tunnel && !tunnel.authorization.certStored && tunnel.authorization.state !== 'authorizing' && (
+            <div className="upload-form">
+              <p className="muted small">{t.settings.domain.connectHint}</p>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy || authBusy || !tunnel.cloudflaredAvailable}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
+                  const res = await api.startTunnelAuth();
+                  setBusy(false);
+                  if (res.status === 200) {
+                    const auth = (res.data as { authorization: TunnelInfo['authorization'] }).authorization;
+                    setTunnel((prev) => (prev ? { ...prev, authorization: auth } : prev));
+                    void pollAuthorize();
+                  } else {
+                    const body = res.data as { code?: string };
+                    setError(tf(t.settings.domain.authorizeFailed, { code: body.code ?? 'unknown' }));
+                  }
+                }}
+              >
+                {t.settings.domain.connectDomain}
+              </button>
+            </div>
           )}
-          <div className="actions">
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={busy || !tunnelHost || !tunnelToken}
-              onClick={async () => {
-                setBusy(true);
-                setError(null);
-                setDnsResult(null);
-                const res = await api.startTunnel({
-                  hostname: tunnelHost,
-                  runtimeToken: tunnelToken,
-                  ...(cloudflareToken ? { cloudflareToken } : {}),
-                  ...(zoneId ? { zoneId } : {}),
-                });
-                setTunnelToken('');
-                setCloudflareToken('');
-                setZoneId('');
-                if (res.status === 200) {
-                  const data = res.data as {
-                    status: TunnelInfo;
-                    dnsRecord: { id: string; name: string; content: string } | null;
-                    dnsActions: string[];
-                  };
-                  setTunnel(data.status);
-                  setDnsResult({
-                    record: data.dnsRecord ? `${data.dnsRecord.name} → ${data.dnsRecord.content}` : null,
-                    actions: data.dnsActions ?? [],
-                  });
-                  setNotice(t.settings.domain.startNotice);
-                } else {
-                  const body = res.data as { code?: string };
-                  setError(tf(t.settings.domain.startFailed, { code: body.code ?? 'unknown' }));
-                }
-                setBusy(false);
-              }}
-            >
-              {t.settings.domain.start}
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={busy}
-              onClick={async () => {
-                const res = await api.stopTunnel();
-                if (res.status === 200) {
-                  setTunnel((res.data as { status: TunnelInfo }).status);
+
+          {tunnel?.authorization.state === 'authorizing' && (
+            <div className="notice-card" role="status">
+              <p>{t.settings.domain.authorizingNote}</p>
+              {tunnel.authorization.authUrl && (
+                <p>
+                  <a className="btn-primary" href={tunnel.authorization.authUrl} target="_blank" rel="noreferrer">
+                    {t.settings.domain.openAuthorize}
+                  </a>
+                </p>
+              )}
+            </div>
+          )}
+
+          {tunnel?.authorization.certStored && (
+            <div className="upload-form">
+              <label htmlFor="tunnel-host">{t.settings.domain.host}</label>
+              <input
+                id="tunnel-host"
+                type="text"
+                placeholder="cloudnest.example.com"
+                value={tunnelHost || tunnel.hostname || ''}
+                onChange={(e) => setTunnelHost(e.target.value)}
+              />
+              <p className="muted small">{t.settings.domain.authorizedNote}</p>
+            </div>
+          )}
+
+          {tunnel?.authorization.certStored && (
+            <div className="actions">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busy || !tunnelHost}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
                   setDnsResult(null);
-                  setNotice((res.data as { notice: string }).notice);
-                } else {
-                  setError(t.settings.domain.stopFailed);
-                }
-              }}
-            >
-              {t.settings.domain.disconnect}
-            </button>
-          </div>
+                  const res = await api.startTunnel(tunnelHost);
+                  if (res.status === 200) {
+                    const data = res.data as { status: TunnelInfo; actions: string[] };
+                    setTunnel(data.status);
+                    setDnsResult({ record: null, actions: data.actions ?? [] });
+                    setNotice(t.settings.domain.startNotice);
+                  } else {
+                    const body = res.data as { code?: string };
+                    setError(tf(t.settings.domain.startFailed, { code: body.code ?? 'unknown' }));
+                  }
+                  setBusy(false);
+                }}
+              >
+                {tunnel?.state === 'running' || tunnel?.state === 'starting' ? t.settings.domain.reconnect : t.settings.domain.start}
+              </button>
+              {(tunnel?.state === 'running' || tunnel?.state === 'starting') && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={busy}
+                  onClick={async () => {
+                    const res = await api.stopTunnel();
+                    if (res.status === 200) {
+                      setTunnel((res.data as { status: TunnelInfo }).status);
+                      setDnsResult(null);
+                      setNotice((res.data as { notice: string }).notice);
+                    } else {
+                      setError(t.settings.domain.stopFailed);
+                    }
+                  }}
+                >
+                  {t.settings.domain.disconnect}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={busy}
+                onClick={async () => {
+                  const res = await api.getTunnel();
+                  if (res.status === 200) {
+                    const data = res.data as { status: TunnelInfo; connectionCheck: { registered: boolean | null } };
+                    setTunnel(data.status);
+                    setNotice(data.connectionCheck.registered === true
+                      ? t.settings.domain.registeredOk
+                      : t.settings.domain.registeredNone);
+                  }
+                }}
+              >
+                {t.settings.domain.connectionCheck}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={busy || authBusy}
+                onClick={async () => {
+                  const ok = await confirmDestructive(t.settings.domain.forgetConfirm, { title: t.settings.domain.forgetAuth });
+                  if (!ok) return;
+                  const res = await api.forgetTunnelAuth();
+                  if (res.status === 200) {
+                    setTunnel((res.data as { status: TunnelInfo }).status);
+                    setNotice(t.settings.domain.forgetDone);
+                  }
+                }}
+              >
+                {t.settings.domain.forgetAuth}
+              </button>
+            </div>
+          )}
+
+          {tunnel && tunnel.connectorRegistered !== null && (
+            <p className="muted small">
+              {tunnel.connectorRegistered ? t.settings.domain.registeredOk : t.settings.domain.registeredNone}
+            </p>
+          )}
+
           {dnsResult && (
             <div className="notice-card" role="status">
-              <p>
-                {dnsResult.record
-                  ? <>{t.settings.domain.dnsRoute} <strong>{dnsResult.record}</strong></>
-                  : t.settings.domain.noDns}
-              </p>
               {dnsResult.actions.length > 0 && (
                 <ul className="plain-list">
                   {dnsResult.actions.map((action) => <li key={action} className="muted small">{action}</li>)}

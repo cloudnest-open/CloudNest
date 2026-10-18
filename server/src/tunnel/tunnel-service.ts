@@ -2,47 +2,36 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import { CredentialKey, decrypt, encrypt } from '../providers/encryption.js';
-import {
-  CloudflareApi,
-  CloudflareApiError,
-  TUNNEL_ID_RE,
-  type CloudflareDnsRecord,
-  type CloudflareTunnelApi,
-} from './cloudflare-api.js';
+import { CredentialKey } from '../providers/encryption.js';
+import { BrowserAuthorization, BrowserAuthError, type BrowserAuthStatus } from './browser-auth.js';
 
 /**
- * Optional Cloudflare Tunnel (M12.b).
+ * Optional Cloudflare Tunnel (M12.b) — browser-authorized (approved design §6).
  *
- * Honest constraints this module enforces:
- * - local use never needs Cloudflare; the tunnel is entirely optional;
- * - CloudNest has no registered Cloudflare OAuth integration, so the wizard
- *   takes a narrowly scoped API token supplied by the owner. A Global API Key
- *   is never requested, and is refused by `validateTokenShape` before anything
- *   is stored;
- * - the tunnel runtime token is a secret. It is stored at rest ONLY as an
- *   AES-256-GCM ciphertext blob (`<dataDir>/tunnel/runtime-token.enc`, 0600)
- *   produced by the shared credential-encryption module, so no plaintext copy
- *   is ever persisted. At start time it is decrypted in memory and written to a
- *   temporary 0600 file that is unlinked after ~5 seconds; `--token-file`
- *   points at that temporary path, never at a command-line argument;
- * - the runtime token is also not returned to the browser or written to logs.
- *   `startAllowedHosts()` does return the *hostnames* the caller asked for
- *   (never the token): those are the routes the owner is about to publish;
- * - `cloudflared` is launched with spawn and a fixed argument array: no shell,
- *   no interpolation of user-controlled values;
- * - the origin stays bound to 127.0.0.1; enabling a tunnel never changes the bind.
+ * The flow is exactly `cloudflared tunnel login`, rclone-style, and the old
+ * paste-an-API-token step is GONE:
+ * - "Connect your domain" spawns `cloudflared tunnel login --origincert …`,
+ *   hands the dash.cloudflare.com authorize URL to the UI and waits; the OWNER
+ *   completes the login in their own browser (the account that is logged in
+ *   there is the one that authorizes);
+ * - the resulting origin cert and the `tunnel create` credentials JSON are
+ *   stored ONLY as AES-256-GCM ciphertext blobs in `<dataDir>/tunnel/` (0600,
+ *   outside git); their plaintext exists for seconds and is deleted right
+ *   after encryption;
+ * - starting spawns, in order: `tunnel create` (once, cred reused after),
+ *   `tunnel route dns <id> <hostname>` (cert-authorized — the DNS REST API and
+ *   its scoped token are no longer involved at all), then
+ *   `tunnel --no-autoupdate run --cred-file <temp 0600>`.
+ * - Disconnect/Reconnect: stopping the connector KEEPS the stored
+ *   authorization, so Reconnect never re-asks the browser; `forget()` is the
+ *   explicit way to start over. Connection-check reads the connector's own
+ *   log for its "Registered tunnel connection" lines — an honest signal, not
+ *   a guess.
  *
- * Known limitations, stated rather than hidden:
- * - when `<dataDir>/credential-master.key` does not exist, the key is CREATED
- *   on the first start (the credential store's own rule permits creation only
- *   when no encrypted records exist). Honouring that rule would make the very
- *   first tunnel start impossible, so creation is allowed here; a key created
- *   this way is indistinguishable from a rotated key later on. If the key file
- *   is missing while `runtime-token.enc` exists, start fails closed with
- *   `tunnel_token_unreadable` and the token must be supplied again;
- * - the Cloudflare API calls use documented REST paths that were NOT exercised
- *   against a live account in this environment; they stay unverified here.
+ * Unchanged invariants: local use never needs Cloudflare; the tunnel is
+ * optional; the origin stays bound to 127.0.0.1; `cloudflared` is spawned
+ * with fixed argv (no shell, no interpolation); hostnames never leak secret
+ * material; enabling a tunnel never changes the server bind.
  */
 
 export type TunnelState = 'disconnected' | 'starting' | 'running' | 'error';
@@ -61,43 +50,37 @@ export interface TunnelStatus {
   enabled: boolean;
   state: TunnelState;
   hostname: string | null;
-  /** Observable session facts; connection *health* needs the connector's own
-   *  output parser and is not claimed here. */
   startedAt: string | null;
   stoppedAt: string | null;
   cloudflaredAvailable: boolean;
   safeErrorCode: string | null;
+  /** Browser-authorization state (login/authorize/forget lifecycle). */
+  authorization: BrowserAuthStatus;
+  /** The connector's own log reported registered connections — the honest
+   * "reachable through Cloudflare" signal; null = no evidence yet. */
+  connectorRegistered: boolean | null;
 }
 
 /** Paths the tunnel owns inside the data directory. */
 export interface TunnelRuntimePaths {
-  /** Temporary plaintext token file; exists only while a start is in flight. */
-  tokenFile: string;
+  /** Temporary plaintext credentials file; exists only while a start is live. */
+  credFile: string;
   logFile: string;
 }
 
 export interface TunnelServiceOptions {
   /** Injected for tests; production omits it and the real `spawn` is used. */
   spawnImpl?: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
-  /** Injected for tests: replaces the real Cloudflare HTTP client entirely. */
-  apiFactory?: CloudflareTunnelApi | ((cfToken: string) => CloudflareTunnelApi);
 }
 
 export interface TunnelStartOptions {
-  runtimeToken: string;
   hostname: string;
-  /** Scoped Cloudflare API token; when present the DNS/zone pre-check runs. */
-  cloudflareToken?: string | null;
-  /** Zone selected by the owner; used as a hint when listing zones. */
-  zoneId?: string | null;
 }
 
 export interface TunnelStartResult {
   status: TunnelStatus;
-  /** The existing record that was reused, or the record created by this call. */
-  dnsRecord: { id: string; name: string; content: string } | null;
-  /** Plain-language trace of what the pre-check did (no secrets). */
-  dnsActions: string[];
+  /** Plain-language trace of what this start did (no secrets). */
+  actions: string[];
 }
 
 export interface HostOriginPolicy {
@@ -112,11 +95,10 @@ export interface HostOriginPolicy {
 }
 
 const HOSTNAME_RE = /^[a-z0-9.-]+$/i;
-const RUNTIME_TOKEN_FILE = 'runtime-token.enc';
-const RUNTIME_TOKEN_MAGIC = 'CNTUN1\n';
-/** Stable purpose string: binds the blob so it cannot be replayed elsewhere. */
-const RUNTIME_TOKEN_AAD = 'tunnel_runtime_token:v1';
+const CONNECTOR_REGISTERED_RE = /Registered tunnel connection/i;
 const CLOUDFLARED_REFRESH_MS = 1_500;
+/** Non-secret start metadata (hostname/tunnel id), 0600 in the tunnel dir. */
+const META_FILE = 'tunnel-meta.json';
 
 function normalizeHost(value: string): string {
   return value.trim().toLowerCase();
@@ -143,25 +125,39 @@ function originHost(value: string): string {
   }
 }
 
-/**
- * Extract the REAL tunnel id from a remotely-managed tunnel token.
- *
- * The documented token payload is base64-encoded JSON carrying at least `t`
- * (tunnel id), `a` (account id) and `s` (secret). Only `t` is read here: the
- * CNAME route must point at the tunnel that token actually runs, and the
- * secret is never needed, logged or stored. A token that does not decode to a
- * tunnel id returns null — CloudNest then refuses to touch DNS rather than
- * pointing the hostname at a target it cannot verify.
- */
-export function tunnelIdFromToken(token: string): string | null {
-  try {
-    const parsed = JSON.parse(Buffer.from(token.trim(), 'base64').toString('utf8')) as Record<string, unknown>;
-    const id = parsed['t'];
-    if (typeof id === 'string' && TUNNEL_ID_RE.test(id)) return id.toLowerCase();
-  } catch {
-    // not a decodable remotely-managed token
-  }
-  return null;
+interface TunnelMeta {
+  hostname: string | null;
+  tunnelId: string | null;
+  tunnelName: string;
+}
+
+/** Run one cloudflared CLI step to completion; rejects with a safe code. */
+function runStep(
+  child: ChildProcess,
+  timeoutMs: number,
+  timeoutCode: string,
+): Promise<{ code: number | null }> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        // already gone
+      }
+      reject(new TunnelError(timeoutCode, 504));
+    }, timeoutMs);
+    timer.unref();
+    child.once('error', (err) => {
+      clearTimeout(timer);
+      void err;
+      reject(new TunnelError('tunnel_start_failed', 500));
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve({ code });
+      else reject(new TunnelError('tunnel_step_failed', 502));
+    });
+  });
 }
 
 export class TunnelService {
@@ -173,36 +169,37 @@ export class TunnelService {
   private stoppedAt: number | null = null;
   /** Hostnames this process published for its current session (never tokens). */
   private sessionHosts: string[] = [];
-  /** Path of the temporary plaintext token file while a start is in flight. */
-  private tempTokenFile: string | null = null;
+  /** Path of the temporary plaintext credentials file while a start is live. */
+  private tempCredFile: string | null = null;
+  /** The connector's own "Registered tunnel connection" evidence, if seen. */
+  private connectorRegistered: boolean | null = null;
   private readonly dataDir: string;
   private readonly keyProvider: () => CredentialKey;
-  private readonly apiFactory: CloudflareTunnelApi | ((cfToken: string) => CloudflareTunnelApi);
   private readonly spawnImpl: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
   private readonly say: (message: string) => void;
   private cachedBinary: string | null | undefined = undefined;
+  /** Browser-authorized cert/credentials (the design §6 lifecycle owner). */
+  readonly browserAuth: BrowserAuthorization;
 
-  /**
-   * `dataDir` is still first so the existing call sites keep working.
-   * `options.keyProvider` is required by the type: when omitted the shared
-   * CredentialKey at `<dataDir>/credential-master.key` is loaded or created. A
-   * call site that forgets it therefore still compiles, which the parent should
-   * replace with the app's shared `credentialsStore.getKey` (see the wiring note
-   * in `constructor` call sites) when wiring app.ts.
-   */
   constructor(
     private readonly _dataDir: string,
     options: TunnelServiceOptions & { keyProvider: () => CredentialKey },
   ) {
     this.dataDir = _dataDir;
     this.keyProvider = options.keyProvider;
-    this.apiFactory = options.apiFactory ?? ((token: string) => new CloudflareApi(token));
     this.spawnImpl =
       options.spawnImpl ??
       ((command, args, spawnOptions) => spawn(command, args as string[], spawnOptions));
     this.say = (message: string) => {
-      console.log(message); // never contains token material; callers pass fixed text
+      console.log(message); // never contains credential material; callers pass fixed text
     };
+    this.browserAuth = new BrowserAuthorization(
+      this.dataDir,
+      this.keyProvider,
+      this.spawnImpl,
+      () => this.cloudflaredPath(),
+      this.say,
+    );
   }
 
   /**
@@ -240,6 +237,8 @@ export class TunnelService {
       stoppedAt: this.stoppedAt === null ? null : new Date(this.stoppedAt).toISOString(),
       cloudflaredAvailable: this.available(),
       safeErrorCode: this.lastSafeError,
+      authorization: this.browserAuth.status(),
+      connectorRegistered: this.connectorRegistered,
     };
   }
 
@@ -270,52 +269,36 @@ export class TunnelService {
     return dir;
   }
 
-  /** Ciphertext path for the runtime token; never a plaintext location. */
-  tokenPath(): string {
-    return path.join(this.runtimeDir(), RUNTIME_TOKEN_FILE);
-  }
-
-  /**
-   * The temporary plaintext file `--token-file` points at. It is created only
-   * for the duration of a start (see `start`) and removed afterwards.
-   */
   runtimePaths(): TunnelRuntimePaths {
     const dir = this.runtimeDir();
     return {
-      tokenFile: path.join(dir, 'runtime-token.tmp'),
+      credFile: path.join(dir, 'runtime-cred.tmp'),
       logFile: path.join(dir, 'cloudflared.log'),
     };
   }
 
-  /** True when an encrypted runtime token is on disk. */
-  hasStoredToken(): boolean {
+  /** Non-secret start metadata (hostname/tunnel id), 0600. */
+  private metaPath(): string {
+    return path.join(this.runtimeDir(), META_FILE);
+  }
+
+  private loadMeta(): TunnelMeta {
     try {
-      return fs.existsSync(this.tokenPath());
+      const parsed = JSON.parse(fs.readFileSync(this.metaPath(), 'utf8')) as Partial<TunnelMeta>;
+      return {
+        hostname: typeof parsed.hostname === 'string' ? parsed.hostname : null,
+        tunnelId: typeof parsed.tunnelId === 'string' ? parsed.tunnelId : null,
+        tunnelName: typeof parsed.tunnelName === 'string' ? parsed.tunnelName : 'cloudnest',
+      };
     } catch {
-      return false;
+      return { hostname: null, tunnelId: null, tunnelName: 'cloudnest' };
     }
   }
 
-  /**
-   * Encrypt and persist the runtime token. Only the ciphertext touches disk;
-   * the plaintext is passed straight to the encryption module in memory.
-   */
-  saveRuntimeToken(token: string, context: { hostname: string }): void {
-    TunnelService.validateTokenShape(token);
-    const blob = encrypt(token, this.keyProvider(), RUNTIME_TOKEN_AAD);
-    const file = this.tokenPath();
-    const payload = {
-      version: 1,
-      keyVersion: blob.keyVersion,
-      // purpose + hostname are documented non-secret context for operators
-      purpose: RUNTIME_TOKEN_AAD,
-      hostname: normalizeHost(context.hostname),
-      nonce: blob.nonce.toString('base64'),
-      authTag: blob.authTag.toString('base64'),
-      ciphertext: blob.ciphertext.toString('base64'),
-    };
+  private saveMeta(meta: TunnelMeta): void {
+    const file = this.metaPath();
     const temp = `${file}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(payload), { mode: 0o600 });
+    fs.writeFileSync(temp, JSON.stringify(meta, null, 2), { mode: 0o600 });
     try {
       fs.chmodSync(temp, 0o600);
     } catch {
@@ -324,182 +307,151 @@ export class TunnelService {
     fs.renameSync(temp, file);
   }
 
-  /** Remove the stored ciphertext (used by tests and by a token reset). */
-  clearStoredToken(): void {
+  /** Forget the stored hostname/tunnel id (used by forgetAuthorization). */
+  clearMeta(): void {
     try {
-      if (fs.existsSync(this.tokenPath())) fs.rmSync(this.tokenPath());
+      if (fs.existsSync(this.metaPath())) fs.rmSync(this.metaPath());
     } catch {
       // nothing else to do: a missing file is the desired end state
     }
   }
 
-  private loadRuntimeToken(): string {
-    const file = this.tokenPath();
-    let raw: string;
-    try {
-      raw = fs.readFileSync(file, 'utf8');
-    } catch {
-      throw new TunnelError('tunnel_token_missing', 409);
-    }
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      throw new TunnelError('tunnel_token_unreadable', 500);
-    }
-    const read = (key: string): string => {
-      const value = parsed[key];
-      if (typeof value !== 'string' || value === '') throw new TunnelError('tunnel_token_unreadable', 500);
-      return value;
-    };
-    const keyVersion = parsed['keyVersion'];
-    if (typeof keyVersion !== 'number') throw new TunnelError('tunnel_token_unreadable', 500);
-    let token: string;
-    try {
-      token = decrypt(
-        {
-          ciphertext: Buffer.from(read('ciphertext'), 'base64'),
-          nonce: Buffer.from(read('nonce'), 'base64'),
-          authTag: Buffer.from(read('authTag'), 'base64'),
-          keyVersion,
-        },
-        this.keyProvider(),
-        RUNTIME_TOKEN_AAD,
-      );
-    } catch {
-      // wrong/missing key or tampered blob: fail closed, never fall back to plaintext
-      throw new TunnelError('tunnel_token_unreadable', 500);
-    }
-    return token;
-  }
-
-  private releaseTempFile(): void {
-    if (this.tempTokenFile === null) return;
-    try {
-      fs.rmSync(this.tempTokenFile, { force: true });
-    } catch {
-      // best effort; the file is overwritten on the next start anyway
-    }
-    this.tempTokenFile = null;
-  }
-
   /**
-   * Write the temporary 0600 token file that `--token-file` points at.
-   *
-   * `cloudflared` reads this file itself, so CloudNest never needs to keep a
-   * descriptor open: the plaintext exists only while the connector runs and is
-   * removed on stop, on exit and on a failed start. Nothing here schedules a
-   * timed deletion, because deleting the token while `cloudflared` is still
-   * starting would break the connector.
+   * Write a temporary 0600 file (the decrypted credentials JSON) that
+   * `--cred-file` points at. Created exclusively so a stale file cannot be
+   * reused; removed on stop/exit/error via `releaseTempFile`.
    */
-  private materializeTempTokenFile(token: string): string {
+  private materializeTempCredFile(contents: string): string {
     this.releaseTempFile();
     const paths = this.runtimePaths();
-    // write through an exclusive-create descriptor so a stale file cannot be
-    // reused and the permissions are applied at creation time; a leftover file
-    // from a previous run is removed and the exclusive create retried
     let fd: number;
     try {
-      fd = fs.openSync(paths.tokenFile, 'wx', 0o600);
+      fd = fs.openSync(paths.credFile, 'wx', 0o600);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      fs.rmSync(paths.tokenFile, { force: true });
-      fd = fs.openSync(paths.tokenFile, 'wx', 0o600);
+      fs.rmSync(paths.credFile, { force: true });
+      fd = fs.openSync(paths.credFile, 'wx', 0o600);
     }
     try {
-      fs.writeFileSync(fd, token);
+      fs.writeFileSync(fd, contents);
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
     }
     try {
-      fs.chmodSync(paths.tokenFile, 0o600);
+      fs.chmodSync(paths.credFile, 0o600);
     } catch {
       // Windows permission model differs; documented limitation
     }
-    this.tempTokenFile = paths.tokenFile;
-    return paths.tokenFile;
+    this.tempCredFile = paths.credFile;
+    return paths.credFile;
   }
 
-  /**
-   * Validate a Cloudflare API token's shape before it is stored.
-   *
-   * This is a local guard only: it rejects an empty or implausibly short value
-   * and a Global API Key (37 hex characters), which is never accepted here. It
-   * does NOT prove that the token is valid or carries the required
-   * permissions — that requires the Cloudflare `verifyToken` call, which is not
-   * live-tested in this environment.
-   */
-  static validateTokenShape(token: string): void {
-    const value = token.trim();
-    if (value === '') throw new TunnelError('tunnel_token_required', 400);
-    if (value.length < 20) throw new TunnelError('tunnel_token_invalid', 400);
-    // a Global API Key is 37 hex characters; it must never be used here
-    if (/^[0-9a-f]{37}$/i.test(value)) {
-      throw new TunnelError('global_api_key_not_accepted', 400);
+  /** Remove the temporary plaintext credentials file (best effort). */
+  releaseTempFile(): void {
+    if (this.tempCredFile === null) return;
+    try {
+      fs.rmSync(this.tempCredFile, { force: true });
+    } catch {
+      // best effort; the file is overwritten on the next start anyway
     }
+    this.tempCredFile = null;
   }
 
-  /** Documented permissions the owner must grant, in plain language. */
-  static requiredPermissions(): string[] {
-    return [
-      'Account → Cloudflare Tunnel → Edit (create and manage the tunnel)',
-      'Zone → DNS → Edit (create the CNAME route for the chosen subdomain)',
-    ];
-  }
-
-  /** The CNAME target a remotely-managed tunnel must point at. */
-  static requiredCnameTarget(): string {
-    return '<tunnel-id>.cfargotunnel.com';
+  /** The tunnel id from the stored credentials JSON (memory only). */
+  private tunnelIdFromCred(credJson: string): string {
+    try {
+      const parsed = JSON.parse(credJson) as Record<string, unknown>;
+      const id = parsed['TunnelID'];
+      if (typeof id === 'string' && id.trim() !== '') return id.trim();
+    } catch {
+      // fall through to the honest refusal
+    }
+    throw new TunnelError('tunnel_cred_unreadable', 500);
   }
 
   /**
-   * Start the connector for a remotely-managed tunnel.
+   * Start the connector for the browser-authorized tunnel.
    *
-   * Order of operations (nothing is stored before it validates):
-   * 1. `validateTokenShape` refuses a malformed or Global-API-Key token;
-   * 2. the hostname must match `^[a-z0-9.-]+$`;
-   * 3. when `cloudflareToken` is supplied, the tunnel id is read from the
-   *    runtime token, the zone is resolved for `hostname` and an existing
-   *    record that CloudNest does not own is refused with
-   *    `dns_record_conflict` instead of being overwritten; an owned record is
-   *    reused, a missing one is created as a CNAME to
-   *    `<real-tunnel-id>.cfargotunnel.com`;
-   * 4. only then is the token encrypted and stored, a temporary 0600 file
-   *    materialised for `--token-file`, and the fixed binary spawned.
+   * Order of operations (nothing runs before it validates):
+   * 1. the hostname must match `^[a-z0-9.-]+$` and an origin cert must be
+   *    stored (browser authorization completed);
+   * 2. credentials: the stored blob is reused; when absent the cert-authorized
+   *    `tunnel create` runs once and its JSON is encrypted into place;
+   * 3. `tunnel route dns` cert-creates/reuses the CNAME for the hostname
+   *    (cloudflared itself refuses to clobber a record it does not own);
+   * 4. the decrypted credentials go to a temporary 0600 file and the fixed
+   *    argv `tunnel --no-autoupdate run --cred-file …` is spawned.
    */
   async start(options: TunnelStartOptions): Promise<TunnelStartResult> {
     const hostname = String(options.hostname ?? '').trim();
+    const actions: string[] = [];
+    let certTempWritten = false;
     try {
-      TunnelService.validateTokenShape(String(options.runtimeToken ?? ''));
       if (!HOSTNAME_RE.test(hostname)) throw new TunnelError('invalid_tunnel_hostname', 400);
-
       const binary = this.cloudflaredPath();
       if (!binary) throw new TunnelError('cloudflared_not_installed', 409);
-
-      const dnsActions: string[] = [];
-      let dnsRecord: CloudflareDnsRecord | null = null;
-      const cfToken = typeof options.cloudflareToken === 'string' ? options.cloudflareToken.trim() : '';
-      if (cfToken !== '') {
-        const prepared = await this.prepareDns(cfToken, hostname, options.zoneId ?? null, String(options.runtimeToken ?? ''));
-        dnsRecord = prepared.record;
-        dnsActions.push(...prepared.actions);
-      } else {
-        dnsActions.push('Cloudflare check skipped: no scoped API token supplied (local-only start).');
-      }
+      if (!this.browserAuth.certStored()) throw new TunnelError('tunnel_not_authorized', 409);
 
       if (this.child) {
-        return { status: this.status(), dnsRecord: this.publicRecord(dnsRecord), dnsActions };
+        return { status: this.status(), actions };
       }
 
-      this.saveRuntimeToken(String(options.runtimeToken), { hostname });
-      const token = this.loadRuntimeToken();
+      // 2. credentials (create once, reuse forever)
+      let credJson: string;
+      let tunnelId: string;
+      const meta = this.loadMeta();
+      if (this.browserAuth.credStored()) {
+        credJson = this.browserAuth.loadCredJson();
+        tunnelId = this.tunnelIdFromCred(credJson);
+        actions.push('Existing tunnel credentials reused.');
+      } else {
+        const certFile = this.browserAuth.plaintextCertPath();
+        certTempWritten = this.writeCertTemp(certFile);
+        const credPath = this.browserAuth.plaintextCredPath();
+        try {
+          fs.rmSync(credPath, { force: true });
+        } catch {
+          // a leftover file from an interrupted create is replaced
+        }
+        const create = this.spawnImpl(
+          binary,
+          ['tunnel', 'create', '--origincert', certFile, '--cred-file', credPath, meta.tunnelName],
+          { stdio: ['ignore', 'pipe', 'pipe'] },
+        );
+        await runStep(create, 60_000, 'tunnel_step_failed');
+        credJson = fs.readFileSync(credPath, 'utf8');
+        this.browserAuth.storeCredJson(credJson);
+        fs.rmSync(credPath, { force: true });
+        tunnelId = this.tunnelIdFromCred(credJson);
+        actions.push('Tunnel created with the browser-authorized certificate.');
+      }
+
+      // 3. DNS route (cert-authorized; cloudflared owns the conflict rules)
+      const certFile2 = this.browserAuth.plaintextCertPath();
+      certTempWritten = this.writeCertTemp(certFile2);
+      const route = this.spawnImpl(
+        binary,
+        ['tunnel', 'route', 'dns', '--origincert', certFile2, tunnelId, hostname],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      let routed = false;
+      try {
+        await runStep(route, 60_000, 'tunnel_step_failed');
+        routed = true;
+      } finally {
+        fs.rmSync(certFile2, { force: true });
+      }
+      actions.push(routed ? 'DNS route created/reused for the hostname.' : 'DNS route step did not complete.');
+
+      this.saveMeta({ hostname: normalizeHost(hostname), tunnelId, tunnelName: meta.tunnelName });
+
+      // 4. run from the temporary credentials file
       const paths = this.runtimePaths();
-      const tokenFile = this.materializeTempTokenFile(token);
+      const credFile = this.materializeTempCredFile(credJson);
       const logFd = fs.openSync(paths.logFile, 'a', 0o600);
       try {
-        // fixed executable + argument array; no shell and no interpolation
-        this.child = this.spawnImpl(binary, ['tunnel', '--no-autoupdate', 'run', '--token-file', tokenFile], {
+        this.child = this.spawnImpl(binary, ['tunnel', '--no-autoupdate', 'run', '--cred-file', credFile], {
           stdio: ['ignore', logFd, logFd],
           detached: false,
         });
@@ -511,11 +463,9 @@ export class TunnelService {
       this.sessionHosts = [this.hostname];
       this.startedAt = Date.now();
       this.lastSafeError = null;
+      this.connectorRegistered = null;
       this.say(`[tunnel] starting cloudflared for ${this.hostname} (origin 127.0.0.1)`);
 
-      // The temporary plaintext file stays in place while the connector runs so
-      // `cloudflared` can read it at start-up; every terminal path below removes
-      // it, and `stop()` removes it too.
       const child = this.child;
       child.once('error', () => {
         this.state = 'error';
@@ -533,7 +483,7 @@ export class TunnelService {
         this.say(`[tunnel] cloudflared exited (code ${code ?? 'unknown'})`);
       });
       // "running" means the child is still alive, so there is still something
-      // to stop; it is deliberately NOT a claim that the tunnel is reachable.
+      // to stop; reachability is claimed only by the connector's own log.
       const started = child;
       setTimeout(() => {
         if (this.child === started && !started.killed) {
@@ -541,7 +491,7 @@ export class TunnelService {
           this.lastSafeError = null;
         }
       }, CLOUDFLARED_REFRESH_MS).unref();
-      return { status: this.status(), dnsRecord: this.publicRecord(dnsRecord), dnsActions };
+      return { status: this.status(), actions };
     } catch (err) {
       this.releaseTempFile();
       if (err instanceof TunnelError) {
@@ -549,100 +499,74 @@ export class TunnelService {
         this.lastSafeError = err.safeCode;
         throw err;
       }
-      if (err instanceof CloudflareApiError) {
+      if (err instanceof BrowserAuthError) {
         this.state = 'error';
         this.lastSafeError = err.safeCode;
-        throw new TunnelError(err.safeCode, 502);
+        throw new TunnelError(err.safeCode, err.httpStatus);
       }
       this.state = 'error';
       this.lastSafeError = 'tunnel_start_failed';
       throw new TunnelError('tunnel_start_failed', 500);
-    }
-  }
-
-  /**
-   * DNS/zone safety pre-check. Returns the record that routes `hostname`
-   * (existing and owned by us, or newly created) or throws a safe error.
-   */
-  private async prepareDns(
-    cfToken: string,
-    hostname: string,
-    zoneId: string | null,
-    runtimeToken: string,
-  ): Promise<{ record: CloudflareDnsRecord | null; actions: string[] }> {
-    const api = typeof this.apiFactory === 'function' ? this.apiFactory(cfToken) : this.apiFactory;
-    const actions: string[] = [];
-    const name = normalizeHost(hostname);
-    // The CNAME must point at the tunnel this token actually runs. A token whose
-    // id cannot be read is refused here: creating a route to a guessed target
-    // would publish a hostname that does not work.
-    const tunnelId = tunnelIdFromToken(runtimeToken);
-    if (tunnelId === null) {
-      throw new TunnelError('tunnel_token_unreadable', 400);
-    }
-    const target = `${tunnelId}.cfargotunnel.com`;
-
-    // 1. the token itself must be usable, as a distinct safe outcome
-    const verified = await api.verifyToken();
-    if (!verified.ok) {
-      throw new TunnelError(verified.safeErrorCode ?? 'cloudflare_token_verify_failed', 502);
-    }
-    actions.push('Cloudflare API token verified for shape and permissions.');
-
-    // 2. the hostname decides the zone; the requested zone id is only a hint
-    const label = name.split('.')[0] ?? '';
-    const suffix = name.slice(label.length + 1);
-    const candidates = label !== 'www'
-      ? [
-          { id: '', name, match: 'exact' as const },
-          { id: '', name: suffix, match: 'apex' as const },
-        ]
-      : [{ id: '', name: name.slice('www.'.length), match: 'www-stripped' as const }];
-
-    const zones = await api.listZones();
-    const chosen =
-      (zoneId ? zones.find((zone) => zone.id === zoneId) : undefined) ??
-      zones.find((zone) => zone.name === name) ??
-      zones.find((zone) => zone.name === suffix) ??
-      (label === 'www' ? zones.find((zone) => zone.name === name.slice('www.'.length)) : undefined) ??
-      (zoneId ? zones.find((zone) => zone.id === zoneId) : undefined);
-    if (!chosen) {
-      actions.push(`No Cloudflare zone found for ${name}; the connector was not started.`);
-      throw new TunnelError('cloudflare_zone_not_found', 404);
-    }
-    if (zoneId && chosen.id !== zoneId) {
-      actions.push('The requested zone id is not visible to this token; the zone of the hostname was used instead.');
-    }
-    actions.push(`Zone selected for ${name}: ${chosen.name}`);
-
-    // 3. never silently overwrite an unrelated record
-    const existing = await api.findDnsRecord(chosen.id, name);
-    if (existing) {
-      const owned = existing.type.toUpperCase() === 'CNAME' && normalizeHost(existing.content) === target;
-      if (!owned) {
-        throw new TunnelError('dns_record_conflict', 409);
+    } finally {
+      // the plaintext cert helper files never outlive the start attempt
+      if (certTempWritten) {
+        try {
+          fs.rmSync(this.browserAuth.plaintextCertPath(), { force: true });
+        } catch {
+          // best effort
+        }
       }
-      actions.push('Existing CloudNest CNAME reused; no DNS change was made.');
-      return { record: existing, actions };
     }
-
-    const created = await api.createCname(chosen.id, name, target);
-    actions.push('No existing record was present; a CNAME route was created.');
-    return { record: created, actions };
   }
 
-  private publicRecord(record: CloudflareDnsRecord | null): TunnelStartResult['dnsRecord'] {
-    return record === null ? null : { id: record.id, name: record.name, content: record.content };
+  /** Decrypt the cert into a 0600 helper file for one CLI step. */
+  private writeCertTemp(certFile: string): boolean {
+    // exclusive create with a stale-file retry: two steps back-to-back reuse
+    // the same helper path, and a leftover file must never be reused
+    let fd: number;
+    try {
+      fd = fs.openSync(certFile, 'wx', 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      fs.rmSync(certFile, { force: true });
+      fd = fs.openSync(certFile, 'wx', 0o600);
+    }
+    try {
+      fs.writeFileSync(fd, this.browserAuth.loadCert());
+    } finally {
+      fs.closeSync(fd);
+    }
+    return true;
   }
 
   /**
-   * Stop the connector this process owns and drop the stored secret.
-   *
-   * The runtime token must not survive a disconnect: both the temporary
-   * plaintext file and the encrypted ciphertext are removed, so a later start
-   * has to be given the token again. Any DNS record or Cloudflare-side tunnel is
-   * deliberately NOT touched here — removing remote state needs its own explicit
-   * confirmation and is never a silent side effect of stopping locally.
+   * Connection-check (owner requirement): read the connector's own log for
+   * "Registered tunnel connection" lines since the current start. This is the
+   * connector's own success signal — never an invented reachability claim.
+   */
+  checkConnection(): { registered: boolean | null; checkedAt: string } {
+    if (this.state !== 'running' && this.state !== 'starting') {
+      return { registered: this.connectorRegistered, checkedAt: new Date().toISOString() };
+    }
+    try {
+      const text = fs.readFileSync(this.runtimePaths().logFile, 'utf8');
+      // only evidence written after the current start counts
+      const marker = text.lastIndexOf('starting cloudflared for');
+      const relevant = marker >= 0 ? text.slice(marker) : text;
+      this.connectorRegistered = CONNECTOR_REGISTERED_RE.test(relevant);
+    } catch {
+      // no log yet — honest null, not a guess
+      this.connectorRegistered = this.connectorRegistered ?? null;
+    }
+    return { registered: this.connectorRegistered, checkedAt: new Date().toISOString() };
+  }
+
+  /**
+   * Stop the connector this process owns. The stored authorization (origin
+   * cert + tunnel credentials) SURVIVES: Disconnect is reversible, Reconnect
+   * never re-asks the browser (owner requirement). `forgetAuthorization` is
+   * the explicit way to delete the stored secrets. Remote Cloudflare-side
+   * state is deliberately NOT touched here.
    */
   stop(): TunnelStatus {
     if (this.child) {
@@ -653,8 +577,15 @@ export class TunnelService {
     this.stoppedAt = Date.now();
     this.lastSafeError = null;
     this.releaseTempFile();
-    this.clearStoredToken();
     this.sessionHosts = [];
+    return this.status();
+  }
+
+  /** Delete the stored authorization + metadata (the explicit "start over"). */
+  forgetAuthorization(): TunnelStatus {
+    this.browserAuth.forget();
+    this.clearMeta();
+    this.hostname = null;
     return this.status();
   }
 }

@@ -111,49 +111,49 @@ export function maintenanceRouter(deps: {
     res.json({ report, text: deps.diagnostics.toText(report) });
   });
 
-  // ---- tunnel ----
+  // ---- tunnel (browser-authorized — approved design §6; NO API token) ----
   router.get('/api/tunnel', adminOnly, (_req, res) => {
     res.set('Cache-Control', 'no-store');
     res.json({
       status: deps.tunnel.status(),
-      requiredPermissions: [
-        'Account → Cloudflare Tunnel → Edit (create and manage the tunnel)',
-        'Zone → DNS → Edit (create the CNAME route for the chosen subdomain)',
-      ],
+      connectionCheck: deps.tunnel.checkConnection(),
       notes: [
         'The tunnel is optional: CloudNest works locally without Cloudflare.',
-        'CloudNest has no registered Cloudflare OAuth app, so a narrowly scoped API token is used. A Global API Key is never requested.',
+        'Authorization is the cloudflared browser login — the owner approves in their own browser; no API token is ever requested.',
         'The app keeps listening on 127.0.0.1 only; enabling a tunnel does not change that.',
       ],
     });
   });
 
+  /** Wizard step 1: open the Cloudflare authorize page (rclone-style). */
+  router.post('/api/tunnel/auth/start', adminOnly, deps.csrf.doubleCsrfProtection, heavyLimiter, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      const status = deps.tunnel.browserAuth.startLogin();
+      deps.queries.recordAudit('tunnel_login_started', true, status.state);
+      res.json({ ok: true, authorization: status });
+    } catch (err) {
+      const code = err instanceof Error && 'safeCode' in err ? (err as { safeCode: string }).safeCode : 'tunnel_failed';
+      const http = err instanceof Error && 'httpStatus' in err ? (err as { httpStatus: number }).httpStatus : 500;
+      deps.queries.recordAudit('tunnel_login_started', false, code);
+      res.status(http).json({ error: code, code });
+    }
+  });
+
+  /** Wizard step 2: poll until the owner finishes (or fails) the authorize. */
+  router.get('/api/tunnel/auth/status', adminOnly, (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ authorization: deps.tunnel.browserAuth.status() });
+  });
+
   router.post('/api/tunnel/start', adminOnly, deps.csrf.doubleCsrfProtection, heavyLimiter, async (req, res) => {
     res.set('Cache-Control', 'no-store');
-    const body = (req.body ?? {}) as {
-      hostname?: unknown;
-      runtimeToken?: unknown;
-      cloudflareToken?: unknown;
-      zoneId?: unknown;
-    };
+    const body = (req.body ?? {}) as { hostname?: unknown };
     try {
-      if (typeof body.runtimeToken !== 'string') throw new TunnelError('tunnel_token_required', 400);
-      // the service validates the token shape AND encrypts it at rest before
-      // anything is spawned; a Global API Key is refused inside it
-      const result = await deps.tunnel.start({
-        runtimeToken: body.runtimeToken,
-        hostname: String(body.hostname ?? ''),
-        cloudflareToken: typeof body.cloudflareToken === 'string' ? body.cloudflareToken : null,
-        zoneId: typeof body.zoneId === 'string' ? body.zoneId : null,
-      });
+      if (typeof body.hostname !== 'string') throw new TunnelError('invalid_tunnel_hostname', 400);
+      const result = await deps.tunnel.start({ hostname: body.hostname });
       deps.queries.recordAudit('tunnel_started', result.status.state !== 'error', result.status.state);
-      res.json({
-        ok: true,
-        status: result.status,
-        dnsRecord: result.dnsRecord,
-        // a plain-language trace; never contains a token
-        dnsActions: result.dnsActions,
-      });
+      res.json({ ok: true, status: result.status, actions: result.actions });
     } catch (err) {
       if (err instanceof TunnelError) {
         deps.queries.recordAudit('tunnel_started', false, err.safeCode);
@@ -171,9 +171,19 @@ export function maintenanceRouter(deps: {
     res.json({
       ok: true,
       status,
+      // owner requirement: Disconnect is reversible — Reconnect reuses the
+      // stored authorization without a new browser login
       notice:
-        'The local connector was stopped and the runtime token file removed. Any DNS route or tunnel created in Cloudflare is NOT deleted automatically — remove it there if you no longer need it.',
+        'The local connector was stopped. The browser authorization and tunnel credentials stay stored, so Reconnect works without logging in again. Anything created in Cloudflare is NOT deleted automatically.',
     });
+  });
+
+  /** The explicit "start over": deletes the stored cert/credentials/metadata. */
+  router.post('/api/tunnel/forget', adminOnly, deps.csrf.doubleCsrfProtection, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const status = deps.tunnel.forgetAuthorization();
+    deps.queries.recordAudit('tunnel_authorization_forgotten', true, status.authorization.state);
+    res.json({ ok: true, status });
   });
 
   return router;
