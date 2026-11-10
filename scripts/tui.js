@@ -1,15 +1,11 @@
 #!/usr/bin/env node
-/**
- * CloudNest Enterprise Terminal User Interface (TUI)
- * Professional ANSI TrueColor (24-bit RGB) System Console
- */
 import readline from 'readline';
 import process from 'process';
+import path from 'path';
+import os from 'os';
+import { execSync } from 'child_process';
 import Database from 'better-sqlite3';
-import { envPaths } from '../server/src/config/paths.js';
-import { hashPassword } from '../server/src/auth/password.js';
 
-// Enterprise Palette: CloudNest Brand Deep Blue, Vibrant Cyan, Emerald, Amber, Rose
 const C = {
   reset: '\x1b[0m',
   bold: '\x1b[1m',
@@ -22,7 +18,6 @@ const C = {
   red: '\x1b[38;2;239;68;68m',
   purple: '\x1b[38;2;168;85;247m',
   slate: '\x1b[38;2;148;163;184m',
-  darkGray: '\x1b[38;2;71;85;105m',
   border: '\x1b[38;2;51;65;85m',
   white: '\x1b[38;2;248;250;252m',
   bgBrand: '\x1b[48;2;0;102;218m\x1b[38;2;255;255;255m',
@@ -32,9 +27,8 @@ const C = {
 };
 
 function formatBytes(bytes) {
-  if (bytes === null || bytes === undefined) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+  if (!bytes || bytes <= 0) return '0 B';
+  const units = ['KB', 'MB', 'GB', 'TB'];
   let val = bytes;
   let u = -1;
   do {
@@ -44,7 +38,7 @@ function formatBytes(bytes) {
   return `${val.toFixed(1)} ${units[u]}`;
 }
 
-function makeProgressBar(used, total, width = 14) {
+function makeProgressBar(used, total, width = 12) {
   if (!total || total <= 0) return `${C.border}[${'░'.repeat(width)}]${C.reset} 0%`;
   const pct = Math.min(1, Math.max(0, used / total));
   const filled = Math.round(pct * width);
@@ -54,7 +48,7 @@ function makeProgressBar(used, total, width = 14) {
 
 class CloudNestTui {
   constructor() {
-    this.dbPath = envPaths().dbPath;
+    this.dbPath = process.env.CLOUDNEST_DB_PATH || path.join(os.homedir(), '.local/share/CloudNest/cloudnest.db');
     this.statusMessage = '';
   }
 
@@ -96,24 +90,21 @@ class CloudNestTui {
     const mem = process.memoryUsage();
     console.clear();
 
-    // ── Header Box ──
     console.log(`${C.brand}╭──────────────────────────────────────────────────────────────────────────────────────────╮${C.reset}`);
     console.log(`${C.brand}│  ${C.bold}${C.white}☁  CloudNest Enterprise Console${C.reset} ${C.brandLight}v0.1.0${C.reset}       ${C.bgPillGreen} ● ENGINE ONLINE ${C.reset}  ${C.dim}http://127.0.0.1:8787${C.reset} ${C.brand}│${C.reset}`);
     console.log(`${C.brand}╰──────────────────────────────────────────────────────────────────────────────────────────╯${C.reset}`);
 
-    // ── Section 1: System Specs & Storage Summary ──
     console.log(`${C.border}╭─ ${C.cyan}CORE ENGINE & RUNTIME${C.border} ───────────────╮╭─ ${C.cyan}STORAGE POOLS & UNIFIED QUOTA${C.border} ──────────────╮${C.reset}`);
     console.log(`${C.border}│${C.reset}  Process Memory: ${C.white}${formatBytes(mem.rss).padEnd(16)}${C.reset} ${C.border}││${C.reset}  Connected Pools:  ${C.bold}${C.white}${String(accounts.length).padEnd(20)}${C.reset} ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  Heap Active:    ${C.white}${formatBytes(mem.heapUsed).padEnd(16)}${C.reset} ${C.border}││${C.reset}  Personal Quota:   ${C.slate}${accounts.filter(a => a.tier === 'personal').length} accounts linked${C.reset}     ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  Binding Port:   ${C.green}8787 (TCP/HTTP)${C.reset}  ${C.border}││${C.reset}  Business S3:      ${C.slate}${accounts.filter(a => a.tier === 'business').length} accounts linked${C.reset}     ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  Runtime Node:   ${C.purple}v24.x LTS (x64)${C.reset}  ${C.border}││${C.reset}  Total Capacity:   ${C.white}${formatBytes(totalUsableBytes).padEnd(20)}${C.reset} ${C.border}│${C.reset}`);
-    console.log(`${C.border}│${C.reset}  Database WAL:   ${C.bgPillGreen} ACTIVE ${C.reset}         ${C.border}││${C.reset}  Pool Utilization: ${makeProgressBar(totalUsedBytes, totalUsableBytes, 12)}   ${C.border}│${C.reset}`);
+    console.log(`${C.border}│${C.reset}  Database Mode:  ${C.bgPillGreen} SQLite WAL ${C.reset}     ${C.border}││${C.reset}  Pool Utilization: ${makeProgressBar(totalUsedBytes, totalUsableBytes, 12)}   ${C.border}│${C.reset}`);
     console.log(`${C.border}╰────────────────────────────────────────╯╰─────────────────────────────────────────────────╯${C.reset}`);
 
-    // ── Section 2: Storage Accounts Breakdown ──
     console.log(`${C.border}╭─ ${C.cyan}CONNECTED PROVIDER ACCOUNTS${C.border} ────────────────────────────────────────────────────────────╮${C.reset}`);
     if (accounts.length === 0) {
-      console.log(`${C.border}│${C.reset}  ${C.slate}No storage accounts connected yet. Link via Web Dashboard.${C.reset}${' '.repeat(28)}${C.border}│${C.reset}`);
+      console.log(`${C.border}│${C.reset}  ${C.slate}No storage accounts connected yet. Link accounts via Web Dashboard.${C.reset}${' '.repeat(22)}${C.border}│${C.reset}`);
     } else {
       accounts.slice(0, 4).forEach((acc) => {
         const badge = acc.tier === 'business' ? `${C.bgPillAmber} S3-BUS ${C.reset}` : `${C.bgPillBlue} PERSNL ${C.reset}`;
@@ -123,15 +114,11 @@ class CloudNestTui {
         const pBar = makeProgressBar(acc.quota_used_bytes || 0, acc.quota_total_bytes || acc.capacity_cap_bytes || 0, 8);
         console.log(`${C.border}│${C.reset}  ${badge} ${C.white}${name}${C.reset} ${C.slate}${used} / ${total}${C.reset}  ${pBar} ${C.border}│${C.reset}`);
       });
-      if (accounts.length > 4) {
-        console.log(`${C.border}│${C.reset}  ${C.dim}... and ${accounts.length - 4} more accounts active in storage pool${C.reset}${' '.repeat(34)}${C.border}│${C.reset}`);
-      }
     }
     console.log(`${C.border}╰──────────────────────────────────────────────────────────────────────────────────────────╯${C.reset}`);
 
-    // ── Section 3: Operations & Commands ──
     console.log(`${C.border}╭─ ${C.cyan}FILES & METRICS${C.border} ──────────────────────╮╭─ ${C.cyan}ENTERPRISE CONTROL ACTIONS${C.border} ─────────────────────╮${C.reset}`);
-    console.log(`${C.border}│${C.reset}  Library Files:  ${C.bold}${C.white}${String(fileCount).padEnd(16)}${C.reset} ${C.border}││${C.reset}  ${C.bold}${C.amber}[P]${C.reset} Reset Admin Password (Instant CLI)      ${C.border}│${C.reset}`);
+    console.log(`${C.border}│${C.reset}  Library Files:  ${C.bold}${C.white}${String(fileCount).padEnd(16)}${C.reset} ${C.border}││${C.reset}  ${C.bold}${C.amber}[P]${C.reset} Reset Admin Password                    ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  Trash Storage:  ${C.amber}${String(trashCount).padEnd(16)}${C.reset} ${C.border}││${C.reset}  ${C.bold}${C.green}[I]${C.reset} Generate One-Time Invite Token          ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  Active Users:   ${C.white}${String(userCount).padEnd(16)}${C.reset} ${C.border}││${C.reset}  ${C.bold}${C.cyan}[V]${C.reset} Run SQLite Maintenance (VACUUM)         ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  Security Audit: ${C.green}Clean (0-vuln)${C.reset}   ${C.border}││${C.reset}  ${C.bold}${C.brandLight}[R]${C.reset} Refresh Metrics Console                 ${C.border}│${C.reset}`);
@@ -145,12 +132,12 @@ class CloudNestTui {
   }
 
   async runAction(action) {
-    const key = action.trim().toLowerCase();
+    const key = (action || '').trim().toLowerCase();
     const db = this.getDb();
 
     if (key === 'q') {
       console.clear();
-      console.log(`\n${C.green}✔ CloudNest TUI Console detached. Server process remains live on :8787.${C.reset}\n`);
+      console.log(`\n${C.green}✔ CloudNest TUI Console closed. Server process remains live on :8787.${C.reset}\n`);
       process.exit(0);
     }
 
@@ -166,8 +153,7 @@ class CloudNestTui {
       } else {
         try {
           db.exec('VACUUM;');
-          db.prepare("DELETE FROM transfer_jobs WHERE state IN ('completed', 'cancelled') AND updated_at < datetime('now', '-7 days')").run();
-          this.statusMessage = 'Database VACUUM completed and stale transfer records purged.';
+          this.statusMessage = 'Database VACUUM completed and optimized.';
         } catch (e) {
           this.statusMessage = `Maintenance error: ${e.message}`;
         } finally {
@@ -181,41 +167,31 @@ class CloudNestTui {
     if (key === 'i') {
       if (!db) {
         this.statusMessage = 'Database connection unavailable.';
-        this.renderScreen();
-        return;
-      }
-      try {
-        const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-        this.statusMessage = `Invite Link: http://127.0.0.1:8787/accept-invite?token=${token}`;
-      } catch (e) {
-        this.statusMessage = `Error: ${e.message}`;
-      } finally {
-        db.close();
+      } else {
+        try {
+          const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+          this.statusMessage = `Invite Link: http://127.0.0.1:8787/accept-invite?token=${token}`;
+        } catch (e) {
+          this.statusMessage = `Error: ${e.message}`;
+        } finally {
+          db.close();
+        }
       }
       this.renderScreen();
       return;
     }
 
     if (key === 'p') {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      rl.question(`\n  ${C.cyan}Enter New Admin Password (min 12 chars): ${C.reset}`, async (pwd) => {
-        rl.close();
-        if (!pwd || pwd.length < 12) {
-          this.statusMessage = 'Rejected: Password must contain at least 12 characters.';
-        } else {
-          try {
-            const hashed = await hashPassword(pwd);
-            const dbMod = this.getDb();
-            dbMod.prepare("UPDATE users SET password_hash = ? WHERE id = 'usr_admin' OR email = 'admin'").run(hashed);
-            dbMod.close();
-            this.statusMessage = 'Admin password securely hashed and updated in database!';
-          } catch (e) {
-            this.statusMessage = `Error updating password: ${e.message}`;
-          }
-        }
-        this.renderScreen();
-        this.listenInput();
-      });
+      console.clear();
+      console.log(`\n${C.amber}▶ Launching Admin Password Reset Tool...${C.reset}\n`);
+      try {
+        execSync('node dist/server/src/scripts/reset-admin.js', { stdio: 'inherit' });
+        this.statusMessage = 'Password reset process completed.';
+      } catch (err) {
+        this.statusMessage = 'Password reset cancelled or exited.';
+      }
+      this.renderScreen();
+      this.listenInput();
       return;
     }
 
@@ -230,7 +206,7 @@ class CloudNestTui {
     const onKey = (str, key) => {
       process.stdin.removeListener('keypress', onKey);
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
-      this.runAction(str || key.name);
+      this.runAction(str || (key && key.name));
     };
     process.stdin.once('keypress', onKey);
   }
