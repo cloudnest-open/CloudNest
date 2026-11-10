@@ -1,8 +1,13 @@
 #!/usr/bin/env node
+/**
+ * CloudNest Enterprise Terminal User Interface (TUI)
+ * Professional ANSI TrueColor (24-bit RGB) System Console
+ */
 import readline from 'readline';
 import process from 'process';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { execSync } from 'child_process';
 import Database from 'better-sqlite3';
 
@@ -90,10 +95,12 @@ class CloudNestTui {
     const mem = process.memoryUsage();
     console.clear();
 
+    // ── Header Box ──
     console.log(`${C.brand}╭──────────────────────────────────────────────────────────────────────────────────────────╮${C.reset}`);
     console.log(`${C.brand}│  ${C.bold}${C.white}☁  CloudNest Enterprise Console${C.reset} ${C.brandLight}v0.1.0${C.reset}       ${C.bgPillGreen} ● ENGINE ONLINE ${C.reset}  ${C.dim}http://127.0.0.1:8787${C.reset} ${C.brand}│${C.reset}`);
     console.log(`${C.brand}╰──────────────────────────────────────────────────────────────────────────────────────────╯${C.reset}`);
 
+    // ── Section 1: System Specs & Storage Summary ──
     console.log(`${C.border}╭─ ${C.cyan}CORE ENGINE & RUNTIME${C.border} ───────────────╮╭─ ${C.cyan}STORAGE POOLS & UNIFIED QUOTA${C.border} ──────────────╮${C.reset}`);
     console.log(`${C.border}│${C.reset}  Process Memory: ${C.white}${formatBytes(mem.rss).padEnd(16)}${C.reset} ${C.border}││${C.reset}  Connected Pools:  ${C.bold}${C.white}${String(accounts.length).padEnd(20)}${C.reset} ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  Heap Active:    ${C.white}${formatBytes(mem.heapUsed).padEnd(16)}${C.reset} ${C.border}││${C.reset}  Personal Quota:   ${C.slate}${accounts.filter(a => a.tier === 'personal').length} accounts linked${C.reset}     ${C.border}│${C.reset}`);
@@ -102,6 +109,7 @@ class CloudNestTui {
     console.log(`${C.border}│${C.reset}  Database Mode:  ${C.bgPillGreen} SQLite WAL ${C.reset}     ${C.border}││${C.reset}  Pool Utilization: ${makeProgressBar(totalUsedBytes, totalUsableBytes, 12)}   ${C.border}│${C.reset}`);
     console.log(`${C.border}╰────────────────────────────────────────╯╰─────────────────────────────────────────────────╯${C.reset}`);
 
+    // ── Section 2: Storage Accounts Breakdown ──
     console.log(`${C.border}╭─ ${C.cyan}CONNECTED PROVIDER ACCOUNTS${C.border} ────────────────────────────────────────────────────────────╮${C.reset}`);
     if (accounts.length === 0) {
       console.log(`${C.border}│${C.reset}  ${C.slate}No storage accounts connected yet. Link accounts via Web Dashboard.${C.reset}${' '.repeat(22)}${C.border}│${C.reset}`);
@@ -117,9 +125,10 @@ class CloudNestTui {
     }
     console.log(`${C.border}╰──────────────────────────────────────────────────────────────────────────────────────────╯${C.reset}`);
 
+    // ── Section 3: Operations & Commands ──
     console.log(`${C.border}╭─ ${C.cyan}FILES & METRICS${C.border} ──────────────────────╮╭─ ${C.cyan}ENTERPRISE CONTROL ACTIONS${C.border} ─────────────────────╮${C.reset}`);
-    console.log(`${C.border}│${C.reset}  Library Files:  ${C.bold}${C.white}${String(fileCount).padEnd(16)}${C.reset} ${C.border}││${C.reset}  ${C.bold}${C.amber}[P]${C.reset} Reset Admin Password                    ${C.border}│${C.reset}`);
-    console.log(`${C.border}│${C.reset}  Trash Storage:  ${C.amber}${String(trashCount).padEnd(16)}${C.reset} ${C.border}││${C.reset}  ${C.bold}${C.green}[I]${C.reset} Generate One-Time Invite Token          ${C.border}│${C.reset}`);
+    console.log(`${C.border}│${C.reset}  Library Files:  ${C.bold}${C.white}${String(fileCount).padEnd(16)}${C.reset} ${C.border}││${C.reset}  ${C.bold}${C.amber}[P]${C.reset} Reset Admin Password (CLI Tool)         ${C.border}│${C.reset}`);
+    console.log(`${C.border}│${C.reset}  Trash Storage:  ${C.amber}${String(trashCount).padEnd(16)}${C.reset} ${C.border}││${C.reset}  ${C.bold}${C.green}[I]${C.reset} Generate 1-Time Password Reset Link     ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  Active Users:   ${C.white}${String(userCount).padEnd(16)}${C.reset} ${C.border}││${C.reset}  ${C.bold}${C.cyan}[V]${C.reset} Run SQLite Maintenance (VACUUM)         ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  Security Audit: ${C.green}Clean (0-vuln)${C.reset}   ${C.border}││${C.reset}  ${C.bold}${C.brandLight}[R]${C.reset} Refresh Metrics Console                 ${C.border}│${C.reset}`);
     console.log(`${C.border}│${C.reset}  SSR Firewall:   ${C.green}Protected${C.reset}        ${C.border}││${C.reset}  ${C.bold}${C.red}[Q]${C.reset} Exit Terminal Console                   ${C.border}│${C.reset}`);
@@ -169,10 +178,14 @@ class CloudNestTui {
         this.statusMessage = 'Database connection unavailable.';
       } else {
         try {
-          const token = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-          this.statusMessage = `Invite Link: http://127.0.0.1:8787/accept-invite?token=${token}`;
+          const rawToken = crypto.randomBytes(32).toString('base64url');
+          const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+          const now = new Date().toISOString();
+          const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+          db.prepare("INSERT INTO user_tokens (token_hash, user_id, purpose, expires_at, created_at) VALUES (?, 'usr_admin', 'password_reset', ?, ?)").run(tokenHash, expiresAt, now);
+          this.statusMessage = `Password Reset Link created: http://127.0.0.1:8787/accept-invite?token=${rawToken}`;
         } catch (e) {
-          this.statusMessage = `Error: ${e.message}`;
+          this.statusMessage = `Error generating token: ${e.message}`;
         } finally {
           db.close();
         }
