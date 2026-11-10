@@ -198,7 +198,7 @@ export function UploadsPage() {
    * Metadata-only plan; no file bytes are sent in this step. The queue runner
    * passes an explicit target so a state update can never race the upload.
    */
-  async function createPlan(target?: { file: File; parentId: string | null }): Promise<{ ok: boolean; jobId: string | null }> {
+  async function createPlan(target?: { file: File; parentId: string | null }): Promise<{ ok: boolean; jobId: string | null; code?: string }> {
     const file = target?.file ?? selected;
     if (!file) return { ok: false, jobId: null };
     setBusy(true);
@@ -251,7 +251,7 @@ export function UploadsPage() {
         setError(described.text);
       }
       setErrorCode(described.code || null);
-      return { ok: false, jobId: null };
+      return { ok: false, jobId: null, code: described.code || 'plan_failed' };
     } finally {
       setBusy(false);
     }
@@ -713,7 +713,7 @@ export function UploadsPage() {
         setSelected(next.file);
         const planned = await createPlan({ file: next.file, parentId: next.parentId });
         if (!planned.ok || !planned.jobId) {
-          const code = errorCode ?? 'plan_failed';
+          const code = planned.code ?? errorCode ?? 'plan_failed';
           setQueue((prev) => prev.map((q) => (q.id === next.id
             ? {
                 ...q,
@@ -792,6 +792,10 @@ export function UploadsPage() {
             onChange={(e) => {
               const picked = Array.from(e.currentTarget.files ?? []).map((file) => ({ file, relativePath: file.webkitRelativePath || null }));
               e.currentTarget.value = '';
+              if (resumeTarget && picked.length > 0) {
+                setSelected(picked[0]!.file);
+                return;
+              }
               void addFiles(picked);
             }}
           />

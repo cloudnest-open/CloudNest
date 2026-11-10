@@ -196,14 +196,16 @@ export class TunnelService {
   private readonly say: (message: string) => void;
   private readonly pathImpl: () => string | null;
   private cachedBinary: string | null | undefined = undefined;
+  private readonly port: number;
   /** Browser-authorized cert/credentials (the design §6 lifecycle owner). */
   readonly browserAuth: BrowserAuthorization;
 
   constructor(
     private readonly _dataDir: string,
-    options: TunnelServiceOptions & { keyProvider: () => CredentialKey },
+    options: TunnelServiceOptions & { keyProvider: () => CredentialKey; port?: number },
   ) {
     this.dataDir = _dataDir;
+    this.port = options.port ?? 8787;
     this.keyProvider = options.keyProvider;
     this.spawnImpl =
       options.spawnImpl ??
@@ -459,10 +461,15 @@ export class TunnelService {
       const credFile = this.materializeTempCredFile(credJson);
       const logFd = fs.openSync(paths.logFile, 'a', 0o600);
       try {
-        this.child = this.spawnImpl(binary, ['tunnel', '--no-autoupdate', 'run', '--cred-file', credFile], {
-          stdio: ['ignore', logFd, logFd],
-          detached: false,
-        });
+        fs.writeSync(logFd, `[tunnel] starting cloudflared for ${this.hostname} (origin 127.0.0.1)\n`);
+        this.child = this.spawnImpl(
+          binary,
+          ['tunnel', '--no-autoupdate', 'run', '--cred-file', credFile, '--url', `http://127.0.0.1:${this.port}`, tunnelId],
+          {
+            stdio: ['ignore', logFd, logFd],
+            detached: false,
+          },
+        );
       } finally {
         fs.closeSync(logFd);
       }

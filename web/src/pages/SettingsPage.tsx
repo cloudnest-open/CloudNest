@@ -103,6 +103,7 @@ export function SettingsPage({ onGoToCloudAccounts, initialSection }: { onGoToCl
         setSettings(data.settings);
         setSystem(data.system);
         setTunnel(data.tunnel);
+        if (data.tunnel?.hostname) setTunnelHost(data.tunnel.hostname);
       } else {
         setError(t.settings.errorLoad);
       }
@@ -603,7 +604,7 @@ export function SettingsPage({ onGoToCloudAccounts, initialSection }: { onGoToCl
                 id="tunnel-host"
                 type="text"
                 placeholder="cloudnest.example.com"
-                value={tunnelHost || tunnel.hostname || ''}
+                value={tunnelHost}
                 onChange={(e) => setTunnelHost(e.target.value)}
               />
               <p className="muted small">{t.settings.domain.authorizedNote}</p>
@@ -615,12 +616,12 @@ export function SettingsPage({ onGoToCloudAccounts, initialSection }: { onGoToCl
               <button
                 type="button"
                 className="btn-primary"
-                disabled={busy || !tunnelHost}
+                disabled={busy || !tunnelHost.trim()}
                 onClick={async () => {
                   setBusy(true);
                   setError(null);
                   setDnsResult(null);
-                  const res = await api.startTunnel(tunnelHost);
+                  const res = await api.startTunnel(tunnelHost.trim());
                   if (res.status === 200) {
                     const data = res.data as { status: TunnelInfo; actions: string[] };
                     setTunnel(data.status);

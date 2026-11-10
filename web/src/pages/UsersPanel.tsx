@@ -228,7 +228,7 @@ export function UsersPanel() {
             {users.map((user) => {
               // the built-in root admin is the instance's anchor account: the
               // server refuses to edit or remove it, so the UI says so too
-              const builtIn = user.email === 'admin' && user.role === 'admin';
+              const builtIn = user.id === 'usr_admin';
               return (
                 <tr key={user.id}>
                   <td>
@@ -251,7 +251,9 @@ export function UsersPanel() {
                       onClick={() => {
                         setEditTarget(user);
                         setEditRole(user.role);
-                        setEditAllowance(user.allowanceBytes === null ? '' : String(user.allowanceBytes / (1024 * 1024 * 1024)));
+                        const isTb = user.allowanceBytes !== null && user.allowanceBytes >= 1024 * 1024 * 1024 * 1024 && user.allowanceBytes % (1024 * 1024 * 1024 * 1024) === 0;
+                        setEditAllowanceUnit(isTb ? 'tb' : 'gb');
+                        setEditAllowance(user.allowanceBytes === null ? '' : String(user.allowanceBytes / (1024 * 1024 * 1024 * (isTb ? 1024 : 1))));
                       }}
                     >
                       {t.users.actions.edit}

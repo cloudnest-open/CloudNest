@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.js';
 import { AcceptInvitePage } from './pages/EntryPage.js';
+import { PublicSharePage } from './pages/PublicSharePage.js';
 import { I18nProvider } from './i18n-context.js';
 import { UiModeProvider } from './ui-mode-context.js';
 // Self-hosted Inter (OFL-licensed, no CDN) — the reference design's typeface.
@@ -14,10 +15,11 @@ import './styles.css';
 const container = document.getElementById('root');
 if (!container) throw new Error('Root element #root not found');
 
-// Roadmap Phase 3: the one-time invite/reset URL is its own top-level route —
-// it must render for a visitor with no session at all. Anything else is the
-// app shell.
+// Roadmap Phase 3 & 4: one-time invite/reset URL and public file share links
+// are top-level routes that render for anonymous visitors with no session.
 const isAcceptRoute = window.location.pathname === '/accept-invite';
+const isPublicShareRoute =
+  window.location.pathname.startsWith('/s/') && !window.location.pathname.startsWith('/s/d/');
 
 createRoot(container).render(
   <StrictMode>
@@ -34,6 +36,8 @@ createRoot(container).render(
               window.location.assign('/');
             }}
           />
+        ) : isPublicShareRoute ? (
+          <PublicSharePage />
         ) : (
           <App />
         )}

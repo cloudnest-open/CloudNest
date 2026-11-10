@@ -63,7 +63,14 @@ export class TrashService {
   restore(ownerUserId: string | null, fileId: string): void {
     const file = this.fileFor(ownerUserId, fileId);
     if (file.trashed_at === null) throw new TrashError('file_not_trashed', 409);
-    this.db.prepare('UPDATE files SET trashed_at = NULL WHERE id = ?').run(fileId);
+    const txn = this.db.transaction(() => {
+      // If a deletion was queued or pending, cancel it so a subsequent sweep does not purge the restored file
+      this.db.prepare(
+        "UPDATE transfer_jobs SET state = 'cancelled', updated_at = ? WHERE file_id = ? AND job_type = 'delete' AND state IN ('queued','deletion_pending')",
+      ).run(new Date().toISOString(), fileId);
+      this.db.prepare("UPDATE files SET trashed_at = NULL, state = 'completed' WHERE id = ?").run(fileId);
+    });
+    txn();
   }
 
   /** Enqueue the REAL deletion (the durable engine takes it from here). */
@@ -93,11 +100,11 @@ export class TrashService {
   }
 
   /** Empty the caller's trash: every trashed file goes to the deletion engine. */
-  empty(ownerUserId: string | null): number {
+  empty(ownerUserId: string | null, tier: string | null = null): number {
     const rows = this.db.prepare(
       `SELECT id, state FROM files WHERE trashed_at IS NOT NULL AND state <> 'deleted'
-         AND state <> 'deletion_pending' AND (? IS NULL OR user_id = ?)`,
-    ).all(ownerUserId, ownerUserId) as Array<{ id: string; state: string }>;
+         AND state <> 'deletion_pending' AND (? IS NULL OR user_id = ?) AND (? IS NULL OR tier = ?)`,
+    ).all(ownerUserId, ownerUserId, tier, tier) as Array<{ id: string; state: string }>;
     for (const row of rows) this.enqueueDeletion(row.id);
     return rows.length;
   }

@@ -286,7 +286,7 @@ export function FilesPage({ initialSearch = '', onGoToCloudAccounts, onGoToUploa
 
   async function emptyTrash(): Promise<void> {
     setEmptyTrashOpen(false);
-    const res = await api.emptyTrash();
+    const res = await api.emptyTrash(tier);
     if (res.status === 200) {
       await load();
     } else {

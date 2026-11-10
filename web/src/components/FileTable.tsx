@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Copy, FolderInput, Info, Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
+import { Copy, Download, FolderInput, Info, Pencil, Share2 as ShareIcon, Trash2, X } from 'lucide-react';
 import { useFileActions } from './FileActionsProvider.js';
 import { Badge, RowMenu, RowMenuItem, TypeIcon, formatBytes, formatDateTime, PROVIDER_LABELS, fileTypeName, fileTypeDisplay } from './ui.js';
 import { ProviderLogo } from './ProviderLogo.js';
@@ -192,6 +192,13 @@ export function FileTable({ rows, reload, footer, resetKey, onDetails }: FileTab
                     {t.table.share}
                   </button>
                   <RowMenu label={t.table.actions}>
+                    <RowMenuItem
+                      disabled={file.state !== 'completed'}
+                      onSelect={() => actions.download(file)}
+                    >
+                      <Download size={14} aria-hidden="true" />
+                      {t.downloads.download}
+                    </RowMenuItem>
                     {onDetails && (
                       <RowMenuItem onSelect={() => onDetails(file)}>
                         <Info size={14} aria-hidden="true" />

@@ -40,6 +40,8 @@ interface FileActionsApi {
   move: (files: ActionableFile[], reload?: Reload) => void;
   /** Opens the mirror dialog for one completed file (roadmap Phase 5 §4.5). */
   mirror: (file: ActionableFile, reload?: Reload) => void;
+  /** Initiates a browser-native download of the file. */
+  download: (file: ActionableFile) => void;
 }
 
 const FileActionsContext = createContext<FileActionsApi | null>(null);
@@ -165,7 +167,7 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
         fileIds: dialog.files.map((f) => f.id),
         ...(sharePassword ? { password: sharePassword } : {}),
         expiresAt,
-        downloadLimit: shareLimit ? Number(shareLimit) : null,
+        downloadLimit: shareLimit ? Number(shareLimit) : undefined,
       });
       if (res.status === 201) {
         const url = (res.data as { url: string }).url;
@@ -356,7 +358,18 @@ export function FileActionsProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const actions: FileActionsApi = { share, shareMany, rename, remove, removeMany, move, mirror: (file, reload) => void openMirror(file, reload) };
+  function download(file: ActionableFile): void {
+    if (file.state !== 'completed') return;
+    toast.push({ kind: 'info', title: tf(t.downloads.starting, { name: file.originalName }) });
+    const anchor = document.createElement('a');
+    anchor.href = api.downloadUrl(file.id);
+    anchor.download = file.originalName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+
+  const actions: FileActionsApi = { share, shareMany, rename, remove, removeMany, move, mirror: (file, reload) => void openMirror(file, reload), download };
 
   return (
     <FileActionsContext.Provider value={actions}>

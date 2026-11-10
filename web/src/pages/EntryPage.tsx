@@ -34,7 +34,7 @@ const SUPPORT_URL = 'https://github.com/cloudnest-open/CloudNest/blob/main/SUPPO
 const PRIVACY_URL = 'https://github.com/cloudnest-open/CloudNest/blob/main/PRIVACY.md';
 
 /** The approved CloudNest cloud mark, reused from the app's sidebar brand. */
-function BrandLockup({ markSize, className }: { markSize: number; className: string }) {
+export function BrandLockup({ markSize, className }: { markSize: number; className: string }) {
   return (
     <span className={`entry-lockup ${className}`}>
       <Cloud size={markSize} strokeWidth={2.3} className="entry-lockup-mark" aria-hidden="true" />
@@ -45,7 +45,7 @@ function BrandLockup({ markSize, className }: { markSize: number; className: str
   );
 }
 
-function ThemePill({ theme, onSet, t }: { theme: Theme; onSet: (next: Theme) => void; t: EntryStrings }) {
+export function ThemePill({ theme, onSet, t }: { theme: Theme; onSet: (next: Theme) => void; t: EntryStrings }) {
   return (
     <div className="entry-theme-pill" role="group" aria-label={theme === 'light' ? t.theme.toDark : t.theme.toLight}>
       <button
@@ -72,7 +72,7 @@ function ThemePill({ theme, onSet, t }: { theme: Theme; onSet: (next: Theme) => 
   );
 }
 
-function EntryHeader({ e, theme, onSetTheme }: {
+export function EntryHeader({ e, theme, onSetTheme }: {
   e: EntryStrings;
   theme: Theme;
   onSetTheme: (next: Theme) => void;
@@ -320,7 +320,7 @@ function EntryHero({ e }: { e: EntryStrings }) {
   );
 }
 
-function PasswordField({ id, label, value, onChange, autoComplete, minLength, e }: {
+export function PasswordField({ id, label, value, onChange, autoComplete, minLength, e }: {
   id: string;
   label: string;
   value: string;
@@ -493,7 +493,7 @@ function SetupForm({ e, serverUnreachable, onDone }: { e: EntryStrings; serverUn
   );
 }
 
-function EntryFooter({ e, theme, onSetTheme }: { e: EntryStrings; theme: Theme; onSetTheme: (next: Theme) => void }) {
+export function EntryFooter({ e, theme, onSetTheme }: { e: EntryStrings; theme: Theme; onSetTheme: (next: Theme) => void }) {
   const [health, setHealth] = useState<'ok' | 'unverified'>('unverified');
   useEffect(() => {
     let cancelled = false;

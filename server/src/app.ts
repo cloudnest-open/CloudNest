@@ -127,6 +127,7 @@ export function createApp(options: {
     // the tunnel runtime token is encrypted with the SAME credential key the
     // provider credentials use; the key never leaves the process
     keyProvider: () => credentialsStore.getKey(),
+    port: options.port,
   });
 
   // 1b. Host/Origin enforcement (M12.b): only loopback names, the configured
@@ -315,7 +316,7 @@ export function createApp(options: {
   // Roadmap Phase 4: folders, trash and the bell's feed (principal-scoped;
   // mutations CSRF-protected inside the router). Phase 5 adds the mirror
   // endpoints on the same principal+CSRF discipline.
-  app.use(filesRouter({ queries, csrf, folders, trash, notifications, uploads, mirror }));
+  app.use(filesRouter({ queries, csrf, folders, trash, notifications, uploads, mirror, deletions }));
 
   // Roadmap Phase 5: per-provider reliability metrics for the health badge
   // (admin-only inside the router — accounts are admin knowledge).

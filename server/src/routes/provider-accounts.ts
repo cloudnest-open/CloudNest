@@ -15,10 +15,12 @@ import { callbackUri, oauthEndpoints } from '../providers/oauth-endpoints.js';
 import { refreshOneAccountQuota, refreshAllAccountQuotas } from '../services/quota-refresh.js';
 
 /** Public shape: never includes tokens, ciphertext, or key material. */
-function toPublic(row: ProviderAccountRow) {
+function toPublic(row: ProviderAccountRow, s3Overrides?: Map<string, { totalBytes: number | null; usedBytes: number | null }>) {
   const adapter = getAdapter(row.provider);
-  const total = row.quota_total_bytes;
-  const used = row.used_bytes;
+  const s3Override = row.provider === 's3' && s3Overrides ? s3Overrides.get(row.id) : undefined;
+  const total = s3Override !== undefined ? s3Override.totalBytes : (row.provider === 's3' && row.capacity_cap_bytes !== null && row.capacity_cap_bytes > 0 ? row.capacity_cap_bytes : row.quota_total_bytes);
+  const used = s3Override !== undefined ? s3Override.usedBytes : (row.provider === 's3' ? (row.used_bytes ?? 0) : row.used_bytes);
+  const quotaStatus = row.provider === 's3' ? (total !== null ? 'current' : 'unknown') : row.quota_status;
   const availableBytes =
     total !== null && used !== null
       ? Math.max(0, total - used - row.reserve_bytes - row.reserved_inflight_bytes)
@@ -37,7 +39,7 @@ function toPublic(row: ProviderAccountRow) {
       totalBytes: total,
       usedBytes: used,
       availableBytes,
-      status: row.quota_status,
+      status: quotaStatus,
       /** Provider-documented unlimited quota — shown as "Unlimited", never 0 B. */
       unlimited: row.quota_unlimited === 1,
       lastCheckedAt: row.last_quota_check_at,
@@ -78,9 +80,10 @@ export function providerAccountsRouter(deps: {
     // Disconnect-warning data (task §5.A): how many live files reference each
     // account. One grouped query for the whole list — never per-row.
     const usage = accounts.trackedUsage();
+    const s3Overrides = accounts.s3QuotaOverrides();
     res.json({
       accounts: accounts.list().map((row) => ({
-        ...toPublic(row),
+        ...toPublic(row, s3Overrides),
         usage: usage.get(row.id) ?? { trackedFiles: 0, trackedChunks: 0 },
       })),
     });
@@ -191,7 +194,7 @@ export function providerAccountsRouter(deps: {
         return;
       }
       queries.recordAudit('provider_quota_scope_set', true, body.provider, { count: updated.filter((r) => r.quota_scope !== null).length });
-      res.json({ accounts: updated.map(toPublic) });
+      res.json({ accounts: updated.map((r) => toPublic(r)) });
     } catch (err) {
       if (err instanceof ProviderError) {
         res.status(err.httpStatus).json({ error: err.safeCode, code: err.safeCode });
@@ -342,10 +345,19 @@ export function providerAccountsRouter(deps: {
         bundle = { schemaVersion: 1, provider: 's3', endpoint, region, accessKeyId, secretAccessKey, bucket, prefix: `${prefixRaw.replace(/\/+$/, '')}/` };
         const identity = await adapter.connectAndReadAccount(bundle);
         accountIdentifier = identity.providerAccountId;
-        const { row: updated } = accounts.upsertConnection({ provider: 's3', account: identity, bundle, tier: 'business' });
+        let updated = accounts.updateCredentials(row.id, bundle, identity);
+        if (typeof body['providerName'] === 'string' && body['providerName'].trim()) {
+          updated = accounts.setProviderDisplayName(row.id, (body['providerName'] as string).trim());
+        }
+        if (body['capacityCapBytes'] !== undefined) {
+          const cap = typeof body['capacityCapBytes'] === 'number' && Number.isInteger(body['capacityCapBytes']) && body['capacityCapBytes'] > 0
+            ? body['capacityCapBytes']
+            : null;
+          updated = accounts.setCapacityCap(row.id, cap);
+        }
         queries.recordAudit('provider_credentials_replaced', true, 's3', { accountId: updated.id });
         (req.body as Record<string, unknown>)['secretAccessKey'] = undefined;
-        res.json({ ok: true, account: toPublic(updated) });
+        res.json({ ok: true, account: toPublic(updated, accounts.s3QuotaOverrides()) });
         return;
       }
       // mega
@@ -360,7 +372,7 @@ export function providerAccountsRouter(deps: {
       }
       bundle = { schemaVersion: 1, provider: 'mega', email, password, ...(secondFactorCode ? { secondFactorCode } : {}) };
       const identity = await adapter.connectAndReadAccount(bundle);
-      const { row: updated } = accounts.upsertConnection({ provider: 'mega', account: identity, bundle });
+      const updated = accounts.updateCredentials(row.id, bundle, identity);
       queries.recordAudit('provider_credentials_replaced', true, 'mega', { accountId: updated.id });
       (req.body as Record<string, unknown>)['password'] = undefined;
       res.json({ ok: true, account: toPublic(updated) });

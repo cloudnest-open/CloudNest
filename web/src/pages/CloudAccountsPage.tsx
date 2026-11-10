@@ -436,6 +436,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
     setError(null);
     const account = editTarget;
     await withBusy(account.id, async () => {
+      const capBytes = editCap.trim() ? Number(editCap.trim()) : null;
       const body: Record<string, unknown> = account.provider === 's3'
         ? {
             endpoint: editEndpoint.trim(),
@@ -444,6 +445,8 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
             secretAccessKey: editSecret,
             bucket: editBucket.trim(),
             prefix: editPrefix.trim() || 'cloudnest',
+            providerName: editProviderName.trim() || null,
+            capacityCapBytes: capBytes !== null && Number.isInteger(capBytes) && capBytes > 0 ? capBytes : null,
           }
         : {
             email: editEmail.trim(),
@@ -705,6 +708,8 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
                   <input id="edit-prefix" type="text" placeholder="cloudnest" value={editPrefix} onChange={(e) => setEditPrefix(e.target.value)} />
                   <label htmlFor="edit-name">{t.accounts.s3.providerName}</label>
                   <input id="edit-name" type="text" placeholder={t.accounts.s3.providerNamePlaceholder} value={editProviderName} onChange={(e) => setEditProviderName(e.target.value)} />
+                  <label htmlFor="edit-cap">{t.accounts.s3.cap}</label>
+                  <input id="edit-cap" type="number" min="1" step="1" inputMode="numeric" value={editCap} onChange={(e) => setEditCap(e.target.value)} />
                 </>
               ) : (
                 <>
@@ -934,7 +939,7 @@ export function CloudAccountsPage({ onGoToSettings }: { onGoToSettings: () => vo
             <button
               type="button"
               className="btn-primary"
-              disabled={busyId === '__scope__' || scopeSelection.length < 1}
+              disabled={busyId === '__scope__' || new Set([scopeTarget.id, ...scopeSelection]).size < 2}
               onClick={() => void saveScope(false)}
             >
               {t.accounts.sharedPool.save}

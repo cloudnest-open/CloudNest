@@ -148,7 +148,45 @@ interface ProviderSlot {
   lastCheckAt?: string | null;
 }
 
-function buildProviderSlots(accounts: AccountDetail[]): ProviderSlot[] {
+function buildProviderSlots(accounts: AccountDetail[], tier: 'personal' | 'business' = 'personal'): ProviderSlot[] {
+  if (tier === 'business') {
+    const list = accounts.filter((a) => a.provider === 's3');
+    if (list.length === 0) {
+      return [{
+        provider: 's3',
+        label: 'S3-compatible',
+        status: 'muted',
+        statusKey: 'notConnected',
+        usedBytes: null,
+        totalBytes: null,
+        unlimited: false,
+        experimental: false,
+        action: 'connect',
+      }];
+    }
+    return list.map((a) => {
+      const hasError = a.status === 'error';
+      const needsReauth = a.status === 'needs_reauth';
+      const isDisconnected = a.status === 'disconnected';
+      let status: ProviderSlot['status'] = 'ok';
+      let statusKey: ProviderSlot['statusKey'] = 'connected';
+      if (hasError) { status = 'bad'; statusKey = 'error'; }
+      else if (needsReauth) { status = 'warn'; statusKey = 'needsAttention'; }
+      else if (isDisconnected) { status = 'muted'; statusKey = 'notConnected'; }
+      else if (a.quotaStatus !== 'current') { status = 'warn'; statusKey = 'quotaStale'; }
+      return {
+        provider: 's3',
+        label: a.displayLabel || 'S3-compatible',
+        status,
+        statusKey,
+        usedBytes: a.quotaUsedBytes,
+        totalBytes: a.quotaTotalBytes,
+        unlimited: false,
+        experimental: false,
+        action: isDisconnected ? 'connect' : 'manage',
+      };
+    });
+  }
   return PROVIDER_ORDER.map((provider) => {
     const label = PROVIDER_LABELS[provider] ?? provider;
     const list = accounts.filter((a) => a.provider === provider);
@@ -353,7 +391,7 @@ export function DashboardPage({ onNavigate, isMember = false }: { onNavigate: (p
   );
   const connected = accounts.filter((a) => a.status === 'connected').length;
   const attention = accounts.filter((a) => a.status !== 'connected' || a.quotaStatus !== 'current').length;
-  const slots = buildProviderSlots(accounts).map((slot) => {
+  const slots = buildProviderSlots(accounts, tier).map((slot) => {
     const health = providerHealth?.[slot.provider];
     return health
       ? { ...slot, health: health.health as ProviderSlot['health'], lastCheckAt: health.lastCheckAt }

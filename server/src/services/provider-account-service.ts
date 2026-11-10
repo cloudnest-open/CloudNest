@@ -83,6 +83,33 @@ export class ProviderAccountService {
     return { row: this.queries.getAccount.get(id) as ProviderAccountRow, reconnected: false };
   }
 
+  /** Update credentials on a specific account id (e.g. S3/MEGA edit dialog). */
+  updateCredentials(id: string, bundle: ProviderCredentialBundle, identity: NormalizedAccount): ProviderAccountRow {
+    const row = this.queries.getAccount.get(id) as ProviderAccountRow | undefined;
+    if (!row) throw new ProviderError('identity_validation_failed', 404, 'account not found');
+    const now = new Date().toISOString();
+    const blobParams = this.blobParamsFor(row.provider, id, bundle);
+    this.db.prepare(
+      `UPDATE provider_accounts SET
+        account_identifier = @account_identifier,
+        status = 'connected',
+        last_error_code = NULL,
+        last_error_at = NULL,
+        credential_ciphertext = @credential_ciphertext,
+        credential_nonce = @credential_nonce,
+        credential_auth_tag = @credential_auth_tag,
+        credential_key_version = @credential_key_version,
+        updated_at = @updated_at
+       WHERE id = @id`,
+    ).run({
+      id,
+      account_identifier: identity.providerAccountId,
+      ...blobParams,
+      updated_at: now,
+    });
+    return this.queries.getAccount.get(id) as ProviderAccountRow;
+  }
+
   private blobParamsFor(provider: string, accountId: string, bundle: ProviderCredentialBundle) {
     const key = this.store.getKey();
     const blob = encrypt(JSON.stringify(bundle), key, `account_credentials:${provider}:${accountId}`);

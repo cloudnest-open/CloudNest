@@ -1,3 +1,8 @@
+if (!/^24\./.test(process.versions.node)) {
+  console.error(`[cloudnest] CloudNest requires Node.js 24.x (current version: ${process.versions.node}). See .nvmrc.`);
+  process.exit(1);
+}
+
 import 'dotenv/config';
 import { createApp } from './app.js';
 import { loadConfig } from './config/env.js';

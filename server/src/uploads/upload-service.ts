@@ -645,18 +645,8 @@ export class UploadService {
   }
 
   private recomputeReservedInflight(jobId: string): void {
-    const allocs = this.q.listAllAllocationsForJob.all(jobId) as Array<{ provider_account_id: string; size_bytes: number; state: string }>;
-    const perAccount = new Map<string, number>();
-    for (const a of allocs) {
-      if (a.state === 'reserved' || a.state === 'uploading' || a.state === 'uploaded_pending_quota') {
-        perAccount.set(a.provider_account_id, (perAccount.get(a.provider_account_id) ?? 0) + a.size_bytes);
-      }
-    }
-    const now = new Date().toISOString();
-    for (const [accountId, bytes] of perAccount) {
-      this.db.prepare('UPDATE provider_accounts SET reserved_inflight_bytes = ?, updated_at = ? WHERE id = ?')
-        .run(bytes, now, accountId);
-    }
+    void jobId;
+    this.recomputeAllReservations();
   }
 
   /** Recompute every account's reserved_inflight_bytes from durable rows. */
@@ -1581,7 +1571,6 @@ export class UploadService {
       id: a.id, provider: a.provider, displayLabel: a.display_label,
       status: a.status, quotaStatus: a.quota_status, tier: a.tier,
     }));
-    const jobs = this.listJobs(200, userId, tier);
     // honest active-job count: the 200-row listing page above must not bound
     // this number, so it is its own COUNT (same upload-job scope as the list)
     const activeJobs = userId === null

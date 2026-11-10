@@ -165,8 +165,8 @@ export function SharedLinksPage() {
       const res = await api.createShareLink({
         fileIds: selected,
         ...(password ? { password } : {}),
-        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
-        downloadLimit: downloadLimit ? Number(downloadLimit) : null,
+        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
+        downloadLimit: downloadLimit ? Number(downloadLimit) : undefined,
       });
       if (res.status === 201) {
         setCreatedUrl((res.data as { url: string }).url);

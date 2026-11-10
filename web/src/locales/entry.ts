@@ -97,6 +97,22 @@ const en = {
   theme: { toDark: 'Switch to dark theme', toLight: 'Switch to light theme' },
   lang: { label: 'Change language' },
   illu: { synced: 'Files synced', secure: 'Secure & Private' },
+  share: {
+    title: 'Shared Files',
+    subtitle: 'The files below have been shared with you via CloudNest.',
+    passwordRequired: 'This shared link is password-protected.',
+    passwordPlaceholder: 'Enter password to unlock',
+    unlock: 'Unlock Files',
+    unlocking: 'Unlocking…',
+    download: 'Download',
+    downloadAll: 'Download All',
+    expiredOrNotFound: 'This share link is invalid, expired, or has been revoked.',
+    limitReached: 'This share link has reached its download limit.',
+    empty: 'No files are available in this link.',
+    preparing: 'Preparing download…',
+    errorInvalidPassword: 'Incorrect password. Please try again.',
+    filesCount: '{count} file(s) available',
+  },
 };
 
 export type EntryStrings = typeof en;
@@ -165,6 +181,22 @@ const zhCN: EntryStrings = {
   theme: { toDark: '切换到深色主题', toLight: '切换到浅色主题' },
   lang: { label: '选择语言' },
   illu: { synced: '文件已同步', secure: '安全且私密' },
+  share: {
+    title: '共享文件',
+    subtitle: '以下文件已通过 CloudNest 与您共享。',
+    passwordRequired: '此共享链接受密码保护。',
+    passwordPlaceholder: '输入密码以解锁',
+    unlock: '解锁文件',
+    unlocking: '解锁中…',
+    download: '下载',
+    downloadAll: '全部下载',
+    expiredOrNotFound: '此共享链接无效、已过期或已被撤回。',
+    limitReached: '此共享链接已达到下载次数限制。',
+    empty: '此链接中没有可用文件。',
+    preparing: '准备下载中…',
+    errorInvalidPassword: '密码不正确，请重试。',
+    filesCount: '{count} 个可用文件',
+  },
 };
 
 const es: EntryStrings = {
@@ -231,6 +263,22 @@ const es: EntryStrings = {
   theme: { toDark: 'Cambiar al tema oscuro', toLight: 'Cambiar al tema claro' },
   lang: { label: 'Cambiar idioma' },
   illu: { synced: 'Archivos sincronizados', secure: 'Seguro y privado' },
+  share: {
+    title: 'Archivos compartidos',
+    subtitle: 'Los siguientes archivos han sido compartidos contigo a través de CloudNest.',
+    passwordRequired: 'Este enlace compartido está protegido con contraseña.',
+    passwordPlaceholder: 'Introduce la contraseña para desbloquear',
+    unlock: 'Desbloquear archivos',
+    unlocking: 'Desbloqueando…',
+    download: 'Descargar',
+    downloadAll: 'Descargar todo',
+    expiredOrNotFound: 'Este enlace compartido no es válido, ha caducado o ha sido revocado.',
+    limitReached: 'Este enlace compartido ha alcanzado su límite de descargas.',
+    empty: 'No hay archivos disponibles en este enlace.',
+    preparing: 'Preparando descarga…',
+    errorInvalidPassword: 'Contraseña incorrecta. Inténtalo de nuevo.',
+    filesCount: '{count} archivo(s) disponible(s)',
+  },
 };
 
 const de: EntryStrings = {
@@ -297,6 +345,22 @@ const de: EntryStrings = {
   theme: { toDark: 'Zum dunklen Design wechseln', toLight: 'Zum hellen Design wechseln' },
   lang: { label: 'Sprache wählen' },
   illu: { synced: 'Dateien synchronisiert', secure: 'Sicher & privat' },
+  share: {
+    title: 'Geteilte Dateien',
+    subtitle: 'Die folgenden Dateien wurden über CloudNest mit Ihnen geteilt.',
+    passwordRequired: 'Dieser geteilte Link ist passwortgeschützt.',
+    passwordPlaceholder: 'Passwort zum Entsperren eingeben',
+    unlock: 'Dateien entsperren',
+    unlocking: 'Entsperren…',
+    download: 'Herunterladen',
+    downloadAll: 'Alle herunterladen',
+    expiredOrNotFound: 'Dieser Freigabelink ist ungültig, abgelaufen oder wurde widerrufen.',
+    limitReached: 'Dieser Freigabelink hat sein Download-Limit erreicht.',
+    empty: 'In diesem Link sind keine Dateien verfügbar.',
+    preparing: 'Download wird vorbereitet…',
+    errorInvalidPassword: 'Falsches Passwort. Bitte versuchen Sie es erneut.',
+    filesCount: '{count} Datei(en) verfügbar',
+  },
 };
 
 const ru: EntryStrings = {
@@ -363,6 +427,22 @@ const ru: EntryStrings = {
   theme: { toDark: 'Переключить на тёмную тему', toLight: 'Переключить на светлую тему' },
   lang: { label: 'Выбрать язык' },
   illu: { synced: 'Синхронизировано', secure: 'Безопасно и приватно' },
+  share: {
+    title: 'Общие файлы',
+    subtitle: 'Следующие файлы были предоставлены вам через CloudNest.',
+    passwordRequired: 'Эта ссылка защищена паролем.',
+    passwordPlaceholder: 'Введите пароль для разблокировки',
+    unlock: 'Разблокировать файлы',
+    unlocking: 'Разблокировка…',
+    download: 'Скачать',
+    downloadAll: 'Скачать все',
+    expiredOrNotFound: 'Эта ссылка недействительна, устарела или была отозвана.',
+    limitReached: 'Для этой ссылки исчерпан лимит скачиваний.',
+    empty: 'По этой ссылке нет доступных файлов.',
+    preparing: 'Подготовка к скачиванию…',
+    errorInvalidPassword: 'Неверный пароль. Попробуйте снова.',
+    filesCount: '{count} доступных файл(ов)',
+  },
 };
 
 const fr: EntryStrings = {
@@ -429,6 +509,22 @@ const fr: EntryStrings = {
   theme: { toDark: 'Passer au thème sombre', toLight: 'Passer au thème clair' },
   lang: { label: 'Choisir la langue' },
   illu: { synced: 'Fichiers synchronisés', secure: 'Sécurisé et privé' },
+  share: {
+    title: 'Fichiers partagés',
+    subtitle: 'Les fichiers ci-dessous ont été partagés avec vous via CloudNest.',
+    passwordRequired: 'Ce lien partagé est protégé par un mot de passe.',
+    passwordPlaceholder: 'Entrez le mot de passe pour déverrouiller',
+    unlock: 'Déverrouiller les fichiers',
+    unlocking: 'Déverrouillage…',
+    download: 'Télécharger',
+    downloadAll: 'Tout télécharger',
+    expiredOrNotFound: 'Ce lien de partage est invalide, expiré ou a été révoqué.',
+    limitReached: 'Ce lien de partage a atteint sa limite de téléchargement.',
+    empty: 'Aucun fichier disponible dans ce lien.',
+    preparing: 'Préparation du téléchargement…',
+    errorInvalidPassword: 'Mot de passe incorrect. Veuillez réessayer.',
+    filesCount: '{count} fichier(s) disponible(s)',
+  },
 };
 
 const ja: EntryStrings = {
@@ -495,6 +591,22 @@ const ja: EntryStrings = {
   theme: { toDark: 'ダークテーマに切り替え', toLight: 'ライトテーマに切り替え' },
   lang: { label: '言語を選択' },
   illu: { synced: 'ファイル同期済み', secure: '安全・プライベート' },
+  share: {
+    title: '共有ファイル',
+    subtitle: '以下のファイルが CloudNest 経由で共有されました。',
+    passwordRequired: 'この共有リンクはパスワードで保護されています。',
+    passwordPlaceholder: 'パスワードを入力してロック解除',
+    unlock: 'ファイルのロック解除',
+    unlocking: 'ロック解除中…',
+    download: 'ダウンロード',
+    downloadAll: 'すべてダウンロード',
+    expiredOrNotFound: 'この共有リンクは無効、期限切れ、または取り消されています。',
+    limitReached: 'この共有リンクはダウンロード上限に達しました。',
+    empty: 'このリンクにはファイルがありません。',
+    preparing: 'ダウンロードを準備中…',
+    errorInvalidPassword: 'パスワードが正しくありません。もう一度お試しください。',
+    filesCount: '{count} 件のファイルが利用可能です',
+  },
 };
 
 const ptBR: EntryStrings = {
@@ -561,6 +673,22 @@ const ptBR: EntryStrings = {
   theme: { toDark: 'Mudar para o tema escuro', toLight: 'Mudar para o tema claro' },
   lang: { label: 'Selecionar idioma' },
   illu: { synced: 'Arquivos sincronizados', secure: 'Seguro e privado' },
+  share: {
+    title: 'Arquivos Compartilhados',
+    subtitle: 'Os arquivos abaixo foram compartilhados com você pelo CloudNest.',
+    passwordRequired: 'Este link compartilhado é protegido por senha.',
+    passwordPlaceholder: 'Digite a senha para desbloquear',
+    unlock: 'Desbloquear arquivos',
+    unlocking: 'Desbloqueando…',
+    download: 'Baixar',
+    downloadAll: 'Baixar tudo',
+    expiredOrNotFound: 'Este link de compartilhamento é inválido, expirou ou foi revogado.',
+    limitReached: 'Este link de compartilhamento atingiu o limite de downloads.',
+    empty: 'Nenhum arquivo disponível neste link.',
+    preparing: 'Preparando download…',
+    errorInvalidPassword: 'Senha incorreta. Tente novamente.',
+    filesCount: '{count} arquivo(s) disponível(is)',
+  },
 };
 
 export const entryStrings: Record<Locale, EntryStrings> = {

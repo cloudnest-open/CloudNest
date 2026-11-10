@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { formatBytes, formatDateTime, useToast } from '../components/ui.js';
+import { formatBytes, formatDateTime, pageList, useToast } from '../components/ui.js';
 import { useI18n } from '../i18n-context.js';
 import { useUiMode } from '../ui-mode-context.js';
 
@@ -47,6 +47,11 @@ export function DownloadsPage() {
   const toast = useToast();
   const [downloads, setDownloads] = useState<DownloadView[]>([]);
   const [files, setFiles] = useState<FileView[]>([]);
+  const [filesTotal, setFilesTotal] = useState(0);
+  const [fileSearch, setFileSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [filePage, setFilePage] = useState(0);
+  const FILE_PAGE_SIZE = 50;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -58,9 +63,16 @@ export function DownloadsPage() {
     setLoading(true);
     // FE-04: a failed load must explain itself and offer a retry path
     try {
-      const [d, f] = await Promise.all([api.listDownloads(50, 0, tier), api.listFiles(100, 0, '', undefined, tier)]);
+      const [d, f] = await Promise.all([
+        api.listDownloads(50, 0, tier),
+        api.listFiles(FILE_PAGE_SIZE, filePage * FILE_PAGE_SIZE, appliedSearch, undefined, tier),
+      ]);
       if (d.status === 200) setDownloads((d.data as { downloads: DownloadView[] }).downloads ?? []);
-      if (f.status === 200) setFiles((f.data as { files: FileView[] }).files ?? []);
+      if (f.status === 200) {
+        const data = f.data as { files: FileView[]; total: number };
+        setFiles(data.files ?? []);
+        setFilesTotal(data.total ?? 0);
+      }
       if (d.status !== 200 && f.status !== 200) {
         setError(t.downloads.errorLoad);
       } else {
@@ -72,11 +84,19 @@ export function DownloadsPage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads are user/poll-driven; a language change must not re-fetch
-  }, [tier]);
+  }, [tier, filePage, appliedSearch]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setFilePage(0);
+      setAppliedSearch(fileSearch.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [fileSearch]);
 
   // FE-09: real server-side byte progress is only useful if it is visible.
   // While any download job is running, poll the list; stop when none is.
@@ -169,18 +189,14 @@ export function DownloadsPage() {
         }
       }
 
-      // Native fallback: the browser performs the download and manages
-      // Range/resume itself. In-app progress/resume controls are limited in
-      // this mode (disclosed in the downloads list copy).
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      // Native fallback: stream directly through the browser without buffering
+      // the whole file into tab RAM, preventing Out-Of-Memory crashes on large files.
       const anchor = document.createElement('a');
-      anchor.href = url;
+      anchor.href = api.downloadUrl(file.id);
       anchor.download = name;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      URL.revokeObjectURL(url);
       setNotice(tf(t.downloads.nativeFallback, { name }));
       setTimeout(() => void load(), 1500);
     } catch {
@@ -202,6 +218,7 @@ export function DownloadsPage() {
     .filter((f) => f.state === 'completed')
     .map((f) => ({ ...f, storedAcross: f.storedAcross ?? [] }));
   const fileNames = new Map(files.map((file) => [file.id, file.originalName]));
+  const totalPages = Math.max(1, Math.ceil(filesTotal / FILE_PAGE_SIZE));
 
   return (
     <>
@@ -216,10 +233,22 @@ export function DownloadsPage() {
       {error && <div className="card error-card" role="alert"><p>{error}</p></div>}
 
       <section className="card">
-        <h2>{t.downloads.available}</h2>
+        <div className="card-head">
+          <h2>{t.downloads.available}</h2>
+          <div className="card-tools">
+            <input
+              type="search"
+              aria-label={t.files.searchLabel}
+              placeholder={t.files.searchPlaceholder}
+              value={fileSearch}
+              onChange={(e) => setFileSearch(e.target.value)}
+            />
+          </div>
+        </div>
         {downloadable.length === 0 ? (
-          <p className="muted">{t.downloads.noneAvailable}</p>
+          <p className="muted">{appliedSearch ? t.files.emptySearchBody : t.downloads.noneAvailable}</p>
         ) : (
+          <>
           <div className="table-scroll-container">
           <table className="accounts-table download-table download-available-table">
             <colgroup>
@@ -263,6 +292,48 @@ export function DownloadsPage() {
             </tbody>
           </table>
           </div>
+          {totalPages > 1 && (
+            <div className="files-footer" style={{ marginTop: 12 }}>
+              <span className="muted small">
+                {tf(t.common.showingRange, {
+                  from: filePage * FILE_PAGE_SIZE + 1,
+                  to: filePage * FILE_PAGE_SIZE + files.length,
+                  total: filesTotal,
+                })}
+              </span>
+              <nav className="pagination" aria-label={t.files.paginationAria}>
+                <button
+                  type="button"
+                  className="page-btn"
+                  disabled={filePage === 0 || loading}
+                  aria-label={t.common.previousPage}
+                  onClick={() => setFilePage((p) => Math.max(0, p - 1))}
+                >‹</button>
+                {pageList(filePage + 1, totalPages).map((p, i) =>
+                  p === 'gap' ? (
+                    <span key={`gap-${i}`} className="pagination-gap" aria-hidden="true">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      className={`page-btn${p === filePage + 1 ? ' active' : ''}`}
+                      aria-current={p === filePage + 1 ? 'page' : undefined}
+                      disabled={loading}
+                      onClick={() => setFilePage(p - 1)}
+                    >{p}</button>
+                  ),
+                )}
+                <button
+                  type="button"
+                  className="page-btn"
+                  disabled={filePage + 1 >= totalPages || loading}
+                  aria-label={t.common.nextPage}
+                  onClick={() => setFilePage((p) => Math.min(totalPages - 1, p + 1))}
+                >›</button>
+              </nav>
+            </div>
+          )}
+          </>
         )}
         <p className="muted small">{t.downloads.footnote}</p>
       </section>

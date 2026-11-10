@@ -56,6 +56,14 @@ function seedAuthorization(tunnel: TunnelService, credJson: string): void {
 
 const CRED_JSON = JSON.stringify({ TunnelID: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', AccountTag: 'acc', TunnelSecret: 'secret-body' });
 
+async function waitFor(fn: () => boolean, timeoutMs = 3000): Promise<void> {
+  const start = Date.now();
+  while (!fn()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor condition timed out');
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 test('login scrapes the authorize URL and stores the cert encrypted (plaintext removed)', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cn-tlogin-'));
   let stdoutEmit: ((chunk: string) => void) | null = null;
@@ -73,7 +81,7 @@ test('login scrapes the authorize URL and stores the cert encrypted (plaintext r
   const started = tunnel.browserAuth.startLogin();
   assert.equal(started.state, 'authorizing');
   // the URL arrives from cloudflared's own output
-  await new Promise((r) => setTimeout(r, 20));
+  await waitFor(() => tunnel.browserAuth.status().authUrl !== null);
   assert.equal(tunnel.browserAuth.status().authUrl, 'https://dash.cloudflare.com/argotunnel?aud=&ca=3');
   // the owner approves in the browser: cloudflared writes the cert, exits 0
   const loginCall = { args: ['tunnel', 'login', '--origincert', tunnel.browserAuth.plaintextCertPath()] } as { args: string[] };
@@ -82,7 +90,7 @@ test('login scrapes the authorize URL and stores the cert encrypted (plaintext r
   fs.writeFileSync(certPath, '-----BEGIN PRIVATE KEY-----\nreal-cert-body\n-----END PRIVATE KEY-----\n', { mode: 0o600 });
   // simulate cloudflared's successful exit (kill() emits exit 0 on the fake)
   (tunnel.browserAuth as unknown as { loginChild: FakeChild | null }).loginChild?.kill();
-  await new Promise((r) => setTimeout(r, 40));
+  await waitFor(() => tunnel.browserAuth.status().state === 'authorized');
   const status = tunnel.browserAuth.status();
   assert.equal(status.state, 'authorized', JSON.stringify(status));
   assert.equal(status.authUrl, null, 'the one-time URL is not retained after completion');
@@ -104,7 +112,7 @@ test('a failed login lands in the honest failed state', async () => {
   });
   const tunnel = makeTunnel(dir, spawnImpl as never);
   tunnel.browserAuth.startLogin();
-  await new Promise((r) => setTimeout(r, 40));
+  await waitFor(() => tunnel.browserAuth.status().state === 'failed');
   const status = tunnel.browserAuth.status();
   assert.equal(status.state, 'failed');
   assert.equal(status.safeErrorCode, 'tunnel_login_failed');

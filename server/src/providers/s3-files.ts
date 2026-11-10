@@ -27,6 +27,18 @@ const EMPTY_SHA256 = sha256Hex('');
 const LIST_PAGE_LIMIT = 1000;
 const LIST_MAX_PAGES = 100;
 
+function isBlockedS3Hostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().trim();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0' || host === '[::1]') return true;
+  if (/^127\.\d+\.\d+\.\d+$/.test(host)) return true;
+  if (/^10\.\d+\.\d+\.\d+$/.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(host)) return true;
+  if (/^192\.168\.\d+\.\d+$/.test(host)) return true;
+  if (/^169\.254\.\d+\.\d+$/.test(host)) return true;
+  if (host.endsWith('.local') || host.endsWith('.internal')) return true;
+  return false;
+}
+
 /** Validate the stored endpoint and return its origin (https only, no path). */
 export function s3EndpointOrigin(endpoint: string): URL {
   let url: URL;
@@ -36,8 +48,14 @@ export function s3EndpointOrigin(endpoint: string): URL {
     throw new ProviderError('invalid_request', 400, 'endpoint is not a valid URL');
   }
   if (url.protocol !== 'https:') throw new ProviderError('invalid_request', 400, 'endpoint must be https');
+  if (url.username || url.password) {
+    throw new ProviderError('invalid_request', 400, 'endpoint must not contain credentials');
+  }
   if ((url.pathname && url.pathname !== '/') || url.search || url.hash) {
     throw new ProviderError('invalid_request', 400, 'endpoint must be a bare origin');
+  }
+  if (isBlockedS3Hostname(url.hostname)) {
+    throw new ProviderError('invalid_request', 400, 'endpoint must not point to loopback, private or internal addresses');
   }
   return url;
 }

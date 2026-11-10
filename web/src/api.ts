@@ -228,6 +228,18 @@ export const api = {
   deletionStatus: (jobId: string) => request('GET', `/api/deletions/${jobId}`),
   retryDeletion: (jobId: string) => request('POST', `/api/deletions/${jobId}/retry`),
 
+  // ---- public share links visitor API (SH-1 / M11) ----
+  getPublicShare: (token: string) => request('GET', `/api/public/shares/${encodeURIComponent(token)}`),
+  unlockPublicShare: (token: string, password?: string) =>
+    request('POST', `/api/public/shares/${encodeURIComponent(token)}/unlock`, { password }),
+  createPublicDownloadSession: (token: string, fileId: string, unlockGrant?: string | null) =>
+    request(
+      'POST',
+      `/api/public/shares/${encodeURIComponent(token)}/files/${encodeURIComponent(fileId)}/download-session`,
+      unlockGrant ? { unlockGrant } : {},
+      unlockGrant ? { 'x-share-unlock': unlockGrant } : undefined,
+    ),
+
   // ---- folders, trash and the notification feed (roadmap Phase 4) ----
   folderChildren: (folderId: 'root' | string, tier?: 'personal' | 'business') =>
     request('GET', `/api/folders/${folderId === 'root' ? 'root' : folderId}/children${tier ? `?tier=${tier}` : ''}`),
@@ -238,7 +250,7 @@ export const api = {
   moveFiles: (fileIds: string[], folderId: string | null) => request('POST', `/api/files/${fileIds[0] ?? ''}/move`, { fileIds, folderId }),
   listTrash: (limit = 50, offset = 0, tier?: 'personal' | 'business') =>
     request('GET', `/api/trash?limit=${limit}&offset=${offset}${tier ? `&tier=${tier}` : ''}`),
-  emptyTrash: () => request('POST', '/api/trash/empty', {}),
+  emptyTrash: (tier?: 'personal' | 'business') => request('POST', `/api/trash/empty${tier ? `?tier=${tier}` : ''}`, { tier }),
   restoreFile: (fileId: string) => request('POST', `/api/files/${fileId}/restore`, {}),
   purgeFile: (fileId: string) => request('POST', `/api/files/${fileId}/purge`, {}),
   listNotifications: (limit = 30, offset = 0, tier?: 'personal' | 'business') =>

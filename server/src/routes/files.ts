@@ -27,6 +27,7 @@ interface FilesRouterDeps {
   notifications: NotificationService;
   uploads: UploadService;
   mirror: MirrorService;
+  deletions?: import('../deletions/deletion-service.js').DeletionService;
 }
 
 function folderError(res: Response, err: unknown): void {
@@ -199,7 +200,15 @@ export function filesRouter(deps: FilesRouterDeps): Router {
     res.set('Cache-Control', 'no-store');
     const principal = req.principal!;
     const owner = principal.role === 'admin' ? null : principal.id;
-    res.json({ ok: true, purged: deps.trash.empty(owner) });
+    const body = (req.body ?? {}) as { tier?: unknown };
+    const tier = typeof body.tier === 'string' && (body.tier === 'personal' || body.tier === 'business')
+      ? body.tier
+      : typeof req.query['tier'] === 'string' && (req.query['tier'] === 'personal' || req.query['tier'] === 'business')
+        ? (req.query['tier'] as string)
+        : null;
+    const purged = deps.trash.empty(owner, tier);
+    void deps.deletions?.resumePending().catch(() => {});
+    res.json({ ok: true, purged });
   });
 
   router.post('/api/files/:fileId/restore', principalOnly, deps.csrf.doubleCsrfProtection, (req, res) => {

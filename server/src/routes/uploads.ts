@@ -580,11 +580,15 @@ export function uploadsRouter(deps: {
         // sha256 is client-reported (the browser hashed its own slice); the
         // placement is recorded 'uploaded', never 'verified', and the download
         // engine re-verifies every stored digest when the file is streamed
+        const etagVal = typeof body.etag === 'string' ? body.etag.replace(/"/g, '').trim() : undefined;
         const result = deps.uploads.commitChunk({
           jobId, chunkIndex, accountId: allocation.provider_account_id, objectKey: attempt.object_key,
           remoteObjectId: found.remoteObjectId, sha256, sizeBytes: allocation.size_bytes,
           providerChecksumType: 'etag',
+          providerChecksumValue: etagVal,
         });
+        recordProviderCall('s3', true, null);
+        recordProviderBytes('s3', 'up', allocation.size_bytes);
         res.json({
           ok: true,
           chunkIndex,
