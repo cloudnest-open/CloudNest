@@ -17,7 +17,8 @@
     "build": "npm run typecheck && vite build --config web/vite.config.ts && tsc -p server/tsconfig.json",
     "test:ui": "node scripts/ui-smoke.cjs",
     "start": "node dist/server/src/index.js",
-    "admin:reset": "node dist/server/src/scripts/reset-admin.js"
+    "admin:reset": "node dist/server/src/scripts/reset-admin.js",
+    "tui": "node scripts/tui.js"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
