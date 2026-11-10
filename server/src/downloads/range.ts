@@ -117,7 +117,7 @@ export function etagForManifest(manifestHash: string | null): string {
 }
 
 /** RFC 5987-safe attachment disposition; CR/LF are stripped from both names. */
-export function contentDisposition(filename: string): string {
+export function contentDisposition(filename: string, dispositionType: "attachment" | "inline" = "attachment"): string {
   const asciiSafe = filename.replace(/[\u0000-\u001f\u007f"\\]/g, '_') || 'download';
   const encoded = encodeURIComponent(filename.replace(/[\u0000-\u001f\u007f]/g, ''));
   return `attachment; filename="${asciiSafe}"; filename*=UTF-8''${encoded}`;

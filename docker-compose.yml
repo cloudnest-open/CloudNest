@@ -1,0 +1,25 @@
+services:
+  cloudnest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cloudnest
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      - NODE_ENV=production
+      - PORT=8787
+      - CLOUDNEST_DATA_DIR=/data
+    volumes:
+      - cloudnest_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  cloudnest_data:
+    name: cloudnest_data

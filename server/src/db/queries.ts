@@ -66,6 +66,9 @@ export function makeQueries(db: Database.Database) {
     newId(): string {
       return crypto.randomUUID();
     },
+    listAuditEvents(limit = 5000): Array<{ id: string; created_at: string; event_type: string; success: number; reason_code: string; metadata_json: string | null }> {
+      return db.prepare('SELECT id, created_at, event_type, success, reason_code, metadata_json FROM audit_events ORDER BY created_at DESC LIMIT ?').all(limit) as Array<{ id: string; created_at: string; event_type: string; success: number; reason_code: string; metadata_json: string | null }>;
+    },
     recordAudit(eventType: string, success: boolean, reasonCode: string, metadata?: Record<string, string | number>): void {
       db.prepare(
         'INSERT INTO audit_events (id, created_at, event_type, success, reason_code, metadata_json) VALUES (?, ?, ?, ?, ?, ?)',

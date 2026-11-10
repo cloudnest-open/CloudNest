@@ -40,9 +40,9 @@ function errorResponse(res: Response, err: unknown, fileSizeBytes?: number): voi
   res.status(500).json({ error: 'download_failed', code: 'download_failed' });
 }
 
-function setStreamingHeaders(res: Response, fileName: string, mimeType: string | null, etag: string): void {
+function setStreamingHeaders(res: Response, fileName: string, mimeType: string | null, etag: string, inline: boolean = false): void {
   res.set('Content-Type', safeContentType(mimeType));
-  res.set('Content-Disposition', contentDisposition(fileName));
+  res.set('Content-Disposition', contentDisposition(fileName, inline ? 'inline' : 'attachment'));
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Cache-Control', 'private, no-store');
   res.set('Accept-Ranges', 'bytes');
@@ -79,6 +79,7 @@ export function downloadsRouter(deps: {
   /** Shared implementation for GET and HEAD on the download route. */
   async function handleDownload(req: Request, res: Response, headOnly: boolean): Promise<void> {
     const fileId = String(req.params['fileId']);
+    const inline = req.query['inline'] === '1' || req.query['inline'] === 'true';
     try {
       const file = deps.downloads.getFile(fileId);
       assertFileAccess(file, req.principal!);
@@ -96,7 +97,7 @@ export function downloadsRouter(deps: {
       // full representation and ignores any Range (per RFC 9110).
       if (headOnly) {
         const prepared = deps.downloads.prepare(fileId, null, false);
-        setStreamingHeaders(res, prepared.fileName, prepared.mimeType, etag);
+        setStreamingHeaders(res, prepared.fileName, prepared.mimeType, etag, inline);
         res.set('Content-Length', String(prepared.fileSizeBytes));
         res.status(200).end();
         return;
@@ -116,7 +117,7 @@ export function downloadsRouter(deps: {
 
 
       const prepared = deps.downloads.prepare(fileId, range, true);
-      setStreamingHeaders(res, prepared.fileName, prepared.mimeType, etag);
+      setStreamingHeaders(res, prepared.fileName, prepared.mimeType, etag, inline);
 
       if (range) {
         res.status(206);

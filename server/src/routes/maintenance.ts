@@ -53,6 +53,28 @@ export function maintenanceRouter(deps: {
     }
   });
 
+  // ---- enterprise audit logs export (M12.e) ----
+  router.get('/api/maintenance/audit-events/export', adminOnly, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const format = String(req.query['format'] || 'json').toLowerCase();
+    const rows = deps.queries.listAuditEvents(5000);
+
+    if (format === 'csv') {
+      const header = 'id,created_at,event_type,success,reason_code,metadata_json\n';
+      const csv = rows.map((r) =>
+        `"${r.id}","${r.created_at}","${r.event_type}",${r.success},"${r.reason_code}","${(r.metadata_json || '').replace(/"/g, '""')}"`
+      ).join('\n');
+      res.set('Content-Type', 'text/csv; charset=utf-8');
+      res.set('Content-Disposition', 'attachment; filename="cloudnest-audit-events.csv"');
+      res.send(header + csv);
+      return;
+    }
+
+    res.set('Content-Type', 'application/json; charset=utf-8');
+    res.set('Content-Disposition', 'attachment; filename="cloudnest-audit-events.json"');
+    res.json({ exportedAt: new Date().toISOString(), count: rows.length, events: rows });
+  });
+
   router.get('/api/maintenance/backups', adminOnly, (_req, res) => {
     res.set('Cache-Control', 'no-store');
     res.json({ backups: deps.maintenance.listBackups(), key: deps.maintenance.keyStatus() });

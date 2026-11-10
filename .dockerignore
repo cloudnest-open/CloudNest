@@ -1,0 +1,12 @@
+node_modules
+.git
+.github
+*.log
+.env
+dist
+coverage
+cloudnest-testapp-*
+cloudnest-data
+*.db
+*.db-wal
+*.db-shm
