@@ -48,5 +48,8 @@
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vite": "^7.2.7"
+  },
+  "bin": {
+    "cloudnest": "./bin/cloudnest.js"
   }
 }
